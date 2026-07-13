@@ -24,6 +24,13 @@ def test_transcribe_returns_generated_text(tmp_path):
     assert t.transcribe(wav) == "這是一段會議逐字稿"
 
 
+def test_transcribe_prompt_asks_for_speaker_labels():
+    """多人會議要標註講者，下游才能自動指派任務負責人。"""
+    from app.transcription.gemini_transcriber import _TRANSCRIBE_PROMPT
+
+    assert "講者" in _TRANSCRIBE_PROMPT
+
+
 def test_progress_callback_reaches_one(tmp_path):
     wav = tmp_path / "clip.wav"
     wav.write_bytes(b"RIFF-fake")

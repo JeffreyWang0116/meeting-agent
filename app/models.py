@@ -27,6 +27,7 @@ class TodoItem(BaseModel):
     owner: Optional[str] = None
     due_date: Optional[date] = None
     priority: Literal["high", "medium", "low"] = "medium"
+    priority_reason: Optional[str] = None
     source_quote: Optional[str] = None
 
 

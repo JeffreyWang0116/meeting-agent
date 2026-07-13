@@ -92,6 +92,13 @@ def test_todo_priority_defaults_to_medium():
     assert item.priority == "medium"
 
 
+def test_todo_priority_reason_optional():
+    """優先級要能附上判斷理由（口試展示 AI 決策透明度）。"""
+    assert TodoItem(task="測試任務").priority_reason is None
+    item = TodoItem(task="修正金流 bug", priority="high", priority_reason="影響線上收款")
+    assert item.priority_reason == "影響線上收款"
+
+
 def test_round_trip_serialization():
     analysis = MeetingAnalysis.model_validate(make_valid_payload())
     dumped = analysis.model_dump(mode="json")

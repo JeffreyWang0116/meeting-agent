@@ -19,8 +19,12 @@ class LocalJsonStore(TaskStore):
 
     def _load(self) -> dict:
         if self._path.exists():
-            return json.loads(self._path.read_text(encoding="utf-8"))
-        return {"meetings": [], "tasks": []}
+            data = json.loads(self._path.read_text(encoding="utf-8"))
+        else:
+            data = {"meetings": [], "tasks": []}
+        for task in data["tasks"]:  # 舊版資料沒有 status 欄位，補預設值
+            task.setdefault("status", "todo")
+        return data
 
     def _flush(self) -> None:
         self._path.parent.mkdir(parents=True, exist_ok=True)
@@ -42,7 +46,13 @@ class LocalJsonStore(TaskStore):
             "pending_items": dumped["pending_items"],
         }
         task_records = [
-            {"id": uuid.uuid4().hex[:12], "meeting_id": meeting_id, "created_at": created_at, **todo}
+            {
+                "id": uuid.uuid4().hex[:12],
+                "meeting_id": meeting_id,
+                "created_at": created_at,
+                "status": "todo",
+                **todo,
+            }
             for todo in dumped["todos"]
         ]
 
@@ -66,3 +76,21 @@ class LocalJsonStore(TaskStore):
             if meeting_id is not None:
                 tasks = [t for t in tasks if t["meeting_id"] == meeting_id]
             return list(tasks)
+
+    def update_task(self, task_id: str, **fields) -> dict | None:
+        with self._lock:
+            for task in self._data["tasks"]:
+                if task["id"] == task_id:
+                    task.update(fields)
+                    self._flush()
+                    return dict(task)
+        return None
+
+    def delete_task(self, task_id: str) -> bool:
+        with self._lock:
+            before = len(self._data["tasks"])
+            self._data["tasks"] = [t for t in self._data["tasks"] if t["id"] != task_id]
+            if len(self._data["tasks"]) == before:
+                return False
+            self._flush()
+            return True

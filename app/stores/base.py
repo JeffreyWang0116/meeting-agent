@@ -25,3 +25,11 @@ class TaskStore(ABC):
     @abstractmethod
     def list_tasks(self, meeting_id: str | None = None) -> list[dict]:
         """攤平的代辦事項清單，可依會議過濾。"""
+
+    @abstractmethod
+    def update_task(self, task_id: str, **fields) -> dict | None:
+        """更新任務欄位，回傳更新後的紀錄；找不到回傳 None。"""
+
+    @abstractmethod
+    def delete_task(self, task_id: str) -> bool:
+        """刪除任務，回傳是否有刪到。"""

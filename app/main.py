@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Optional
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel
 
 from app.agents.decision_agent import DecisionAgent, DecisionAgentError
@@ -19,6 +19,7 @@ from app.agents.executor_agent import ExecutorAgent
 from app.agents.notifier_agent import NotifierAgent
 from app.agents.parser_agent import ParserAgent
 from app.config import Settings, get_settings
+from app.export import meeting_report_md, tasks_to_csv
 from app.jobs import MediaJobManager
 from app.orchestrator import Orchestrator
 from app.stores.local_store import LocalJsonStore
@@ -118,6 +119,50 @@ def create_app(
     @app.get("/api/tasks")
     def list_tasks(meeting_id: Optional[str] = None):
         return {"tasks": store.list_tasks(meeting_id=meeting_id)}
+
+    # ---- 任務管理 ----
+
+    _EDITABLE_FIELDS = {"status", "task", "owner", "due_date", "priority"}
+    _VALID_STATUS = {"todo", "doing", "done"}
+
+    @app.patch("/api/tasks/{task_id}")
+    def patch_task(task_id: str, fields: dict):
+        unknown = set(fields) - _EDITABLE_FIELDS
+        if unknown:
+            raise HTTPException(status_code=400, detail=f"不允許修改的欄位：{'、'.join(sorted(unknown))}")
+        if "status" in fields and fields["status"] not in _VALID_STATUS:
+            raise HTTPException(status_code=400, detail="status 只能是 todo / doing / done")
+        if "priority" in fields and fields["priority"] not in {"high", "medium", "low"}:
+            raise HTTPException(status_code=400, detail="priority 只能是 high / medium / low")
+        updated = store.update_task(task_id, **fields)
+        if updated is None:
+            raise HTTPException(status_code=404, detail=f"找不到任務：{task_id}")
+        return updated
+
+    @app.delete("/api/tasks/{task_id}")
+    def delete_task(task_id: str):
+        if not store.delete_task(task_id):
+            raise HTTPException(status_code=404, detail=f"找不到任務：{task_id}")
+        return {"deleted": task_id}
+
+    @app.get("/api/export/tasks.csv")
+    def export_tasks_csv():
+        return Response(
+            content=tasks_to_csv(store.list_tasks()),
+            media_type="text/csv; charset=utf-8",
+            headers={"Content-Disposition": 'attachment; filename="tasks.csv"'},
+        )
+
+    @app.get("/api/meetings/{meeting_id}/report.md")
+    def meeting_report(meeting_id: str):
+        record = store.get_meeting(meeting_id)
+        if record is None:
+            raise HTTPException(status_code=404, detail=f"找不到會議：{meeting_id}")
+        return Response(
+            content=meeting_report_md(record, store.list_tasks(meeting_id=meeting_id)),
+            media_type="text/markdown; charset=utf-8",
+            headers={"Content-Disposition": f'attachment; filename="meeting-{meeting_id}.md"'},
+        )
 
     # ---- 輸入路徑 2：音檔 / 影片上傳（背景轉錄） ----
 

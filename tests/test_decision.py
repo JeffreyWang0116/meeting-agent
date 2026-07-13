@@ -71,6 +71,15 @@ def test_missing_api_key_raises_clear_error():
         agent.analyze("測試", meeting_date=MEETING_DATE)
 
 
+def test_prompt_instructs_dedupe_and_priority_reason():
+    """prompt 必須要求：重複任務合併、優先級附理由。"""
+    from app.agents.decision_agent import build_prompt
+
+    prompt = build_prompt("測試", MEETING_DATE)
+    assert "合併" in prompt  # 同一件事講多次要合併成一筆
+    assert "priority_reason" in prompt
+
+
 def test_meeting_date_defaults_to_today():
     captured = {}
 

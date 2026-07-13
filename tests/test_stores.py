@@ -67,6 +67,58 @@ def test_get_missing_meeting_returns_none(tmp_path):
     assert store.get_meeting("no-such-id") is None
 
 
+def test_new_tasks_default_status_todo(tmp_path):
+    store = LocalJsonStore(tmp_path / "db.json")
+    store.save_meeting(make_analysis())
+    assert store.list_tasks()[0]["status"] == "todo"
+
+
+def test_update_task_status_and_fields(tmp_path):
+    store = LocalJsonStore(tmp_path / "db.json")
+    store.save_meeting(make_analysis())
+    task_id = store.list_tasks()[0]["id"]
+
+    updated = store.update_task(task_id, status="doing", owner="Kevin")
+    assert updated["status"] == "doing"
+    assert updated["owner"] == "Kevin"
+
+    # 要真的落地：重載後仍是更新後的值
+    reloaded = LocalJsonStore(tmp_path / "db.json")
+    assert reloaded.list_tasks()[0]["status"] == "doing"
+
+
+def test_update_missing_task_returns_none(tmp_path):
+    store = LocalJsonStore(tmp_path / "db.json")
+    assert store.update_task("no-such-id", status="done") is None
+
+
+def test_delete_task(tmp_path):
+    store = LocalJsonStore(tmp_path / "db.json")
+    store.save_meeting(make_analysis())
+    task_id = store.list_tasks()[0]["id"]
+
+    assert store.delete_task(task_id) is True
+    assert store.list_tasks() == []
+    assert store.delete_task(task_id) is False  # 已刪除
+
+    # 刪除要落地
+    assert LocalJsonStore(tmp_path / "db.json").list_tasks() == []
+
+
+def test_old_db_without_status_gets_todo_on_list(tmp_path):
+    """部署上已存在的舊資料沒有 status 欄位，讀取時要補預設值。"""
+    path = tmp_path / "db.json"
+    store = LocalJsonStore(path)
+    store.save_meeting(make_analysis())
+    # 模擬舊版資料：手動移除 status
+    data = json.loads(path.read_text(encoding="utf-8"))
+    for t in data["tasks"]:
+        t.pop("status", None)
+    path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+
+    assert LocalJsonStore(path).list_tasks()[0]["status"] == "todo"
+
+
 def test_list_meetings_newest_first(tmp_path):
     store = LocalJsonStore(tmp_path / "db.json")
     id1 = store.save_meeting(make_analysis())

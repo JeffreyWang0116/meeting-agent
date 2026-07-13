@@ -189,6 +189,60 @@ def test_live_chunk_after_finish_400(client):
     assert resp.status_code == 400
 
 
+# ---- 任務管理 ----
+
+def make_meeting(client) -> str:
+    resp = client.post("/api/meetings", json={"text": "鈺翔下週一交 prompt"})
+    return resp.json()["meeting_id"]
+
+
+def test_patch_task_updates_status_and_owner(client):
+    make_meeting(client)
+    task = client.get("/api/tasks").json()["tasks"][0]
+    assert task["status"] == "todo"
+
+    resp = client.patch(f"/api/tasks/{task['id']}", json={"status": "done", "owner": "Kevin"})
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "done"
+    assert client.get("/api/tasks").json()["tasks"][0]["owner"] == "Kevin"
+
+
+def test_patch_task_rejects_unknown_fields_and_bad_status(client):
+    make_meeting(client)
+    task_id = client.get("/api/tasks").json()["tasks"][0]["id"]
+    assert client.patch(f"/api/tasks/{task_id}", json={"hacked": "yes"}).status_code == 400
+    assert client.patch(f"/api/tasks/{task_id}", json={"status": "??"}).status_code == 400
+    assert client.patch("/api/tasks/nope", json={"status": "done"}).status_code == 404
+
+
+def test_delete_task(client):
+    make_meeting(client)
+    task_id = client.get("/api/tasks").json()["tasks"][0]["id"]
+    assert client.delete(f"/api/tasks/{task_id}").status_code == 200
+    assert client.get("/api/tasks").json()["tasks"] == []
+    assert client.delete(f"/api/tasks/{task_id}").status_code == 404
+
+
+def test_export_tasks_csv(client):
+    make_meeting(client)
+    resp = client.get("/api/export/tasks.csv")
+    assert resp.status_code == 200
+    assert "text/csv" in resp.headers["content-type"]
+    body = resp.content.decode("utf-8-sig")
+    assert "完成 Prompt 初版" in body
+    assert "王鈺翔" in body
+
+
+def test_meeting_markdown_report(client):
+    meeting_id = make_meeting(client)
+    resp = client.get(f"/api/meetings/{meeting_id}/report.md")
+    assert resp.status_code == 200
+    body = resp.text
+    assert "# 專題進度會議" in body
+    assert "完成 Prompt 初版" in body
+    assert client.get("/api/meetings/nope/report.md").status_code == 404
+
+
 # ---- 其他 ----
 
 def test_health(client):
