@@ -14,3 +14,11 @@ services:
         value: gemini-3.5-flash
       - key: TRANSCRIBE_ENGINE
         value: gemini
+      # 轉錄專用模型：吃掉絕大多數請求，用免費額度高的輕量版；
+      # 分析仍走 GEMINI_MODEL 維持品質
+      - key: TRANSCRIBE_MODEL
+        value: gemini-flash-lite-latest
+      # 選填：貼上 Firebase service account JSON 即改用 Firestore 永久保存資料；
+      # 留空則用本地 JSON（重啟會清空）
+      - key: FIREBASE_CREDENTIALS_JSON
+        sync: false

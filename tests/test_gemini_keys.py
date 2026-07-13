@@ -231,20 +231,41 @@ def test_gemini_transcriber_rotates_key_on_quota_error(tmp_path, monkeypatch):
 # ---- Settings ----
 
 def test_settings_parses_multiple_keys(monkeypatch):
-    from app.config import get_settings
+    import app.config as config
 
+    monkeypatch.setattr(config, "load_dotenv", lambda *a, **k: None)  # 隔離開發者 .env
     monkeypatch.setenv("GEMINI_API_KEYS", "aaa, bbb ,ccc")
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
-    s = get_settings()
+    s = config.get_settings()
     assert s.gemini_api_keys == ("aaa", "bbb", "ccc")
     assert s.gemini_api_key == "aaa"  # 向後相容：單數欄位＝第一把
 
 
 def test_settings_falls_back_to_single_key(monkeypatch):
-    from app.config import get_settings
+    import app.config as config
 
+    monkeypatch.setattr(config, "load_dotenv", lambda *a, **k: None)  # 隔離開發者 .env
     monkeypatch.delenv("GEMINI_API_KEYS", raising=False)
     monkeypatch.setenv("GEMINI_API_KEY", "solo")
-    s = get_settings()
+    s = config.get_settings()
     assert s.gemini_api_keys == ("solo",)
     assert s.gemini_api_key == "solo"
+
+
+def test_settings_transcribe_model_defaults_to_lite(monkeypatch):
+    """轉錄吃掉絕大多數請求，預設用高額度的輕量模型，跟分析模型脫鉤。"""
+    import app.config as config
+
+    monkeypatch.setattr(config, "load_dotenv", lambda *a, **k: None)
+    monkeypatch.delenv("TRANSCRIBE_MODEL", raising=False)
+    s = config.get_settings()
+    assert s.transcribe_model == "gemini-flash-lite-latest"
+
+
+def test_settings_transcribe_model_overridable(monkeypatch):
+    import app.config as config
+
+    monkeypatch.setattr(config, "load_dotenv", lambda *a, **k: None)
+    monkeypatch.setenv("TRANSCRIBE_MODEL", "gemini-3.5-flash")
+    s = config.get_settings()
+    assert s.transcribe_model == "gemini-3.5-flash"

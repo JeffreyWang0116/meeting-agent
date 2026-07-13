@@ -24,7 +24,7 @@ from app.export import meeting_report_md, tasks_to_csv
 from app.jobs import MediaJobManager
 from app.orchestrator import Orchestrator
 from app.rag import AskAgent, GeminiEmbedder, RagIndex
-from app.stores.local_store import LocalJsonStore
+from app.stores import make_store
 from app.transcription import media
 from app.transcription.gemini_transcriber import GeminiTranscriber
 from app.transcription.live_session import LiveSessionManager, SessionNotFound
@@ -58,7 +58,7 @@ def create_app(
     ask_agent=None,
 ) -> FastAPI:
     settings = settings or get_settings()
-    store = store or LocalJsonStore(settings.data_dir / "output" / "db.json")
+    store = store or make_store(settings)
     orchestrator = orchestrator or Orchestrator(
         parser=ParserAgent(),
         decision=DecisionAgent(
@@ -75,7 +75,7 @@ def create_app(
             transcriber = GeminiTranscriber(
                 api_key=settings.gemini_api_key,
                 api_keys=settings.gemini_api_keys,
-                model=settings.gemini_model,
+                model=settings.transcribe_model,
             )
         else:
             transcriber = Transcriber(
@@ -126,6 +126,7 @@ def create_app(
             "gemini_key_set": bool(settings.gemini_api_key),
             "gemini_model": settings.gemini_model,
             "transcribe_engine": settings.transcribe_engine,
+            "store_backend": getattr(store, "backend", "unknown"),
             "whisper_device": transcriber.device,
             "whisper_model": transcriber.model_size
             or settings.whisper_model

@@ -307,6 +307,21 @@ def test_ask_backend_failure_returns_502(tmp_path):
 
 # ---- 其他 ----
 
+def test_gemini_engine_uses_transcribe_model_not_analysis_model(tmp_path):
+    """轉錄用高額度輕量模型、分析用聰明模型：兩者必須各走各的設定。"""
+    settings = Settings(
+        gemini_api_key="k",
+        transcribe_engine="gemini",
+        gemini_model="gemini-3.5-flash",
+        transcribe_model="gemini-flash-lite-latest",
+        data_dir=tmp_path,
+    )
+    app = create_app(settings)
+    body = TestClient(app).get("/api/health").json()
+    assert body["whisper_model"] == "gemini-flash-lite-latest"  # 轉錄模型
+    assert body["gemini_model"] == "gemini-3.5-flash"  # 分析模型不受影響
+
+
 def test_health(client):
     body = client.get("/api/health").json()
     assert body["status"] == "ok"

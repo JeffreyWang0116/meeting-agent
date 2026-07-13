@@ -12,6 +12,8 @@ from app.stores.base import TaskStore
 
 
 class LocalJsonStore(TaskStore):
+    backend = "local"
+
     def __init__(self, path: Path | str):
         self._path = Path(path)
         self._lock = threading.Lock()

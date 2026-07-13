@@ -2,6 +2,8 @@
 __pycache__/
 *.pyc
 .env
+firebase-service-account.json
+*serviceaccount*.json
 data/output/
 data/tmp/
 .pytest_cache/
