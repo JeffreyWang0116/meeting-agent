@@ -494,6 +494,19 @@
   .panel-head h2 {
     margin: 0; font-size: 1.1rem; font-weight: 600; letter-spacing: -.01em; display: flex; align-items: center; gap: 11px;
   }
+
+  /* ---- 收縮面板 ---- */
+  .panel.collapsible .panel-head h2 { cursor: pointer; user-select: none; }
+  .chevron { display: inline-flex; color: var(--faint); transition: transform .2s ease; flex: none; }
+  .chevron svg { width: 15px; height: 15px; display: block; }
+  .panel.collapsed .chevron { transform: rotate(-90deg); }
+  .panel.collapsed { gap: 0; }
+  .panel.collapsed > :not(.panel-head) { display: none !important; }
+  .panel-x {
+    background: none; border: none; color: var(--faint); cursor: pointer; font-size: .95rem; line-height: 1;
+    padding: 5px 8px; border-radius: var(--radius-sm); transition: color .15s, background .15s;
+  }
+  .panel-x:hover { color: var(--high); background: var(--high-soft); }
 </style>
 </head>
 <body>
@@ -593,29 +606,35 @@
   </div>
 
   <!-- 主動提醒（Agent 自主掃描） -->
-  <div class="panel" id="reminderPanel">
+  <div class="panel collapsible" id="reminderPanel">
     <div class="panel-head">
       <h2>
+        <span class="chevron"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></span>
         <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9a6 6 0 0 1 12 0c0 5 2 6 2 6H4s2-1 2-6"/><path d="M10 20a2 2 0 0 0 4 0"/></svg>
         主動提醒
         <span class="head-count" id="alertCount"></span>
       </h2>
-      <button class="ghost" id="btnRefreshReminders">
-        <svg class="i-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11a9 9 0 1 1-2.7-6.4"/><path d="M21 3v6h-6"/></svg>
-        重新掃描
-      </button>
+      <div class="panel-actions">
+        <button class="panel-x" id="btnClearReminders" title="清除顯示（按「重新掃描」即可全部復原）">✕</button>
+        <button class="ghost" id="btnRefreshReminders">
+          <svg class="i-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11a9 9 0 1 1-2.7-6.4"/><path d="M21 3v6h-6"/></svg>
+          重新掃描
+        </button>
+      </div>
     </div>
     <p class="hint">Agent 主動掃描任務庫，逾期、即將到期、沒人負責的任務，以及議而未決的事項，都會擬好催辦草稿。</p>
     <div class="alert-list" id="reminderBody"></div>
   </div>
 
   <!-- 跨會議問答（RAG） -->
-  <div class="panel">
+  <div class="panel collapsible" id="askPanel">
     <div class="panel-head">
       <h2>
+        <span class="chevron"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></span>
         <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
         詢問會議
       </h2>
+      <button class="panel-x" id="btnClearAsk" title="清除問答紀錄">✕</button>
     </div>
     <div class="ask-log" id="askLog"></div>
     <div class="ask-bar">
@@ -686,9 +705,10 @@
   </div>
 
   <!-- 任務庫 -->
-  <div class="panel">
+  <div class="panel collapsible" id="taskPanel">
     <div class="panel-head">
       <h2>
+        <span class="chevron"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></span>
         <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5.5" rx="8" ry="3"/><path d="M4 5.5v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/><path d="M4 11.5v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/></svg>
         任務庫
       </h2>
@@ -719,9 +739,10 @@
   </div>
 
   <!-- 歷史會議 -->
-  <div class="panel">
+  <div class="panel collapsible" id="meetingPanel">
     <div class="panel-head">
       <h2>
+        <span class="chevron"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></span>
         <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/></svg>
         歷史會議
       </h2>
@@ -992,6 +1013,12 @@ $("reminderBody").addEventListener("click", async e => {
   setTimeout(() => (btn.textContent = original), 1500);
 });
 $("btnRefreshReminders").addEventListener("click", refreshReminders);
+// 清除只清畫面，不動後端；按「重新掃描」即可全部復原
+$("btnClearReminders").addEventListener("click", () => {
+  $("reminderBody").innerHTML = "";
+  $("alertCount").textContent = "";
+  $("alertCount").classList.remove("has");
+});
 refreshReminders();
 
 // ---- 跨會議問答（RAG） ----
@@ -1030,6 +1057,28 @@ async function sendAsk() {
 }
 $("btnAsk").addEventListener("click", sendAsk);
 $("askInput").addEventListener("keydown", e => { if (e.key === "Enter") sendAsk(); });
+$("btnClearAsk").addEventListener("click", () => {
+  $("askLog").innerHTML = "";
+  $("askLog").style.display = "none";
+});
+
+// ---- 面板收縮（點標題展開/收合，狀態記在瀏覽器）----
+const COLLAPSE_KEY = "collapsedPanels";
+function saveCollapsed() {
+  const ids = [...document.querySelectorAll(".panel.collapsible.collapsed")].map(p => p.id);
+  try { localStorage.setItem(COLLAPSE_KEY, JSON.stringify(ids)); } catch (e) {}
+}
+(function initCollapse() {
+  let saved = [];
+  try { saved = JSON.parse(localStorage.getItem(COLLAPSE_KEY) || "[]"); } catch (e) {}
+  document.querySelectorAll(".panel.collapsible").forEach(panel => {
+    if (saved.includes(panel.id)) panel.classList.add("collapsed");
+    panel.querySelector(".panel-head h2").addEventListener("click", () => {
+      panel.classList.toggle("collapsed");
+      saveCollapsed();
+    });
+  });
+})();
 
 // ---- 路徑 1：純文字 ----
 $("btnAnalyzeText").addEventListener("click", async () => {
