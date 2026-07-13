@@ -464,6 +464,13 @@
   }
 
   .empty-note { color: var(--faint); font-size: .88rem; margin: 0; }
+  .empty-alert {
+    display: flex; flex-direction: column; align-items: center; gap: 8px;
+    padding: 30px 14px; text-align: center; color: var(--faint);
+    border: 1px dashed var(--border); border-radius: var(--radius-md); background: var(--card-2);
+  }
+  .empty-alert .i { color: var(--low); width: 26px; height: 26px; }
+  .empty-alert p { margin: 0; font-size: .88rem; }
 
   /* ---- 資料庫 ---- */
   .table-wrap { overflow-x: auto; }
@@ -748,6 +755,7 @@ const ICON_PATHS = {
   user: '<circle cx="12" cy="8" r="4"/><path d="M4.5 21a7.5 7.5 0 0 1 15 0"/>',
   help: '<circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 1 1 3.5 2.3c-.8.4-1 .9-1 1.7"/><path d="M12 17h.01"/>',
   alert: '<path d="M12 9v4.5"/><path d="m10.6 3.5-9 15.6a1 1 0 0 0 .9 1.5h18.9a1 1 0 0 0 .9-1.5l-9-15.6a1 1 0 0 0-1.7 0Z"/><circle cx="12" cy="17" r=".6" fill="currentColor" stroke="none"/>',
+  check: '<circle cx="12" cy="12" r="9"/><path d="m8.5 12 2.5 2.5L16 9"/>',
 };
 function icon(name, cls) {
   return `<svg class="${cls || "i"}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">${ICON_PATHS[name] || ""}</svg>`;
@@ -971,7 +979,7 @@ async function refreshReminders() {
     ];
     $("reminderBody").innerHTML = items.length
       ? items.join("")
-      : `<p class="empty-note">目前無</p>`;
+      : `<div class="empty-alert">${icon("check")}<p>尚無提醒</p></div>`;
   } catch (e) { /* 靜默：提醒失敗不擋主流程 */ }
 }
 
