@@ -13,6 +13,7 @@ from datetime import date
 
 from pydantic import ValidationError
 
+from app.gemini_keys import KeyPool, call_with_rotation
 from app.models import MeetingAnalysis
 
 
@@ -99,22 +100,28 @@ class DecisionAgent:
         model: str = "gemini-flash-latest",
         generate=None,
         max_attempts: int = 3,
+        api_keys=None,
     ):
-        self.api_key = api_key
+        # 多把 key 輪替（429 換下一把）；單把 api_key 為向後相容寫法
+        self._pool = KeyPool(api_keys if api_keys else [api_key])
+        self.api_key = self._pool.current
         self.model = model
         self.max_attempts = max_attempts
         # 可注入 callable(prompt) -> str，測試時不需要真的呼叫 Gemini
         self._generate = generate or self._generate_with_gemini
 
     def _generate_with_gemini(self, prompt: str) -> str:
-        if not self.api_key:
+        if not self._pool:
             raise DecisionAgentError(
                 "未設定 GEMINI_API_KEY：請到 https://aistudio.google.com/apikey "
                 "取得金鑰並填入專案根目錄的 .env 檔"
             )
+        return call_with_rotation(self._pool, lambda key: self._call_gemini(key, prompt))
+
+    def _call_gemini(self, key: str, prompt: str) -> str:
         from google import genai
 
-        client = genai.Client(api_key=self.api_key)
+        client = genai.Client(api_key=key)
         response = client.models.generate_content(
             model=self.model,
             contents=prompt,

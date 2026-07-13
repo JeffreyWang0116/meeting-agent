@@ -55,7 +55,9 @@ def create_app(
     orchestrator = orchestrator or Orchestrator(
         parser=ParserAgent(),
         decision=DecisionAgent(
-            api_key=settings.gemini_api_key, model=settings.gemini_model
+            api_key=settings.gemini_api_key,
+            api_keys=settings.gemini_api_keys,
+            model=settings.gemini_model,
         ),
         executor=ExecutorAgent(store),
         notifier=NotifierAgent(settings.data_dir / "output" / "notifications"),
@@ -64,7 +66,9 @@ def create_app(
         if settings.transcribe_engine == "gemini":
             # 雲端無 GPU：用 Gemini 直接聽音訊轉錄
             transcriber = GeminiTranscriber(
-                api_key=settings.gemini_api_key, model=settings.gemini_model
+                api_key=settings.gemini_api_key,
+                api_keys=settings.gemini_api_keys,
+                model=settings.gemini_model,
             )
         else:
             transcriber = Transcriber(

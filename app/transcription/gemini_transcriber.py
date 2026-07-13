@@ -12,6 +12,7 @@ from __future__ import annotations
 import time
 from pathlib import Path
 
+from app.gemini_keys import KeyPool, call_with_rotation
 from app.transcription import media
 
 # Gemini 原生支援的音訊副檔名，這些不需要再轉檔
@@ -37,14 +38,17 @@ class GeminiTranscriber:
         model: str = "gemini-flash-latest",
         upload=None,
         generate=None,
+        api_keys=None,
     ):
-        self.api_key = api_key
+        # 多把 key 輪替（429 換下一把）；單把 api_key 為向後相容寫法
+        self._pool = KeyPool(api_keys if api_keys else [api_key])
+        self.api_key = self._pool.current
         self.model = model
         # 供 /api/health 顯示；命名對齊 Whisper Transcriber 以免前端分歧
         self.device = "gemini"
         self.model_size = model
-        self._upload = upload or self._upload_to_gemini
-        self._generate = generate or self._generate_with_gemini
+        self._upload = upload
+        self._generate = generate
 
     # ---- 對外介面（與 Whisper Transcriber 相同簽名）----
 
@@ -52,8 +56,17 @@ class GeminiTranscriber:
         audio_path = self._ensure_audio(Path(path))
         if on_progress:
             on_progress(0.1, "")
-        uploaded = self._upload(audio_path)
-        text = (self._generate(uploaded) or "").strip()
+        if self._upload or self._generate:  # 測試注入假物件，不經金鑰輪替
+            uploaded = self._upload(audio_path)
+            text = (self._generate(uploaded) or "").strip()
+        else:
+            # 上傳的檔案綁在該 key 的專案底下，所以「上傳＋轉錄」必須整組用同一把 key
+            text = (
+                call_with_rotation(
+                    self._pool, lambda key: self._transcribe_with_key(key, audio_path)
+                )
+                or ""
+            ).strip()
         if on_progress:
             on_progress(1.0, text)
         return text
@@ -68,18 +81,18 @@ class GeminiTranscriber:
             return media.extract_audio(path)
         return path  # 沒有 ffmpeg 就盡力而為，交給 Gemini 自行判斷
 
-    def _client(self):
-        if not self.api_key:
+    def _client(self, key: str | None):
+        if not key:
             raise GeminiTranscribeError(
                 "未設定 GEMINI_API_KEY：雲端轉錄需要 Gemini 金鑰，"
                 "請在部署平台的環境變數設定 GEMINI_API_KEY"
             )
         from google import genai
 
-        return genai.Client(api_key=self.api_key)
+        return genai.Client(api_key=key)
 
-    def _upload_to_gemini(self, path: Path):
-        client = self._client()
+    def _transcribe_with_key(self, key: str | None, path: Path) -> str:
+        client = self._client(key)
         uploaded = client.files.upload(file=str(path))
         # 音訊通常上傳即就緒；video 或大檔可能要等處理，輪詢到 ACTIVE
         for _ in range(60):
@@ -91,10 +104,6 @@ class GeminiTranscriber:
                 raise GeminiTranscribeError("Gemini 檔案處理失敗，請換一個檔案再試")
             time.sleep(1)
             uploaded = client.files.get(name=uploaded.name)
-        return uploaded
-
-    def _generate_with_gemini(self, uploaded) -> str:
-        client = self._client()
         response = client.models.generate_content(
             model=self.model,
             contents=[_TRANSCRIBE_PROMPT, uploaded],
