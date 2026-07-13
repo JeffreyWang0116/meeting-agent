@@ -104,7 +104,7 @@ class DecisionAgent:
     ):
         # 多把 key 輪替（429 換下一把）；單把 api_key 為向後相容寫法
         self._pool = KeyPool(api_keys if api_keys else [api_key])
-        self.api_key = self._pool.current
+        self.api_key = self._pool.first
         self.model = model
         self.max_attempts = max_attempts
         # 可注入 callable(prompt) -> str，測試時不需要真的呼叫 Gemini

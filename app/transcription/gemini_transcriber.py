@@ -42,7 +42,7 @@ class GeminiTranscriber:
     ):
         # 多把 key 輪替（429 換下一把）；單把 api_key 為向後相容寫法
         self._pool = KeyPool(api_keys if api_keys else [api_key])
-        self.api_key = self._pool.current
+        self.api_key = self._pool.first
         self.model = model
         # 供 /api/health 顯示；命名對齊 Whisper Transcriber 以免前端分歧
         self.device = "gemini"

@@ -1,8 +1,9 @@
-"""Gemini 金鑰池：多把 API key 輪替。
+"""Gemini 金鑰池：多把 API key 輪替（round-robin）。
 
-免費層每把 key 每天只有少量請求配額，撞到 429（RESOURCE_EXHAUSTED）時
-自動換下一把、對同一個請求最多每把試一次。輪替後黏著在新 key 上，
-後續請求不再浪費時間去打已爆額度的 key。
+免費層每把 key 每天只有少量請求配額。每次呼叫都推進到下一把 key
+（第 1 次 key1、第 2 次 key2…循環），把配額平均分攤到所有 key。
+單次呼叫若撞到 429（RESOURCE_EXHAUSTED），會在同一次呼叫內繼續往後
+試，每把最多一次；全部爆掉才報錯。
 """
 from __future__ import annotations
 
@@ -20,7 +21,7 @@ def is_quota_error(exc: BaseException) -> bool:
 class KeyPool:
     def __init__(self, keys: Iterable[str | None] | None):
         self._keys = [k.strip() for k in (keys or []) if k and k.strip()]
-        self._index = 0
+        self._index = -1  # 第一次 next_key() 回傳第 0 把
         self._lock = threading.Lock()
 
     def __len__(self) -> int:
@@ -30,35 +31,35 @@ class KeyPool:
         return bool(self._keys)
 
     @property
-    def current(self) -> str | None:
-        with self._lock:
-            return self._keys[self._index] if self._keys else None
+    def first(self) -> str | None:
+        """第一把（僅供 health 端點顯示，不影響輪替游標）。"""
+        return self._keys[0] if self._keys else None
 
-    def rotate(self, from_key: str | None = None) -> None:
-        """換到下一把（環狀）。帶 from_key 可避免並發時把新 key 又換掉：
-        只有當前 key 仍是撞到配額的那把時才真的輪替。"""
+    def next_key(self) -> str | None:
+        """round-robin：推進到下一把並回傳；空池回傳 None。"""
         with self._lock:
             if not self._keys:
-                return
-            if from_key is not None and self._keys[self._index] != from_key:
-                return
+                return None
             self._index = (self._index + 1) % len(self._keys)
+            return self._keys[self._index]
 
 
 def call_with_rotation(pool: KeyPool, fn: Callable[[str | None], T]) -> T:
-    """fn(key) -> 結果；配額錯誤時輪替重試，每把 key 最多試一次。
+    """每次呼叫先取下一把 key（round-robin）給 fn。
 
-    空池會以 None 呼叫一次，讓 fn 自己丟出「未設定金鑰」的友善錯誤。
-    非配額錯誤（網路、格式…）直接往外拋，不輪替。
+    fn(key) 撞到配額錯誤時，在同一次呼叫內續取下一把重試，每把最多一次；
+    空池會以 None 呼叫一次，讓 fn 自己丟出「未設定金鑰」的友善錯誤；
+    非配額錯誤（網路、格式…）直接往外拋，不再試其他 key。
     """
+    if not pool:
+        return fn(None)
     last: BaseException | None = None
-    for _ in range(max(1, len(pool))):
-        key = pool.current
+    for _ in range(len(pool)):
+        key = pool.next_key()
         try:
             return fn(key)
         except Exception as exc:
-            if not is_quota_error(exc) or len(pool) <= 1:
+            if not is_quota_error(exc):
                 raise
             last = exc
-            pool.rotate(from_key=key)
     raise last  # type: ignore[misc]  # 迴圈至少跑一次，到這裡必有例外

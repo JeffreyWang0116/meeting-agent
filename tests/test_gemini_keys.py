@@ -1,7 +1,8 @@
 """Gemini 多金鑰輪替測試。
 
 免費層每把 key 每天只有少量配額（20 次/天），demo 現場撞到 429 會翻車。
-KeyPool 讓多把 key 在配額爆掉（429 / RESOURCE_EXHAUSTED）時自動換下一把。
+KeyPool 用 round-robin：每次呼叫都換下一把 key（循環），把配額平均分攤；
+單次呼叫撞到 429（RESOURCE_EXHAUSTED）時，同一次呼叫內續試下一把。
 """
 import pytest
 
@@ -24,14 +25,17 @@ def test_non_quota_error_not_detected():
 
 # ---- KeyPool ----
 
-def test_pool_current_and_rotate_cycles():
+def test_next_key_round_robin_cycles():
     pool = KeyPool(["k1", "k2", "k3"])
-    assert pool.current == "k1"
-    pool.rotate()
-    assert pool.current == "k2"
-    pool.rotate()
-    pool.rotate()
-    assert pool.current == "k1"  # 環狀
+    assert [pool.next_key() for _ in range(4)] == ["k1", "k2", "k3", "k1"]
+
+
+def test_first_does_not_advance_cursor():
+    """first 僅供顯示（health 端點），不可推進輪替游標。"""
+    pool = KeyPool(["k1", "k2"])
+    assert pool.first == "k1"
+    assert pool.first == "k1"
+    assert pool.next_key() == "k1"  # 游標仍從頭開始
 
 
 def test_pool_skips_blank_keys_and_empty_is_falsy():
@@ -40,13 +44,10 @@ def test_pool_skips_blank_keys_and_empty_is_falsy():
     assert len(KeyPool(["k1", " ", "k2"])) == 2
 
 
-def test_rotate_is_noop_if_another_thread_already_rotated():
-    """兩個請求同時撞 429：第二個 rotate 不該把剛換上的新 key 又換掉。"""
-    pool = KeyPool(["k1", "k2", "k3"])
-    pool.rotate(from_key="k1")
-    assert pool.current == "k2"
-    pool.rotate(from_key="k1")  # 過期的輪替請求
-    assert pool.current == "k2"
+def test_empty_pool_next_key_and_first_are_none():
+    pool = KeyPool([])
+    assert pool.next_key() is None
+    assert pool.first is None
 
 
 # ---- call_with_rotation ----
@@ -55,7 +56,21 @@ def _quota_exc():
     return RuntimeError("429 RESOURCE_EXHAUSTED quota exceeded")
 
 
-def test_rotation_retries_next_key_on_quota_error():
+def test_each_call_uses_next_key_round_robin():
+    """連續呼叫：這次用第一把、下次用第二把…循環。"""
+    pool = KeyPool(["k1", "k2", "k3"])
+    used = []
+
+    def fn(key):
+        used.append(key)
+        return key
+
+    for _ in range(4):
+        call_with_rotation(pool, fn)
+    assert used == ["k1", "k2", "k3", "k1"]
+
+
+def test_rotation_skips_exhausted_key_within_a_call():
     pool = KeyPool(["k1", "k2"])
     used = []
 
@@ -67,7 +82,6 @@ def test_rotation_retries_next_key_on_quota_error():
 
     assert call_with_rotation(pool, fn) == "ok-k2"
     assert used == ["k1", "k2"]
-    assert pool.current == "k2"  # 之後的請求直接用還有額度的 key
 
 
 def test_rotation_raises_when_all_keys_exhausted():
@@ -80,7 +94,7 @@ def test_rotation_raises_when_all_keys_exhausted():
         call_with_rotation(pool, fn)
 
 
-def test_non_quota_error_propagates_without_rotation():
+def test_non_quota_error_propagates_without_trying_more_keys():
     pool = KeyPool(["k1", "k2"])
     used = []
 
@@ -90,8 +104,7 @@ def test_non_quota_error_propagates_without_rotation():
 
     with pytest.raises(ValueError):
         call_with_rotation(pool, fn)
-    assert used == ["k1"]
-    assert pool.current == "k1"
+    assert used == ["k1"]  # 非配額錯誤不續試其他 key
 
 
 def test_empty_pool_calls_fn_with_none():
