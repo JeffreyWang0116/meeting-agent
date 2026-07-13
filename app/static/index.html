@@ -7,75 +7,83 @@
 <title>主動式會議 Agent</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Space+Grotesk:wght@400;500&display=swap" rel="stylesheet">
 <style>
   /*
-    視覺風格：深色版的 SaaS 互動式 demo（Inter 字體、藍色強調、圓角卡片、
-    漸層圖示磚、脈動 CTA）。語意色沿用：紅＝高優先/錯誤、琥珀＝中/待確認、
-    綠＝低/正常。互動元件加了 :active 壓下感與（支援裝置的）觸覺回饋。
+    視覺風格：Retool「Warm Obsidian Workshop」——溫暖近黑畫布 (#151515)、
+    羊皮紙色文字 (#e9ebdf)、扁平材質層次（無陰影、靠明度分層）、細字大標題
+    （Inter 300 + 負字距）、藥丸主按鈕 + 方角 ghost、暖琥珀鏽色 hero 漸層、
+    青綠色氛圍點綴。標籤用 Space Grotesk。語意色改為暖色系：珊瑚＝高/錯誤、
+    琥珀＝中、鼠尾草綠＝低。互動元件保留 :active 壓下感與觸覺回饋。
   */
   @media (prefers-reduced-motion: reduce) {
     * { animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; }
   }
 
   :root {
-    --bg: #0b1120;
-    --bg-glow: rgba(59, 130, 246, .10);
-    --card: #131c2e;
-    --card-2: #1b2739;
-    --card-3: #223047;
-    --border: #26324a;
-    --border-strong: #33415c;
-    --ink: #f1f5f9;
-    --muted: #94a3b8;
-    --faint: #64748b;
+    /* 扁平材質層次：畫布 #151515，卡片靠明度往上抬（#242424），無陰影 */
+    --bg: #151515;
+    --bg-glow: rgba(74, 43, 17, .5);
+    --card: #1e1e1d;
+    --card-2: #242424;
+    --card-3: #2e2e2c;
+    --border: #3f403d;
+    --border-strong: #55564f;
+    --ink: #e9ebdf;         /* 羊皮紙：系統唯一「亮」色，取代純白 */
+    --muted: #cbccc4;       /* 霧色：次級文字 */
+    --faint: #94958e;       /* 灰燼：三級文字/標籤 */
 
-    --accent: #3b82f6;
-    --accent-strong: #2563eb;
-    --accent-soft: rgba(59, 130, 246, .14);
-    --accent-border: rgba(59, 130, 246, .38);
+    /* 互動強調＝青綠氛圍色（系統唯一被允許的彩色）；主 CTA 用羊皮紙明度 */
+    --accent: #2f9e84;
+    --accent-strong: #e9ebdf;
+    --accent-soft: rgba(24, 88, 73, .28);
+    --accent-border: rgba(47, 158, 132, .42);
 
-    --high: #f87171;
-    --high-soft: rgba(248, 113, 113, .14);
-    --medium: #fbbf24;
-    --medium-soft: rgba(251, 191, 36, .14);
-    --low: #34d399;
-    --low-soft: rgba(52, 211, 153, .14);
+    /* 語意色：暖色系，維持功能辨識但融入工坊質感 */
+    --high: #e2856a;
+    --high-soft: rgba(226, 133, 106, .14);
+    --medium: #d4a95f;
+    --medium-soft: rgba(212, 169, 95, .14);
+    --low: #6fae8f;
+    --low-soft: rgba(111, 174, 143, .14);
 
     --sans: "Inter", "Segoe UI", "Microsoft JhengHei UI", "Microsoft JhengHei", -apple-system, "PingFang TC", system-ui, sans-serif;
-    --mono: "Cascadia Code", ui-monospace, "SF Mono", Consolas, "Microsoft JhengHei", monospace;
+    --label: "Space Grotesk", "Inter", "Microsoft JhengHei UI", system-ui, sans-serif;
+    --mono: "Space Grotesk", ui-monospace, "Cascadia Code", Consolas, "Microsoft JhengHei", monospace;
 
-    --radius: 16px;
-    --radius-md: 12px;
-    --radius-sm: 8px;
+    --radius: 12px;
+    --radius-md: 8px;
+    --radius-sm: 4px;
   }
 
-  /* 淺色主題：切換 body.light 覆蓋同一組變數，元件樣式不用改 */
+  /* 淺色主題：暖羊皮紙紙感，覆蓋同一組變數，元件樣式不用改 */
   body.light {
-    --bg: #f4f6fb;
-    --bg-glow: rgba(59, 130, 246, .08);
-    --card: #ffffff;
-    --card-2: #f1f5f9;
-    --card-3: #e2e8f0;
-    --border: #e2e8f0;
-    --border-strong: #cbd5e1;
-    --ink: #0f172a;
-    --muted: #475569;
-    --faint: #94a3b8;
-    --high: #dc2626;
-    --high-soft: rgba(220, 38, 38, .08);
-    --medium: #b45309;
-    --medium-soft: rgba(217, 119, 6, .10);
-    --low: #059669;
-    --low-soft: rgba(5, 150, 105, .10);
+    --bg: #eae7dd;
+    --bg-glow: rgba(74, 43, 17, .12);
+    --card: #f4f2ea;
+    --card-2: #efece2;
+    --card-3: #e4e0d3;
+    --border: #d3cfc0;
+    --border-strong: #bcb7a5;
+    --ink: #1d1d1a;
+    --muted: #4a4a44;
+    --faint: #7c7b71;
+    --accent: #1f7a63;
+    --accent-strong: #1d1d1a;
+    --accent-soft: rgba(24, 88, 73, .12);
+    --accent-border: rgba(31, 122, 99, .35);
+    --high: #c05f42;
+    --high-soft: rgba(192, 95, 66, .10);
+    --medium: #a9772f;
+    --medium-soft: rgba(169, 119, 47, .12);
+    --low: #3f8a68;
+    --low-soft: rgba(63, 138, 104, .12);
     color-scheme: light;
   }
-  body.light .brand h1 { background: linear-gradient(180deg, #0f172a, #334155); -webkit-background-clip: text; background-clip: text; }
-  body.light .panel, body.light .telemetry { box-shadow: 0 1px 3px rgba(15,23,42,.08); }
   body.light input[type="date"] { color-scheme: light; }
 
   * { box-sizing: border-box; }
-  ::selection { background: var(--accent); color: #fff; }
+  ::selection { background: var(--accent); color: #151515; }
   ::-webkit-scrollbar { width: 11px; height: 11px; }
   ::-webkit-scrollbar-track { background: var(--bg); }
   ::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 999px; border: 3px solid var(--bg); }
@@ -87,8 +95,12 @@
     margin: 0; background: var(--bg); color: var(--ink);
     font-family: var(--sans); line-height: 1.6; font-size: 15px;
     -webkit-font-smoothing: antialiased;
+    /* Hero 氛圍：暖琥珀鏽色從左下角滲出，融回近黑畫布，無彩色噪點 */
     background-image:
-      radial-gradient(1100px 620px at 50% -280px, var(--bg-glow), transparent 70%);
+      radial-gradient(at 0% 100%,
+        rgba(27, 46, 68, .5) 0%, rgba(51, 45, 43, .5) 22%,
+        rgba(74, 43, 17, .5) 40%, rgba(73, 31, 22, .45) 52%,
+        transparent 78%);
     background-attachment: fixed;
   }
 
@@ -102,15 +114,15 @@
   /* ---- 頁首 ---- */
   header { display: flex; flex-direction: column; gap: 18px; }
   .brand-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+  /* 招牌細字大標：weight 300 + 負字距，靠尺度而非粗細建立權威感 */
   .brand h1 {
-    margin: 0; font-size: 1.9rem; font-weight: 800; letter-spacing: -.02em; text-wrap: balance;
-    background: linear-gradient(180deg, #fff, #c7d2e4); -webkit-background-clip: text;
-    background-clip: text; color: transparent;
+    margin: 0; font-size: 2.4rem; font-weight: 300; letter-spacing: -.028em; line-height: 1.02;
+    text-wrap: balance; color: var(--ink);
   }
   .brand .eyebrow {
-    display: inline-block; font-size: .74rem; font-weight: 600; letter-spacing: .04em;
-    color: var(--accent); background: var(--accent-soft); border: 1px solid var(--accent-border);
-    padding: 3px 11px; border-radius: 999px; margin: 0 0 12px;
+    display: inline-block; font-family: var(--label); font-size: .72rem; font-weight: 500; letter-spacing: .09em;
+    text-transform: uppercase; color: var(--faint); background: none; border: none;
+    padding: 0; border-radius: 0; margin: 0 0 12px;
   }
   .head-tools { display: flex; align-items: center; gap: 14px; }
   .win-dots { display: flex; gap: 7px; padding-top: 8px; }
@@ -126,7 +138,7 @@
   .telemetry {
     display: flex; flex-wrap: wrap; gap: 0;
     border: 1px solid var(--border); border-radius: var(--radius-md); overflow: hidden;
-    background: var(--card); box-shadow: 0 1px 3px rgba(0,0,0,.28);
+    background: var(--card-2);
   }
   .tele-item {
     display: flex; align-items: center; gap: 8px; padding: 11px 16px;
@@ -137,24 +149,23 @@
   .tele-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--faint); box-shadow: 0 0 0 3px transparent; }
   .tele-item.ok .tele-dot { background: var(--low); box-shadow: 0 0 0 3px var(--low-soft); }
   .tele-item.bad .tele-dot { background: var(--high); box-shadow: 0 0 0 3px var(--high-soft); }
-  .tele-label { color: var(--faint); font-family: var(--mono); font-size: .72rem; letter-spacing: .04em; }
+  .tele-label { color: var(--faint); font-family: var(--label); font-size: .72rem; letter-spacing: .08em; text-transform: uppercase; }
   .tele-value { color: var(--ink); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
   /* ---- 錯誤橫幅 ---- */
   .banner {
     display: none; align-items: center; gap: 10px; padding: 13px 16px; border-radius: var(--radius-md);
-    background: var(--high-soft); border: 1px solid rgba(248,113,113,.4); color: #fca5a5; font-size: .9rem;
+    background: var(--high-soft); border: 1px solid var(--high); color: var(--high); font-size: .9rem;
   }
   .banner .i { color: var(--high); }
 
-  /* ---- 面板通用 ---- */
+  /* ---- 面板通用（扁平材質：靠明度分層，零陰影） ---- */
   .panel {
-    background: var(--card); border: 1px solid var(--border); border-radius: var(--radius);
+    background: var(--card-2); border: 1px solid var(--border); border-radius: var(--radius);
     padding: 24px; display: flex; flex-direction: column; gap: 18px;
-    box-shadow: 0 4px 20px rgba(0,0,0,.28);
   }
 
-  .tabs { display: inline-flex; gap: 4px; padding: 5px; background: var(--card-2); border: 1px solid var(--border); border-radius: 999px; align-self: flex-start; }
+  .tabs { display: inline-flex; gap: 4px; padding: 5px; background: var(--card); border: 1px solid var(--border); border-radius: 999px; align-self: flex-start; }
   .tab {
     display: flex; align-items: center; gap: 7px;
     border: none; background: none; padding: 9px 18px; font-size: .88rem; cursor: pointer;
@@ -162,8 +173,9 @@
     transition: color .15s, background .15s;
   }
   .tab:hover { color: var(--ink); }
-  .tab.active { color: #fff; background: var(--accent-strong); font-weight: 600; box-shadow: 0 2px 10px rgba(37,99,235,.4); }
-  .tab.active .i { color: #fff; }
+  /* 選中分頁＝羊皮紙藥丸、近黑字（明度 CTA，非彩色） */
+  .tab.active { color: #151515; background: var(--ink); font-weight: 600; }
+  .tab.active .i { color: #151515; }
   .pane { display: none; flex-direction: column; gap: 16px; }
   .pane.active { display: flex; animation: fadeIn .25s ease; }
   @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
@@ -192,34 +204,35 @@
 
   .actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
   button { font-family: var(--sans); cursor: pointer; }
+  /* 主 CTA＝羊皮紙藥丸（明度按鈕，全頁最亮元素）、近黑字 */
   button.primary {
     display: inline-flex; align-items: center; gap: 8px;
-    background: var(--accent-strong); color: #fff; border: none; border-radius: var(--radius-md);
-    padding: 12px 22px; font-size: .92rem; font-weight: 600;
-    box-shadow: 0 4px 14px rgba(37,99,235,.32);
-    transition: background .15s, transform .08s, box-shadow .15s;
+    background: var(--ink); color: #151515; border: 1px solid var(--ink); border-radius: 999px;
+    padding: 11px 24px; font-size: .92rem; font-weight: 600; letter-spacing: -.01em;
+    transition: filter .15s, transform .08s, opacity .15s;
   }
-  button.primary:hover:not(:disabled) { background: var(--accent); box-shadow: 0 6px 18px rgba(59,130,246,.42); }
+  button.primary:hover:not(:disabled) { filter: brightness(.92); }
   button.primary:active:not(:disabled) { transform: translateY(1px) scale(.985); }
-  button.primary:disabled { opacity: .45; cursor: not-allowed; box-shadow: none; }
-  button.primary.danger { background: var(--high); color: #3b0a0a; box-shadow: 0 4px 14px rgba(248,113,113,.3); }
-  button.primary.danger:hover:not(:disabled) { background: #fca5a5; }
+  button.primary:disabled { opacity: .4; cursor: not-allowed; }
+  button.primary.danger { background: var(--high); color: #1a0a06; border-color: var(--high); }
+  button.primary.danger:hover:not(:disabled) { filter: brightness(1.06); }
 
-  /* 主要 CTA 的脈動提示（借自範例的 demo-highlight） */
-  #btnAnalyzeText:not(:disabled) { animation: cta-pulse 2.4s ease-in-out infinite; }
+  /* 主要 CTA 的脈動提示：羊皮紙光暈環（借自範例的 demo-highlight） */
+  #btnAnalyzeText:not(:disabled) { animation: cta-pulse 2.6s ease-in-out infinite; }
   @keyframes cta-pulse {
-    0%, 100% { box-shadow: 0 4px 14px rgba(37,99,235,.32), 0 0 0 0 rgba(59,130,246,.5); }
-    50% { box-shadow: 0 4px 14px rgba(37,99,235,.32), 0 0 0 9px rgba(59,130,246,0); }
+    0%, 100% { box-shadow: 0 0 0 0 rgba(233,235,223,.42); }
+    50% { box-shadow: 0 0 0 9px rgba(233,235,223,0); }
   }
 
+  /* Ghost＝方角、透明底、細框（Retool 的次級按鈕語彙） */
   button.ghost, a.btn-link {
     display: inline-flex; align-items: center; gap: 6px;
-    background: var(--card-2); border: 1px solid var(--border); border-radius: var(--radius-sm);
+    background: transparent; border: 1px solid var(--border); border-radius: var(--radius-sm);
     padding: 8px 14px; font-size: .82rem; font-weight: 500; color: var(--muted);
     text-decoration: none; white-space: nowrap;
     transition: border-color .15s, color .15s, background .15s, transform .08s;
   }
-  button.ghost:hover, a.btn-link:hover { border-color: var(--border-strong); color: var(--ink); background: var(--card-3); }
+  button.ghost:hover, a.btn-link:hover { border-color: var(--ink); color: var(--ink); background: var(--card-3); }
   button.ghost:active, a.btn-link:active { transform: translateY(1px) scale(.98); }
 
   /* ---- 資料庫工具列與任務管理 ---- */
@@ -232,8 +245,8 @@
   #taskSearch { width: 180px; }
   #taskSearch::placeholder { color: var(--faint); }
   .status-sel { padding: 4px 6px; font-size: .8rem; cursor: pointer; }
-  .status-sel.st-doing { color: var(--medium); border-color: rgba(251,191,36,.4); }
-  .status-sel.st-done { color: var(--low); border-color: rgba(52,211,153,.4); }
+  .status-sel.st-doing { color: var(--medium); border-color: var(--medium); }
+  .status-sel.st-done { color: var(--low); border-color: var(--low); }
   .row-done td { opacity: .55; }
   .row-done td:first-child { text-decoration: line-through; }
   .del-btn {
@@ -307,7 +320,7 @@
   .meeting-meta { color: var(--faint); font-size: .78rem; }
 
   .progress { height: 6px; background: var(--card-2); border-radius: 999px; overflow: hidden; }
-  .progress > div { height: 100%; width: 0%; background: linear-gradient(90deg, var(--accent-strong), #60a5fa); transition: width .4s; }
+  .progress > div { height: 100%; width: 0%; background: var(--ink); transition: width .4s; }
   .status-line { font-size: .84rem; color: var(--muted); display: flex; align-items: center; gap: 8px; }
   .transcript-box {
     background: var(--card-2); border: 1px solid var(--border); border-radius: var(--radius-md);
@@ -325,7 +338,7 @@
   /* ---- 結果（工作階段報告）---- */
   #result { display: none; }
   .report-head { display: flex; flex-direction: column; gap: 12px; }
-  .report-head h2 { margin: 0; font-size: 1.35rem; font-weight: 700; letter-spacing: -.01em; text-wrap: balance; }
+  .report-head h2 { margin: 0; font-size: 1.7rem; font-weight: 300; letter-spacing: -.025em; text-wrap: balance; }
   .meta-chips { display: flex; gap: 8px; flex-wrap: wrap; }
   .meta-chip {
     display: inline-flex; align-items: center; gap: 6px; font-size: .8rem; font-weight: 500;
@@ -335,22 +348,22 @@
   .meta-chip .i { color: var(--faint); }
 
   h3.sub {
-    display: flex; align-items: center; gap: 11px; font-size: 1rem; font-weight: 700;
+    display: flex; align-items: center; gap: 11px; font-size: 1rem; font-weight: 600;
     margin: 8px 0 0; color: var(--ink);
     padding-top: 20px; border-top: 1px solid var(--border);
   }
-  /* 漸層圖示磚（借自範例的 step icon tiles，各段配不同色） */
+  /* 扁平圖示磚（Retool：細線 mono-color 圖示嵌在 ember 方塊，無漸層無陰影） */
   h3.sub > svg, .panel-head h2 > svg {
-    width: 15px; height: 15px; padding: 8px; box-sizing: content-box; border-radius: 9px;
-    color: #fff; flex: none; vertical-align: middle;
-    background: linear-gradient(135deg, #3b82f6, #6366f1);
+    width: 15px; height: 15px; padding: 8px; box-sizing: content-box; border-radius: var(--radius-sm);
+    flex: none; vertical-align: middle;
+    background: var(--card-3); border: 1px solid var(--border); color: var(--muted);
   }
-  #result h3.sub:nth-of-type(1) > svg { background: linear-gradient(135deg, #3b82f6, #60a5fa); }
-  #result h3.sub:nth-of-type(2) > svg { background: linear-gradient(135deg, #10b981, #34d399); }
-  #result h3.sub:nth-of-type(3) > svg { background: linear-gradient(135deg, #6366f1, #8b5cf6); }
-  #result h3.sub:nth-of-type(4) > svg { background: linear-gradient(135deg, #f59e0b, #fbbf24); }
-  #result h3.sub:nth-of-type(5) > svg { background: linear-gradient(135deg, #0ea5e9, #38bdf8); }
-  #result h3.sub:nth-of-type(6) > svg { background: linear-gradient(135deg, #ec4899, #f472b6); }
+  #result h3.sub:nth-of-type(1) > svg { color: var(--accent); }
+  #result h3.sub:nth-of-type(2) > svg { color: var(--low); }
+  #result h3.sub:nth-of-type(3) > svg { color: var(--accent); }
+  #result h3.sub:nth-of-type(4) > svg { color: var(--medium); }
+  #result h3.sub:nth-of-type(5) > svg { color: var(--high); }
+  #result h3.sub:nth-of-type(6) > svg { color: var(--muted); }
   h3.sub .aux { margin-left: auto; font-weight: 400; color: var(--faint); font-size: .76rem; }
 
   #rSummary { margin: 0; color: var(--ink); font-size: .95rem; line-height: 1.75; }
@@ -365,7 +378,7 @@
     background: var(--card-2); display: flex; flex-direction: column; gap: 9px;
     transition: border-color .15s, box-shadow .15s, transform .15s;
   }
-  .todo-card:hover { border-color: var(--border-strong); box-shadow: 0 6px 18px rgba(0,0,0,.3); transform: translateY(-1px); }
+  .todo-card:hover { border-color: var(--border-strong); background: var(--card-3); }
   .todo-list { display: flex; flex-direction: column; gap: 10px; }
   .todo-head { display: flex; align-items: baseline; gap: 9px; }
   .led { width: 9px; height: 9px; border-radius: 50%; flex: none; background: var(--medium); box-shadow: 0 0 0 3px var(--medium-soft); }
@@ -379,11 +392,11 @@
     color: var(--muted);
   }
   .badge b { color: var(--ink); font-weight: 600; margin-left: 1px; }
-  .badge.owner-none { border-color: rgba(248,113,113,.4); color: var(--high); background: var(--high-soft); }
+  .badge.owner-none { border-color: var(--high); color: var(--high); background: var(--high-soft); }
   .badge.owner-none b { color: var(--high); }
-  .badge.pr-high { color: var(--high); border-color: rgba(248,113,113,.4); background: var(--high-soft); }
-  .badge.pr-medium { color: var(--medium); border-color: rgba(251,191,36,.4); background: var(--medium-soft); }
-  .badge.pr-low { color: var(--low); border-color: rgba(52,211,153,.4); background: var(--low-soft); }
+  .badge.pr-high { color: var(--high); border-color: var(--high); background: var(--high-soft); }
+  .badge.pr-medium { color: var(--medium); border-color: var(--medium); background: var(--medium-soft); }
+  .badge.pr-low { color: var(--low); border-color: var(--low); background: var(--low-soft); }
   .quote {
     font-family: var(--mono); font-size: .79rem; color: var(--faint); border-left: 2px solid var(--border-strong);
     padding-left: 10px; margin: 0; line-height: 1.6;
@@ -428,7 +441,7 @@
 
   .panel-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
   .panel-head h2 {
-    margin: 0; font-size: 1.05rem; font-weight: 700; display: flex; align-items: center; gap: 11px;
+    margin: 0; font-size: 1.1rem; font-weight: 600; letter-spacing: -.01em; display: flex; align-items: center; gap: 11px;
   }
 </style>
 </head>
