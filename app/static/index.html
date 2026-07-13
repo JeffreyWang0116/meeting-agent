@@ -526,7 +526,7 @@
 
     <div class="field-row">
       <div class="field">
-        <label class="lbl" for="meetingDate">會議日期 · 相對日期換算基準</label>
+        <label class="lbl" for="meetingDate">會議日期</label>
         <input type="date" id="meetingDate">
       </div>
     </div>
@@ -598,8 +598,8 @@
         重新掃描
       </button>
     </div>
-    <p class="hint">Agent 主動掃描任務庫，不需要你開口：逾期、即將到期、沒人負責的任務，以及議而未決的事項，都會擬好催辦草稿。</p>
-    <div class="alert-list" id="reminderBody"><p class="empty-note">掃描中…</p></div>
+    <p class="hint">Agent 主動掃描任務庫，逾期、即將到期、沒人負責的任務，以及議而未決的事項，都會擬好催辦草稿。</p>
+    <div class="alert-list" id="reminderBody"></div>
   </div>
 
   <!-- 跨會議問答（RAG） -->
@@ -607,7 +607,7 @@
     <div class="panel-head">
       <h2>
         <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
-        問你的會議
+        詢問會議
       </h2>
     </div>
     <div class="ask-log" id="askLog"></div>
@@ -618,7 +618,6 @@
         查詢
       </button>
     </div>
-    <p class="hint">回答只依據已分析過的會議紀錄，並附上來源會議；紀錄中找不到的內容會直接說不知道。</p>
   </div>
 
   <!-- 結果 -->
@@ -679,12 +678,12 @@
     </details>
   </div>
 
-  <!-- 資料庫 -->
+  <!-- 任務庫 -->
   <div class="panel">
     <div class="panel-head">
       <h2>
         <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5.5" rx="8" ry="3"/><path d="M4 5.5v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/><path d="M4 11.5v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/></svg>
-        資料庫
+        任務庫
       </h2>
       <div class="panel-actions">
         <input type="search" id="taskSearch" placeholder="搜尋任務、負責人…">
@@ -972,7 +971,7 @@ async function refreshReminders() {
     ];
     $("reminderBody").innerHTML = items.length
       ? items.join("")
-      : `<p class="empty-note">目前沒有需要提醒的事項——所有任務都在軌道上。</p>`;
+      : `<p class="empty-note">目前無</p>`;
   } catch (e) { /* 靜默：提醒失敗不擋主流程 */ }
 }
 
