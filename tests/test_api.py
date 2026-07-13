@@ -243,6 +243,21 @@ def test_meeting_markdown_report(client):
     assert client.get("/api/meetings/nope/report.md").status_code == 404
 
 
+def test_reminders_endpoint_scans_tasks_and_pending_items(client):
+    make_meeting(client)
+    task_id = client.get("/api/tasks").json()["tasks"][0]["id"]
+    # 把期限改成過去 → 必為逾期，不依賴測試執行當天的日期
+    client.patch(f"/api/tasks/{task_id}", json={"due_date": "2000-01-01"})
+
+    body = client.get("/api/reminders").json()
+    assert body["generated_at"]
+    [r] = body["reminders"]
+    assert r["kind"] == "overdue"
+    assert "完成 Prompt 初版" in r["message"]
+    # 會議裡的未決事項 → 追問草稿
+    assert any("要不要支援英文介面" in f["topic"] for f in body["followups"])
+
+
 def test_usage_endpoint_counts_analyses(client):
     assert client.get("/api/usage").json()["total"] == {}
     make_meeting(client)

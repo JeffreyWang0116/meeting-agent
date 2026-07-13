@@ -18,6 +18,7 @@ from app.agents.decision_agent import DecisionAgent, DecisionAgentError
 from app.agents.executor_agent import ExecutorAgent
 from app.agents.notifier_agent import NotifierAgent
 from app.agents.parser_agent import ParserAgent
+from app.agents.reminder_agent import scan as scan_reminders
 from app.config import Settings, get_settings
 from app.export import meeting_report_md, tasks_to_csv
 from app.jobs import MediaJobManager
@@ -130,6 +131,11 @@ def create_app(
     @app.get("/api/usage")
     def get_usage():
         return usage.snapshot()
+
+    @app.get("/api/reminders")
+    def get_reminders(days: int = 2):
+        """主動提醒：逾期/即將到期/未指派任務的催辦草稿＋未決事項追問。"""
+        return scan_reminders(store.list_tasks(), store.list_meetings(), due_soon_days=days)
 
     # ---- 任務管理 ----
 
