@@ -10,12 +10,13 @@ services:
       # 金鑰不放進 repo；部署後在 Render 後台手動填（Environment 分頁）
       - key: GEMINI_API_KEY
         sync: false
+      # 分析模型：免費層 gemini-3.5-flash 每天每專案僅 20 次且常過載，
+      # 暫用額度高又穩定的 lite 版；配額充足或升級付費後可改回 gemini-3.5-flash 提高品質
       - key: GEMINI_MODEL
-        value: gemini-3.5-flash
+        value: gemini-flash-lite-latest
       - key: TRANSCRIBE_ENGINE
         value: gemini
-      # 轉錄專用模型：吃掉絕大多數請求，用免費額度高的輕量版；
-      # 分析仍走 GEMINI_MODEL 維持品質
+      # 轉錄專用模型：吃掉絕大多數請求，用免費額度高的輕量版
       - key: TRANSCRIBE_MODEL
         value: gemini-flash-lite-latest
       # 選填：貼上 Firebase service account JSON 即改用 Firestore 永久保存資料；
