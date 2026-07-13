@@ -266,6 +266,45 @@ def test_usage_endpoint_counts_analyses(client):
     assert usage["today"]["analysis"] == 1
 
 
+# ---- RAG 跨會議問答 ----
+
+def test_ask_empty_question_400(client):
+    assert client.post("/api/ask", json={"question": "   "}).status_code == 400
+
+
+def test_ask_with_no_meetings_answers_gracefully(client):
+    """空資料庫不需要金鑰也不觸網，直接回覆「還沒有紀錄」。"""
+    body = client.post("/api/ask", json={"question": "上次開會說了什麼？"}).json()
+    assert "沒有" in body["answer"]
+    assert body["sources"] == []
+
+
+def test_ask_with_fake_agent_returns_answer_and_counts_usage(tmp_path):
+    class FakeAsk:
+        def ask(self, question):
+            return {"answer": f"回答：{question}", "sources": [{"meeting_id": "m1"}]}
+
+    settings = Settings(gemini_api_key=None, data_dir=tmp_path)
+    app = create_app(settings, transcriber=FakeTranscriber(), ask_agent=FakeAsk())
+    c = TestClient(app)
+
+    body = c.post("/api/ask", json={"question": "API 誰負責？"}).json()
+    assert body["answer"] == "回答：API 誰負責？"
+    assert c.get("/api/usage").json()["total"]["ask"] == 1
+
+
+def test_ask_backend_failure_returns_502(tmp_path):
+    class BrokenAsk:
+        def ask(self, question):
+            raise RuntimeError("429 RESOURCE_EXHAUSTED")
+
+    settings = Settings(gemini_api_key=None, data_dir=tmp_path)
+    app = create_app(settings, transcriber=FakeTranscriber(), ask_agent=BrokenAsk())
+    resp = TestClient(app).post("/api/ask", json={"question": "嗨"})
+    assert resp.status_code == 502
+    assert "RESOURCE_EXHAUSTED" in resp.json()["detail"]
+
+
 # ---- 其他 ----
 
 def test_health(client):

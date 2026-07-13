@@ -13,5 +13,5 @@ class ExecutorAgent:
     def __init__(self, store: TaskStore):
         self.store = store
 
-    def execute(self, analysis: MeetingAnalysis) -> str:
-        return self.store.save_meeting(analysis)
+    def execute(self, analysis: MeetingAnalysis, transcript: str | None = None) -> str:
+        return self.store.save_meeting(analysis, transcript=transcript)

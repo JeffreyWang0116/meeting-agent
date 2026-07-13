@@ -23,6 +23,7 @@ from app.config import Settings, get_settings
 from app.export import meeting_report_md, tasks_to_csv
 from app.jobs import MediaJobManager
 from app.orchestrator import Orchestrator
+from app.rag import AskAgent, GeminiEmbedder, RagIndex
 from app.stores.local_store import LocalJsonStore
 from app.transcription import media
 from app.transcription.gemini_transcriber import GeminiTranscriber
@@ -42,6 +43,10 @@ class FinishRequest(BaseModel):
     meeting_date: Optional[date] = None
 
 
+class AskRequest(BaseModel):
+    question: str
+
+
 def create_app(
     settings: Settings | None = None,
     *,
@@ -50,6 +55,7 @@ def create_app(
     transcriber=None,
     live_manager=None,
     job_manager=None,
+    ask_agent=None,
 ) -> FastAPI:
     settings = settings or get_settings()
     store = store or LocalJsonStore(settings.data_dir / "output" / "db.json")
@@ -81,6 +87,19 @@ def create_app(
     job_manager = job_manager or MediaJobManager(
         transcriber, orchestrator, settings.data_dir / "tmp"
     )
+    if ask_agent is None:
+        ask_agent = AskAgent(
+            index=RagIndex(
+                settings.data_dir / "output" / "rag_index.json",
+                GeminiEmbedder(
+                    api_key=settings.gemini_api_key, api_keys=settings.gemini_api_keys
+                ),
+            ),
+            store=store,
+            api_key=settings.gemini_api_key,
+            api_keys=settings.gemini_api_keys,
+            model=settings.gemini_model,
+        )
     uploads_dir = settings.data_dir / "tmp" / "uploads"
     usage = UsageTracker(settings.data_dir / "output" / "usage.json")
 
@@ -136,6 +155,17 @@ def create_app(
     def get_reminders(days: int = 2):
         """主動提醒：逾期/即將到期/未指派任務的催辦草稿＋未決事項追問。"""
         return scan_reminders(store.list_tasks(), store.list_meetings(), due_soon_days=days)
+
+    @app.post("/api/ask")
+    def ask_meetings(req: AskRequest):
+        """RAG 跨會議問答：檢索歷史會議片段，交給 Gemini 依據回答。"""
+        usage.record("ask")
+        try:
+            return ask_agent.ask(req.question)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        except Exception as exc:  # 金鑰未設、配額爆掉…原因要透明
+            raise HTTPException(status_code=502, detail=f"問答失敗：{exc}")
 
     # ---- 任務管理 ----
 

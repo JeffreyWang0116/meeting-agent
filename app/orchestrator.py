@@ -28,7 +28,7 @@ class Orchestrator:
     def process_transcript(self, raw_text: str, meeting_date: date | None = None) -> dict:
         text = self.parser.parse(raw_text)
         analysis = self.decision.analyze(text, meeting_date=meeting_date)
-        meeting_id = self.executor.execute(analysis)
+        meeting_id = self.executor.execute(analysis, transcript=text)
         notifications = self.notifier.notify(meeting_id, analysis)
         return {
             "meeting_id": meeting_id,
