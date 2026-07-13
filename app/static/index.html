@@ -309,6 +309,8 @@
   .ask-a.pending::after { content: "▍"; color: var(--accent); animation: blink 1s steps(1) infinite; }
   .ask-a.err > span { color: var(--high); background: var(--high-soft); border-color: var(--high); }
   .ask-a.err { color: var(--high); }
+  .ask-item { position: relative; display: flex; flex-direction: column; gap: 12px; padding-right: 26px; }
+  .del-ask { position: absolute; top: 0; right: 0; }
   .ask-src { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
   .src-chip {
     font-family: var(--mono); font-size: .74rem; color: var(--faint);
@@ -631,7 +633,6 @@
         <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
         詢問會議
       </h2>
-      <button class="panel-x" id="btnClearAsk" title="清除問答紀錄">✕</button>
     </div>
     <div class="ask-log" id="askLog"></div>
     <div class="ask-bar">
@@ -1029,9 +1030,12 @@ async function sendAsk() {
   const log = $("askLog");
   log.style.display = "flex";
   log.insertAdjacentHTML("beforeend",
-    `<div class="ask-q"><span>Q</span><div>${esc(q)}</div></div>` +
-    `<div class="ask-a pending"><span>A</span><div>檢索會議紀錄中…</div></div>`);
-  const slot = log.lastElementChild;
+    `<div class="ask-item">
+       <button class="del-btn del-ask" title="刪除這則問答" aria-label="刪除">✕</button>
+       <div class="ask-q"><span>Q</span><div>${esc(q)}</div></div>
+       <div class="ask-a pending"><span>A</span><div>檢索會議紀錄中…</div></div>
+     </div>`);
+  const slot = log.lastElementChild.querySelector(".ask-a");
   log.scrollTop = log.scrollHeight;
   $("btnAsk").disabled = true;
   try {
@@ -1057,9 +1061,13 @@ async function sendAsk() {
 }
 $("btnAsk").addEventListener("click", sendAsk);
 $("askInput").addEventListener("keydown", e => { if (e.key === "Enter") sendAsk(); });
-$("btnClearAsk").addEventListener("click", () => {
-  $("askLog").innerHTML = "";
-  $("askLog").style.display = "none";
+// 每則問答各自刪除；刪到全空就把整個對話框收起來
+$("askLog").addEventListener("click", e => {
+  const del = e.target.closest(".del-ask");
+  if (!del) return;
+  del.closest(".ask-item").remove();
+  const log = $("askLog");
+  if (!log.querySelector(".ask-item")) log.style.display = "none";
 });
 
 // ---- 面板收縮（點標題展開/收合，狀態記在瀏覽器）----
