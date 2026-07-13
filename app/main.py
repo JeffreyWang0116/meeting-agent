@@ -160,6 +160,8 @@ def create_app(
             raise HTTPException(status_code=404, detail=str(exc))
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc))
+        except Exception as exc:  # 轉錄後端故障（額度、格式…）要讓前端看得到原因
+            raise HTTPException(status_code=502, detail=f"這段音訊轉錄失敗：{exc}")
 
     @app.post("/api/live/{session_id}/finish")
     def live_finish(session_id: str, req: Optional[FinishRequest] = None):

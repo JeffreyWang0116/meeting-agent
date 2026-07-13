@@ -149,6 +149,32 @@ def test_live_finish_without_speech_400(client):
     assert client.post(f"/api/live/{sid}/finish").status_code == 400
 
 
+def test_live_chunk_transcribe_error_returns_502_with_reason(tmp_path):
+    """轉錄後端（如 Gemini 額度爆掉）失敗時，前端要能看到真正原因，而非不明 500。"""
+
+    class BrokenTranscriber:
+        device = "gemini"
+        model_size = "fake"
+
+        def transcribe(self, path, on_progress=None):
+            raise RuntimeError("429 quota exceeded")
+
+    settings = Settings(gemini_api_key=None, data_dir=tmp_path)
+    app = create_app(settings, transcriber=BrokenTranscriber())
+    c = TestClient(app)
+
+    sid = c.post("/api/live/start").json()["session_id"]
+    resp = c.post(
+        f"/api/live/{sid}/chunk",
+        files={"file": ("c.webm", io.BytesIO(b"x"), "audio/webm")},
+    )
+    assert resp.status_code == 502
+    assert "quota" in resp.json()["detail"]
+
+    # session 不應因單段失敗而壞掉：之後的段仍可繼續
+    assert c.post(f"/api/live/{sid}/finish").status_code == 400  # 沒有成功內容
+
+
 def test_live_chunk_after_finish_400(client):
     sid = client.post("/api/live/start").json()["session_id"]
     client.post(
