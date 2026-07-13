@@ -6,6 +6,7 @@ services:
     runtime: docker
     dockerfilePath: ./Dockerfile
     plan: free
+    autoDeploy: true   # 每次 push 到 GitHub 自動重新部署
     envVars:
       # 金鑰不放進 repo；部署後在 Render 後台手動填（Environment 分頁）
       - key: GEMINI_API_KEY
