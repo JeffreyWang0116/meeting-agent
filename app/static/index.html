@@ -614,13 +614,10 @@
         主動提醒
         <span class="head-count" id="alertCount"></span>
       </h2>
-      <div class="panel-actions">
-        <button class="panel-x" id="btnClearReminders" title="清除顯示（按「重新掃描」即可全部復原）">✕</button>
-        <button class="ghost" id="btnRefreshReminders">
-          <svg class="i-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11a9 9 0 1 1-2.7-6.4"/><path d="M21 3v6h-6"/></svg>
-          重新掃描
-        </button>
-      </div>
+      <button class="ghost" id="btnRefreshReminders">
+        <svg class="i-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11a9 9 0 1 1-2.7-6.4"/><path d="M21 3v6h-6"/></svg>
+        重新掃描
+      </button>
     </div>
     <p class="hint">Agent 主動掃描任務庫，逾期、即將到期、沒人負責的任務，以及議而未決的事項，都會擬好催辦草稿。</p>
     <div class="alert-list" id="reminderBody"></div>
@@ -977,34 +974,43 @@ const ALERT_LABEL = {
   unassigned: () => "未指派",
 };
 
+// 依目前畫面上還剩幾則提醒更新標題的數字（刪除單項後也會即時反映）
+function updateAlertCount() {
+  const n = $("reminderBody").querySelectorAll(".alert-item").length;
+  const badge = $("alertCount");
+  badge.textContent = n;
+  badge.classList.toggle("has", n > 0);
+}
+
 async function refreshReminders() {
   try {
     const r = await jsonOrThrow(await fetch("/api/reminders"));
-    const total = r.reminders.length + r.followups.length;
-    const badge = $("alertCount");
-    badge.textContent = total || "0";
-    badge.classList.toggle("has", total > 0);
+    const alertItem = (cls, chip, msg) => `
+        <div class="alert-item ${cls}">
+          <span class="alert-chip">${chip}</span>
+          <div class="alert-msg">${esc(msg)}</div>
+          <button class="ghost copy-alert" data-copy="${esc(msg)}">複製</button>
+          <button class="del-btn del-alert" title="刪除此提醒（按「重新掃描」可全部復原）" aria-label="刪除">✕</button>
+        </div>`;
     const items = [
-      ...r.reminders.map(x => `
-        <div class="alert-item k-${x.kind}">
-          <span class="alert-chip">${ALERT_LABEL[x.kind](x)}</span>
-          <div class="alert-msg">${esc(x.message)}</div>
-          <button class="ghost copy-alert" data-copy="${esc(x.message)}">複製</button>
-        </div>`),
-      ...r.followups.map(f => `
-        <div class="alert-item k-follow">
-          <span class="alert-chip">追問</span>
-          <div class="alert-msg">${esc(f.message)}</div>
-          <button class="ghost copy-alert" data-copy="${esc(f.message)}">複製</button>
-        </div>`),
+      ...r.reminders.map(x => alertItem(`k-${x.kind}`, ALERT_LABEL[x.kind](x), x.message)),
+      ...r.followups.map(f => alertItem("k-follow", "追問", f.message)),
     ];
     $("reminderBody").innerHTML = items.length
       ? items.join("")
       : `<div class="empty-alert">${icon("check")}<p>尚無提醒</p></div>`;
+    updateAlertCount();
   } catch (e) { /* 靜默：提醒失敗不擋主流程 */ }
 }
 
 $("reminderBody").addEventListener("click", async e => {
+  // 刪除單則：只移除畫面，不動後端；按「重新掃描」即可全部復原
+  const del = e.target.closest(".del-alert");
+  if (del) {
+    del.closest(".alert-item").remove();
+    updateAlertCount();
+    return;
+  }
   const btn = e.target.closest(".copy-alert");
   if (!btn) return;
   await navigator.clipboard.writeText(btn.dataset.copy);
@@ -1013,12 +1019,6 @@ $("reminderBody").addEventListener("click", async e => {
   setTimeout(() => (btn.textContent = original), 1500);
 });
 $("btnRefreshReminders").addEventListener("click", refreshReminders);
-// 清除只清畫面，不動後端；按「重新掃描」即可全部復原
-$("btnClearReminders").addEventListener("click", () => {
-  $("reminderBody").innerHTML = "";
-  $("alertCount").textContent = "";
-  $("alertCount").classList.remove("has");
-});
 refreshReminders();
 
 // ---- 跨會議問答（RAG） ----
