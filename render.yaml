@@ -1,0 +1,16 @@
+# Render Blueprint：在 Render 建立這個 repo 時會自動讀取。
+# 到 https://render.com → New → Blueprint → 連這個 GitHub repo 即可。
+services:
+  - type: web
+    name: meeting-agent
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: free
+    envVars:
+      # 金鑰不放進 repo；部署後在 Render 後台手動填（Environment 分頁）
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GEMINI_MODEL
+        value: gemini-3.5-flash
+      - key: TRANSCRIBE_ENGINE
+        value: gemini

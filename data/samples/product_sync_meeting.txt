@@ -1,0 +1,20 @@
+Weekly Product Sync — 2026/07/10
+
+Host: Jenny
+出席: Jenny, Mark, 小林, Tiffany
+
+Jenny: ok quick sync, 主要是 release 前的 checklist。Mark, staging 的 bug 修得怎樣？
+Mark: login flow 那個 race condition 我修好了，但是 payment webhook 偶爾還是會 timeout，我懷疑是 vendor 那邊的問題，還在查
+Jenny: 這個 blocker 嗎？
+Mark: 算是，如果下週三前查不出來我建議先 rollback 到舊的 retry 機制
+Jenny: ok 那就這樣定，下週三是 deadline，查不出來就 rollback。小林，文件呢？
+小林: API docs 更新到 v2.3 了，不過 changelog 我還沒寫，這兩天補
+Jenny: 好。Tiffany，marketing 那邊 landing page 的 copy 什麼時候可以給？
+Tiffany: 設計稿我禮拜五給你們，copy 的部分要等 legal review，時間我不敢保證
+Jenny: legal 都要多久啊...
+Tiffany: 上次等了兩週 lol
+Jenny: 那要不要先放 placeholder 上去？
+Tiffany: 嗯...這個我要問過 brand team，先 hold
+Jenny: fine，那 release date 先不動，8/1 不變。oh 對了，下季的 roadmap planning 大家先想一下，這次先不討論
+Mark: 👌
+Jenny: ok that's it, thanks all

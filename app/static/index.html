@@ -1,0 +1,727 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>主動式會議 Agent</title>
+<style>
+  /*
+    視覺概念：類比錄音座 / 混音台的儀表面板。
+    這支 Agent 的第一件事就是「聽錄音」，所以介面借用 VU 電平表的三色語彙：
+    綠＝安全（低優先級／正常）、琥珀＝警戒（中優先級／待確認）、紅＝峰值（高優先級／錯誤）。
+    琥珀同時也是整台「機器」的訊號燈色，用在互動元件上。
+  */
+  @media (prefers-reduced-motion: reduce) {
+    * { animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; }
+  }
+
+  :root {
+    --ink: #120f0c;
+    --panel: #1b1712;
+    --panel-2: #241f18;
+    --line: #34291e;
+    --line-strong: #4a3c2c;
+    --paper: #eee6d8;
+    --paper-dim: #a89c8a;
+    --paper-faint: #6e6353;
+
+    --signal: #e2932f;
+    --signal-bright: #f4ab4d;
+    --signal-wash: rgba(226, 147, 47, .12);
+
+    --peak: #dd5c42;
+    --peak-wash: rgba(221, 92, 66, .13);
+    --caution: #e2932f;
+    --caution-wash: rgba(226, 147, 47, .13);
+    --safe: #7f9c6b;
+    --safe-wash: rgba(127, 156, 107, .14);
+
+    --sans: "Segoe UI", "Microsoft JhengHei UI", "Microsoft JhengHei", -apple-system, "PingFang TC", system-ui, sans-serif;
+    --mono: "Cascadia Code", "Cascadia Mono", ui-monospace, "SF Mono", Consolas, "Microsoft JhengHei", monospace;
+
+    --radius: 6px;
+    --radius-sm: 4px;
+  }
+
+  * { box-sizing: border-box; }
+  ::selection { background: var(--signal); color: #1a1206; }
+  ::-webkit-scrollbar { width: 11px; height: 11px; }
+  ::-webkit-scrollbar-track { background: var(--ink); }
+  ::-webkit-scrollbar-thumb { background: var(--line-strong); border-radius: 999px; border: 3px solid var(--ink); }
+  * { scrollbar-color: var(--line-strong) var(--ink); scrollbar-width: thin; }
+
+  :focus-visible { outline: 2px solid var(--signal); outline-offset: 2px; }
+
+  body {
+    margin: 0; background: var(--ink); color: var(--paper);
+    font-family: var(--sans); line-height: 1.6; font-size: 15px;
+    background-image:
+      radial-gradient(ellipse 900px 500px at 15% -10%, rgba(226,147,47,.05), transparent 60%);
+  }
+
+  .wrap { max-width: 920px; margin: 0 auto; padding: 32px 20px 72px; display: flex; flex-direction: column; gap: 20px; }
+
+  /* ---- 圖示 ---- */
+  .i { width: 16px; height: 16px; flex: none; vertical-align: -3px; }
+  .i-sm { width: 13px; height: 13px; vertical-align: -2px; }
+  .i-lg { width: 20px; height: 20px; vertical-align: -5px; }
+
+  /* ---- 頁首 ---- */
+  header { display: flex; flex-direction: column; gap: 16px; }
+  .brand-row { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+  .brand h1 {
+    margin: 0; font-size: 1.5rem; font-weight: 650; letter-spacing: .01em; text-wrap: balance;
+  }
+  .brand .eyebrow {
+    font-family: var(--mono); font-size: .72rem; letter-spacing: .12em; color: var(--signal);
+    text-transform: uppercase; margin: 0 0 6px;
+  }
+  .brand p.tagline { margin: 6px 0 0; color: var(--paper-dim); font-size: .92rem; }
+
+  .telemetry {
+    display: flex; flex-wrap: wrap; gap: 0;
+    border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden;
+    background: var(--panel);
+  }
+  .tele-item {
+    display: flex; align-items: center; gap: 8px; padding: 9px 16px;
+    border-right: 1px solid var(--line); font-family: var(--mono); font-size: .78rem;
+    color: var(--paper-dim); flex: 1 1 auto; min-width: 0;
+  }
+  .tele-item:last-child { border-right: none; }
+  .tele-dot { width: 7px; height: 7px; border-radius: 50%; flex: none; background: var(--paper-faint); box-shadow: 0 0 0 3px transparent; }
+  .tele-item.ok .tele-dot { background: var(--safe); box-shadow: 0 0 0 3px var(--safe-wash); }
+  .tele-item.bad .tele-dot { background: var(--peak); box-shadow: 0 0 0 3px var(--peak-wash); }
+  .tele-label { color: var(--paper-faint); }
+  .tele-value { color: var(--paper); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  /* ---- 錯誤橫幅 ---- */
+  .banner {
+    display: none; align-items: center; gap: 10px; padding: 12px 16px; border-radius: var(--radius);
+    background: var(--peak-wash); border: 1px solid rgba(221,92,66,.4); color: #f0a390; font-size: .88rem;
+  }
+  .banner .i { color: var(--peak); }
+
+  /* ---- 面板通用 ---- */
+  .panel {
+    background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+    padding: 22px; display: flex; flex-direction: column; gap: 16px;
+  }
+
+  .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); margin: -22px -22px 0; padding: 0 22px; }
+  .tab {
+    display: flex; align-items: center; gap: 7px;
+    border: none; background: none; padding: 13px 4px; margin-right: 22px; font-size: .88rem; cursor: pointer;
+    color: var(--paper-faint); border-bottom: 2px solid transparent; font-family: var(--sans);
+    transition: color .15s;
+  }
+  .tab:hover { color: var(--paper-dim); }
+  .tab.active { color: var(--paper); border-bottom-color: var(--signal); font-weight: 600; }
+  .tab.active .i { color: var(--signal); }
+  .pane { display: none; flex-direction: column; gap: 14px; }
+  .pane.active { display: flex; }
+
+  .field { display: flex; flex-direction: column; gap: 6px; }
+  .field-row { display: flex; gap: 20px; flex-wrap: wrap; }
+  label.lbl {
+    font-family: var(--mono); font-size: .72rem; letter-spacing: .08em; color: var(--paper-faint);
+  }
+  textarea, input[type="date"], input[type="file"] {
+    font-family: var(--sans); font-size: .92rem; color: var(--paper);
+    background: var(--panel-2); border: 1px solid var(--line); border-radius: var(--radius-sm);
+  }
+  textarea {
+    width: 100%; min-height: 220px; padding: 12px 14px; resize: vertical;
+  }
+  textarea::placeholder { color: var(--paper-faint); }
+  textarea:focus, input:focus { border-color: var(--line-strong); }
+  input[type="date"] { padding: 8px 12px; color-scheme: dark; }
+  input[type="file"] { padding: 7px 10px; width: 100%; max-width: 420px; }
+  input[type="file"]::file-selector-button {
+    font-family: var(--sans); font-size: .85rem; color: var(--paper);
+    background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius-sm);
+    padding: 6px 12px; margin-right: 10px; cursor: pointer;
+  }
+
+  .actions { display: flex; gap: 10px; align-items: center; }
+  button { font-family: var(--sans); cursor: pointer; }
+  button.primary {
+    display: inline-flex; align-items: center; gap: 8px;
+    background: var(--signal); color: #1a1206; border: none; border-radius: var(--radius-sm);
+    padding: 10px 20px; font-size: .9rem; font-weight: 650; transition: background .15s;
+  }
+  button.primary:hover:not(:disabled) { background: var(--signal-bright); }
+  button.primary:disabled { opacity: .45; cursor: not-allowed; }
+  button.primary.danger { background: var(--peak); color: #1f0d08; }
+  button.primary.danger:hover:not(:disabled) { background: #e8735c; }
+  button.ghost {
+    display: inline-flex; align-items: center; gap: 6px;
+    background: none; border: 1px solid var(--line); border-radius: var(--radius-sm);
+    padding: 7px 13px; font-size: .8rem; color: var(--paper-dim); transition: border-color .15s, color .15s;
+  }
+  button.ghost:hover { border-color: var(--line-strong); color: var(--paper); }
+
+  .progress { height: 5px; background: var(--panel-2); border-radius: 999px; overflow: hidden; }
+  .progress > div { height: 100%; width: 0%; background: var(--signal); transition: width .4s; }
+  .status-line { font-family: var(--mono); font-size: .8rem; color: var(--paper-dim); display: flex; align-items: center; gap: 8px; }
+  .transcript-box {
+    background: var(--panel-2); border: 1px solid var(--line); border-radius: var(--radius-sm);
+    padding: 12px 14px; max-height: 240px; overflow-y: auto;
+    font-family: var(--mono); font-size: .84rem; color: var(--paper-dim); white-space: pre-wrap; display: none;
+  }
+  .rec-dot {
+    display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+    background: var(--peak); box-shadow: 0 0 0 3px var(--peak-wash); animation: pulse 1.2s infinite;
+  }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .3; } }
+
+  .hint { font-size: .8rem; color: var(--paper-faint); margin: 0; }
+
+  /* ---- 結果（工作階段報告）---- */
+  #result { display: none; }
+  .report-head { display: flex; flex-direction: column; gap: 10px; }
+  .report-head h2 { margin: 0; font-size: 1.2rem; font-weight: 650; text-wrap: balance; }
+  .meta-chips { display: flex; gap: 8px; flex-wrap: wrap; }
+  .meta-chip {
+    display: inline-flex; align-items: center; gap: 6px; font-family: var(--mono); font-size: .78rem;
+    padding: 4px 10px; border-radius: var(--radius-sm); background: var(--panel-2); border: 1px solid var(--line);
+    color: var(--paper-dim);
+  }
+  .meta-chip .i { color: var(--paper-faint); }
+
+  h3.sub {
+    display: flex; align-items: center; gap: 8px; font-size: .8rem; font-weight: 650;
+    letter-spacing: .06em; margin: 4px 0 0; color: var(--paper-dim); text-transform: uppercase;
+    padding-top: 16px; border-top: 1px solid var(--line);
+  }
+  h3.sub .i { color: var(--signal); }
+  h3.sub .aux { margin-left: auto; text-transform: none; letter-spacing: 0; font-weight: 400; color: var(--paper-faint); font-size: .74rem; }
+
+  #rSummary { margin: 0; color: var(--paper); font-size: .94rem; }
+
+  ol#rDecisions { margin: 0; padding-left: 1.2em; display: flex; flex-direction: column; gap: 6px; }
+  ol#rDecisions li { font-size: .92rem; }
+  ol#rDecisions .ctx { color: var(--paper-dim); }
+
+  .todo-card {
+    border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 12px 14px;
+    background: var(--panel-2); display: flex; flex-direction: column; gap: 8px;
+  }
+  .todo-list { display: flex; flex-direction: column; gap: 8px; }
+  .todo-head { display: flex; align-items: baseline; gap: 8px; }
+  .led { width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--caution); box-shadow: 0 0 0 3px var(--caution-wash); }
+  .todo-card.p-high .led { background: var(--peak); box-shadow: 0 0 0 3px var(--peak-wash); }
+  .todo-card.p-low .led { background: var(--safe); box-shadow: 0 0 0 3px var(--safe-wash); }
+  .todo-task { font-weight: 600; font-size: .93rem; }
+  .badges { display: flex; gap: 6px; flex-wrap: wrap; }
+  .badge {
+    display: inline-flex; align-items: center; gap: 5px; font-family: var(--mono); font-size: .72rem;
+    padding: 3px 8px; border-radius: var(--radius-sm); background: var(--panel); border: 1px solid var(--line);
+    color: var(--paper-faint);
+  }
+  .badge b { color: var(--paper); font-family: var(--sans); font-weight: 600; margin-left: 1px; }
+  .badge.owner-none { border-color: rgba(221,92,66,.35); color: var(--peak); }
+  .badge.owner-none b { color: var(--peak); }
+  .badge.pr-high { color: var(--peak); }
+  .badge.pr-medium { color: var(--caution); }
+  .badge.pr-low { color: var(--safe); }
+  .quote {
+    font-family: var(--mono); font-size: .78rem; color: var(--paper-faint); border-left: 2px solid var(--line);
+    padding-left: 8px; margin: 0;
+  }
+
+  .pending-list, .event-list { display: flex; flex-direction: column; gap: 8px; }
+  .pending-item, .event-item {
+    display: flex; gap: 10px; align-items: flex-start; border: 1px solid var(--line); border-radius: var(--radius-sm);
+    padding: 10px 12px; font-size: .88rem; background: var(--panel-2);
+  }
+  .pending-item .i { color: var(--caution); margin-top: 2px; }
+  .event-item .i { color: var(--paper-faint); margin-top: 2px; }
+  .pending-item .reason, .event-item .desc { color: var(--paper-faint); font-size: .82rem; display: block; margin-top: 2px; }
+  .event-item .when { font-family: var(--mono); color: var(--paper-dim); margin-right: 8px; }
+
+  pre.draft {
+    background: var(--panel-2); border: 1px solid var(--line); border-radius: var(--radius-sm);
+    padding: 16px; white-space: pre-wrap; font-family: var(--mono); font-size: .82rem; color: var(--paper-dim);
+    overflow-x: auto; margin: 0; line-height: 1.7;
+  }
+
+  .empty-note { color: var(--paper-faint); font-size: .88rem; margin: 0; }
+
+  /* ---- 資料庫 ---- */
+  .table-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: .86rem; }
+  th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--line); }
+  th {
+    font-family: var(--mono); font-size: .7rem; letter-spacing: .07em; text-transform: uppercase;
+    color: var(--paper-faint); font-weight: 600;
+  }
+  td { color: var(--paper); }
+  td.mono, th.mono { font-family: var(--mono); font-variant-numeric: tabular-nums; color: var(--paper-dim); }
+  .pr-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 6px; vertical-align: 1px; }
+  .pr-dot.high { background: var(--peak); }
+  .pr-dot.medium { background: var(--caution); }
+  .pr-dot.low { background: var(--safe); }
+  .unassigned { color: var(--peak); }
+
+  .panel-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+  .panel-head h2 {
+    margin: 0; font-size: .95rem; font-weight: 650; display: flex; align-items: center; gap: 8px;
+  }
+  .panel-head h2 .i { color: var(--signal); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="brand-row">
+      <div class="brand">
+        <p class="eyebrow">Proactive Meeting Agent</p>
+        <h1>主動式會議 Agent</h1>
+      </div>
+    </div>
+    <div class="telemetry" id="healthChips"></div>
+  </header>
+
+  <div class="banner" id="errorBanner"></div>
+
+  <div class="panel">
+    <div class="tabs">
+      <button class="tab active" data-pane="paneText">
+        <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2h9l5 5v13a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2Z"/><path d="M15 2v5h5"/><path d="M8 13h8M8 17h8M8 9h3"/></svg>
+        文字貼上
+      </button>
+      <button class="tab" data-pane="paneFile">
+        <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15V3"/><path d="m7 8 5-5 5 5"/><path d="M4 15v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4"/></svg>
+        檔案上傳
+      </button>
+      <button class="tab" data-pane="paneLive">
+        <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 11a7 7 0 0 1-14 0"/><path d="M12 18v3"/></svg>
+        即時聆聽
+      </button>
+    </div>
+
+    <div class="field-row">
+      <div class="field">
+        <label class="lbl" for="meetingDate">會議日期 · 相對日期換算基準</label>
+        <input type="date" id="meetingDate">
+      </div>
+    </div>
+
+    <!-- 文字貼上 -->
+    <div class="pane active" id="paneText">
+      <div class="field">
+        <label class="lbl" for="textInput">貼上會議紀錄 / 群組討論文字</label>
+        <textarea id="textInput"></textarea>
+      </div>
+      <div class="actions">
+        <button class="primary" id="btnAnalyzeText">
+          <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5L20 7"/></svg>
+          送出分析
+        </button>
+      </div>
+    </div>
+
+    <!-- 檔案上傳 -->
+    <div class="pane" id="paneFile">
+      <div class="field">
+        <label class="lbl" for="fileInput">選擇會議音檔或影片 · mp3 / wav / m4a / mp4 / mov / mkv</label>
+        <input type="file" id="fileInput" accept="audio/*,video/*">
+      </div>
+      <div class="actions">
+        <button class="primary" id="btnUpload">
+          <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15V3"/><path d="m7 8 5-5 5 5"/><path d="M4 15v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4"/></svg>
+          上傳並轉錄
+        </button>
+      </div>
+      <div class="progress" id="fileProgress" style="display:none"><div></div></div>
+      <div class="status-line" id="fileStatus"></div>
+      <div class="transcript-box" id="fileTranscript"></div>
+      <p class="hint">影片會自動抽出聲音軌；長檔（30 分鐘～2 小時）轉錄需要一點時間，進度會即時顯示。</p>
+    </div>
+
+    <!-- 即時聆聽 -->
+    <div class="pane" id="paneLive">
+      <div class="actions">
+        <button class="primary" id="btnLiveStart">
+          <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 11a7 7 0 0 1-14 0"/><path d="M12 18v3"/></svg>
+          開始聆聽
+        </button>
+        <button class="primary danger" id="btnLiveStop" disabled>
+          <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="5" width="14" height="14" rx="1.5"/></svg>
+          結束會議並分析
+        </button>
+        <span class="status-line" id="liveStatus"></span>
+      </div>
+      <div class="transcript-box" id="liveTranscript"></div>
+      <p class="hint">每隔一段時間自動把錄音送出轉文字，逐字稿會即時出現在上方；按「結束會議」後彙整全文進行分析。需要允許瀏覽器使用麥克風。</p>
+    </div>
+  </div>
+
+  <!-- 結果 -->
+  <div class="panel" id="result">
+    <div class="report-head">
+      <h2 id="rTitle"></h2>
+      <div class="meta-chips" id="rMeta"></div>
+    </div>
+
+    <h3 class="sub">
+      <svg class="i-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="3" width="12" height="18" rx="1.5"/><path d="M9 9h6M9 13h6M9 17h4"/></svg>
+      會議摘要
+    </h3>
+    <p id="rSummary"></p>
+
+    <h3 class="sub">
+      <svg class="i-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="m8.5 12 2.5 2.5L16 9"/></svg>
+      決議事項
+    </h3>
+    <ol id="rDecisions"></ol>
+
+    <h3 class="sub">
+      <svg class="i-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="3" width="12" height="18" rx="1.5"/><path d="M9 3V2h6v1"/><path d="M9 9h6M9 13h6M9 17h4"/></svg>
+      代辦事項
+    </h3>
+    <div class="todo-list" id="rTodos"></div>
+
+    <h3 class="sub">
+      <svg class="i-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 1 1 3.5 2.3c-.8.4-1 .9-1 1.7"/><path d="M12 17h.01"/></svg>
+      待確認事項
+      <span class="aux">議而未決，留待下次會議</span>
+    </h3>
+    <div class="pending-list" id="rPending"></div>
+
+    <h3 class="sub">
+      <svg class="i-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4.5" width="18" height="16" rx="1.5"/><path d="M16 2.5v4M8 2.5v4M3 9.5h18"/></svg>
+      行事曆事件
+      <span class="aux">Google Calendar 格式 · 9 月串接後自動建立</span>
+    </h3>
+    <div class="event-list" id="rEvents"></div>
+
+    <h3 class="sub">
+      <svg class="i-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="4.5" width="19" height="15" rx="1.5"/><path d="m3 6 9 6.5L21 6"/></svg>
+      會議結論確認信草稿
+      <button class="ghost" id="btnCopyDraft" style="margin-left:auto">
+        <svg class="i-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="8.5" y="8.5" width="12" height="12" rx="1.5"/><path d="M15.5 8.5V5a1.5 1.5 0 0 0-1.5-1.5H5A1.5 1.5 0 0 0 3.5 5v9A1.5 1.5 0 0 0 5 15.5h3.5"/></svg>
+        複製
+      </button>
+    </h3>
+    <pre class="draft" id="rDraft"></pre>
+  </div>
+
+  <!-- 資料庫 -->
+  <div class="panel">
+    <div class="panel-head">
+      <h2>
+        <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5.5" rx="8" ry="3"/><path d="M4 5.5v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/><path d="M4 11.5v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/></svg>
+        資料庫
+      </h2>
+      <button class="ghost" id="btnRefreshTasks">
+        <svg class="i-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11a9 9 0 1 1-2.7-6.4"/><path d="M21 3v6h-6"/></svg>
+        重新整理
+      </button>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>任務</th><th>負責人</th><th class="mono">期限</th><th>優先級</th><th class="mono">會議</th></tr></thead>
+        <tbody id="taskRows"><tr><td colspan="5" class="empty-note">尚無任務</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+const PRIORITY_ZH = { high: "高", medium: "中", low: "低" };
+let chunkSeconds = 45;
+
+// ---- 圖示（線條風，24x24 viewBox，currentColor） ----
+const ICON_PATHS = {
+  calendar: '<rect x="3" y="4.5" width="18" height="16" rx="1.5"/><path d="M16 2.5v4M8 2.5v4M3 9.5h18"/>',
+  user: '<circle cx="12" cy="8" r="4"/><path d="M4.5 21a7.5 7.5 0 0 1 15 0"/>',
+  help: '<circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 1 1 3.5 2.3c-.8.4-1 .9-1 1.7"/><path d="M12 17h.01"/>',
+  alert: '<path d="M12 9v4.5"/><path d="m10.6 3.5-9 15.6a1 1 0 0 0 .9 1.5h18.9a1 1 0 0 0 .9-1.5l-9-15.6a1 1 0 0 0-1.7 0Z"/><circle cx="12" cy="17" r=".6" fill="currentColor" stroke="none"/>',
+};
+function icon(name, cls) {
+  return `<svg class="${cls || "i"}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">${ICON_PATHS[name] || ""}</svg>`;
+}
+
+function esc(s) {
+  return String(s ?? "").replace(/[&<>"']/g, c =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+function showError(msg) {
+  const b = $("errorBanner");
+  b.innerHTML = icon("alert") + `<span>${esc(msg)}</span>`;
+  b.style.display = "flex";
+  b.scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+function clearError() { $("errorBanner").style.display = "none"; }
+async function jsonOrThrow(resp) {
+  const body = await resp.json().catch(() => ({}));
+  if (!resp.ok) throw new Error(body.detail || `伺服器錯誤（${resp.status}）`);
+  return body;
+}
+
+// ---- 初始化 ----
+$("meetingDate").value = new Date().toLocaleDateString("sv");  // YYYY-MM-DD（本地時區）
+
+document.querySelectorAll(".tab").forEach(tab => {
+  tab.addEventListener("click", () => {
+    document.querySelectorAll(".tab").forEach(t => t.classList.remove("active"));
+    document.querySelectorAll(".pane").forEach(p => p.classList.remove("active"));
+    tab.classList.add("active");
+    $(tab.dataset.pane).classList.add("active");
+  });
+});
+
+async function loadHealth() {
+  try {
+    const h = await jsonOrThrow(await fetch("/api/health"));
+    chunkSeconds = h.live_chunk_seconds || 45;
+    const isGemini = h.transcribe_engine === "gemini";
+    const engLabel = isGemini ? "轉錄" : "WHISPER";
+    const engValue = isGemini
+      ? `Gemini · ${h.whisper_model}`
+      : (h.whisper_device ? `${h.whisper_device} / ${h.whisper_model}` : "首次轉錄時載入");
+    $("healthChips").innerHTML = [
+      `<div class="tele-item ${h.gemini_key_set ? "ok" : "bad"}"><span class="tele-dot"></span><span class="tele-label">GEMINI</span><span class="tele-value">${h.gemini_key_set ? esc(h.gemini_model) : "未設定金鑰"}</span></div>`,
+      `<div class="tele-item ${h.ffmpeg ? "ok" : "bad"}"><span class="tele-dot"></span><span class="tele-label">FFMPEG</span><span class="tele-value">${h.ffmpeg ? "可用" : "未安裝"}</span></div>`,
+      `<div class="tele-item"><span class="tele-dot"></span><span class="tele-label">${engLabel}</span><span class="tele-value">${esc(engValue)}</span></div>`,
+    ].join("");
+  } catch (e) { /* health 失敗不擋操作 */ }
+}
+loadHealth();
+
+// ---- 結果渲染 ----
+function renderResult(result) {
+  const a = result.analysis, m = a.meeting;
+  $("rTitle").textContent = m.title;
+  $("rMeta").innerHTML =
+    `<span class="meta-chip">${icon("calendar", "i-sm")}${esc(m.date)}</span>` +
+    m.attendees.map(p => `<span class="meta-chip">${icon("user", "i-sm")}${esc(p)}</span>`).join("");
+  $("rSummary").textContent = m.summary;
+
+  $("rDecisions").innerHTML = a.decisions.length
+    ? a.decisions.map(d => `<li>${esc(d.description)}${d.context ? ` <span class="ctx">（${esc(d.context)}）</span>` : ""}</li>`).join("")
+    : `<p class="empty-note">本次會議無正式決議</p>`;
+
+  $("rTodos").innerHTML = a.todos.length
+    ? a.todos.map(t => `
+      <div class="todo-card p-${t.priority}">
+        <div class="todo-head"><span class="led"></span><span class="todo-task">${esc(t.task)}</span></div>
+        <div class="badges">
+          <span class="badge ${t.owner ? "" : "owner-none"}">負責人 <b>${esc(t.owner || "未指派")}</b></span>
+          <span class="badge">期限 <b>${esc(t.due_date || "未定")}</b></span>
+          <span class="badge pr-${t.priority}">優先級 <b>${PRIORITY_ZH[t.priority]}</b></span>
+        </div>
+        ${t.source_quote ? `<p class="quote">${esc(t.source_quote)}</p>` : ""}
+      </div>`).join("")
+    : `<p class="empty-note">未偵測到代辦事項</p>`;
+
+  $("rPending").innerHTML = a.pending_items.length
+    ? a.pending_items.map(p => `<div class="pending-item">${icon("help")}<span>${esc(p.topic)}${p.reason ? `<span class="reason">${esc(p.reason)}</span>` : ""}</span></div>`).join("")
+    : `<p class="empty-note">無</p>`;
+
+  const events = result.notifications.calendar_events || [];
+  $("rEvents").innerHTML = events.length
+    ? events.map(e => `<div class="event-item">${icon("calendar")}<span><span class="when">${esc(e.start.date)}</span><b>${esc(e.summary)}</b><span class="desc">${esc(e.description).replace(/\n/g, " · ")}</span></span></div>`).join("")
+    : `<p class="empty-note">沒有含期限的代辦，未產生行事曆事件</p>`;
+
+  $("rDraft").textContent = result.notifications.email_draft || "";
+  $("result").style.display = "flex";
+  $("result").scrollIntoView({ behavior: "smooth" });
+  refreshTasks();
+}
+
+$("btnCopyDraft").addEventListener("click", async () => {
+  await navigator.clipboard.writeText($("rDraft").textContent);
+  const btn = $("btnCopyDraft");
+  const original = btn.innerHTML;
+  btn.textContent = "已複製";
+  setTimeout(() => (btn.innerHTML = original), 1500);
+});
+
+// ---- 資料庫 ----
+async function refreshTasks() {
+  try {
+    const { tasks } = await jsonOrThrow(await fetch("/api/tasks"));
+    $("taskRows").innerHTML = tasks.length
+      ? tasks.map(t => `<tr>
+          <td>${esc(t.task)}</td>
+          <td>${t.owner ? esc(t.owner) : `<span class="unassigned">未指派</span>`}</td>
+          <td class="mono">${esc(t.due_date || "—")}</td>
+          <td><span class="pr-dot ${t.priority}"></span>${PRIORITY_ZH[t.priority] || esc(t.priority)}</td>
+          <td class="mono">${esc(t.meeting_id)}</td>
+        </tr>`).join("")
+      : `<tr><td colspan="5" class="empty-note">尚無任務</td></tr>`;
+  } catch (e) { /* 靜默 */ }
+}
+$("btnRefreshTasks").addEventListener("click", refreshTasks);
+refreshTasks();
+
+// ---- 路徑 1：純文字 ----
+$("btnAnalyzeText").addEventListener("click", async () => {
+  clearError();
+  const btn = $("btnAnalyzeText");
+  const original = btn.innerHTML;
+  btn.disabled = true; btn.textContent = "AI 分析中…";
+  try {
+    const result = await jsonOrThrow(await fetch("/api/meetings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: $("textInput").value, meeting_date: $("meetingDate").value || null }),
+    }));
+    renderResult(result);
+  } catch (e) { showError(e.message); }
+  finally { btn.disabled = false; btn.innerHTML = original; }
+});
+
+// ---- 路徑 2：檔案上傳 ----
+const JOB_STATUS_ZH = {
+  queued: "排隊中…", extracting: "從影片抽取聲音軌…", transcribing: "轉錄中",
+  analyzing: "AI 分析中…", done: "完成", error: "失敗",
+};
+
+$("btnUpload").addEventListener("click", async () => {
+  clearError();
+  const file = $("fileInput").files[0];
+  if (!file) { showError("請先選擇檔案"); return; }
+
+  const btn = $("btnUpload");
+  btn.disabled = true;
+  $("fileProgress").style.display = "block";
+  $("fileTranscript").style.display = "block";
+  $("fileTranscript").textContent = "";
+
+  try {
+    const form = new FormData();
+    form.append("file", file);
+    if ($("meetingDate").value) form.append("meeting_date", $("meetingDate").value);
+    const { job_id } = await jsonOrThrow(await fetch("/api/media", { method: "POST", body: form }));
+
+    while (true) {
+      await new Promise(r => setTimeout(r, 1500));
+      const job = await jsonOrThrow(await fetch(`/api/media/${job_id}`));
+      const pct = Math.round((job.progress || 0) * 100);
+      $("fileProgress").firstElementChild.style.width = pct + "%";
+      $("fileStatus").textContent =
+        JOB_STATUS_ZH[job.status] + (job.status === "transcribing" ? `（${pct}%）` : "");
+      if (job.transcript) {
+        $("fileTranscript").textContent = job.transcript;
+        $("fileTranscript").scrollTop = $("fileTranscript").scrollHeight;
+      }
+      if (job.status === "done") { renderResult(job.result); break; }
+      if (job.status === "error") throw new Error(job.error || "轉錄失敗");
+    }
+  } catch (e) { showError(e.message); $("fileStatus").textContent = "失敗"; }
+  finally { btn.disabled = false; }
+});
+
+// ---- 路徑 3：即時聆聽 ----
+let liveStream = null, liveRecorder = null, liveSessionId = null;
+let liveRecording = false, liveSegTimer = null, uploadsInFlight = 0, liveStartTime = null, liveTickTimer = null;
+
+function pickMime() {
+  for (const m of ["audio/webm;codecs=opus", "audio/webm", "audio/mp4"]) {
+    if (MediaRecorder.isTypeSupported(m)) return m;
+  }
+  return "";
+}
+
+function liveTick() {
+  if (!liveRecording) return;
+  const s = Math.floor((Date.now() - liveStartTime) / 1000);
+  $("liveStatus").innerHTML =
+    `<span class="rec-dot"></span>聆聽中 ${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}（每 ${chunkSeconds} 秒送出一段）`;
+}
+
+async function uploadLiveChunk(blob) {
+  uploadsInFlight++;
+  try {
+    const ext = blob.type.includes("mp4") ? ".mp4" : ".webm";
+    const form = new FormData();
+    form.append("file", blob, "chunk" + ext);
+    const r = await jsonOrThrow(await fetch(`/api/live/${liveSessionId}/chunk`, { method: "POST", body: form }));
+    if (r.transcript) {
+      $("liveTranscript").textContent = r.transcript;
+      $("liveTranscript").scrollTop = $("liveTranscript").scrollHeight;
+    }
+  } catch (e) { showError("音訊段上傳失敗：" + e.message); }
+  finally { uploadsInFlight--; }
+}
+
+// 每段用「新的 MediaRecorder」錄，確保每段都有完整檔頭、可獨立解碼
+function recordSegment() {
+  if (!liveRecording) return;
+  const chunks = [];
+  liveRecorder = new MediaRecorder(liveStream, pickMime() ? { mimeType: pickMime() } : undefined);
+  liveRecorder.ondataavailable = e => { if (e.data.size) chunks.push(e.data); };
+  liveRecorder.onstop = () => {
+    if (liveRecording) recordSegment();  // 先無縫接錄下一段，再上傳
+    const blob = new Blob(chunks, { type: liveRecorder.mimeType });
+    if (blob.size > 0) uploadLiveChunk(blob);
+  };
+  liveRecorder.start();
+  liveSegTimer = setTimeout(() => {
+    if (liveRecorder.state !== "inactive") liveRecorder.stop();
+  }, chunkSeconds * 1000);
+}
+
+$("btnLiveStart").addEventListener("click", async () => {
+  clearError();
+  try {
+    liveStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  } catch (e) { showError("無法取得麥克風權限：" + e.message); return; }
+  try {
+    liveSessionId = (await jsonOrThrow(await fetch("/api/live/start", { method: "POST" }))).session_id;
+  } catch (e) { showError(e.message); return; }
+
+  liveRecording = true;
+  liveStartTime = Date.now();
+  $("btnLiveStart").disabled = true;
+  $("btnLiveStop").disabled = false;
+  $("liveTranscript").style.display = "block";
+  $("liveTranscript").textContent = "";
+  liveTickTimer = setInterval(liveTick, 1000);
+  liveTick();
+  recordSegment();
+});
+
+$("btnLiveStop").addEventListener("click", async () => {
+  clearError();
+  liveRecording = false;
+  clearTimeout(liveSegTimer);
+  clearInterval(liveTickTimer);
+  $("btnLiveStop").disabled = true;
+  $("liveStatus").textContent = "整理最後一段錄音…";
+
+  if (liveRecorder && liveRecorder.state !== "inactive") liveRecorder.stop();  // 觸發最後一段上傳
+  liveStream.getTracks().forEach(t => t.stop());
+
+  // 等所有音訊段上傳完成（含最後一段），最多等 3 分鐘
+  const deadline = Date.now() + 180000;
+  await new Promise(r => setTimeout(r, 300));  // 讓 onstop 先執行
+  while (uploadsInFlight > 0 && Date.now() < deadline) {
+    await new Promise(r => setTimeout(r, 300));
+  }
+
+  $("liveStatus").textContent = "AI 分析整場會議中…";
+  try {
+    const result = await jsonOrThrow(await fetch(`/api/live/${liveSessionId}/finish`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ meeting_date: $("meetingDate").value || null }),
+    }));
+    $("liveStatus").textContent = "完成";
+    renderResult(result);
+  } catch (e) { showError(e.message); $("liveStatus").textContent = "分析失敗"; }
+  finally {
+    $("btnLiveStart").disabled = false;
+    liveSessionId = null;
+  }
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,9 @@
+# 雲端部署用的精簡依賴（TRANSCRIBE_ENGINE=gemini）。
+# 刻意不含 faster-whisper / ctranslate2 / torch —— 那些是本地 GPU 轉錄用的，
+# 又大又在無 GPU 的免費主機上跑不動；雲端改由 Gemini 直接聽音訊轉錄。
+fastapi>=0.115
+uvicorn[standard]>=0.30
+pydantic>=2.8
+python-dotenv>=1.0
+python-multipart>=0.0.9
+google-genai>=1.0
