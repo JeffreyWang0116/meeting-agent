@@ -272,6 +272,15 @@
   .quote.clickable { cursor: pointer; transition: color .15s, border-color .15s; }
   .quote.clickable:hover { color: var(--accent); border-left-color: var(--accent); }
 
+  .stats-chip { color: var(--accent); border-color: var(--accent-border); background: var(--accent-soft); font-weight: 600; }
+
+  /* ---- 頁尾（隱私說明） ---- */
+  .site-footer { display: flex; flex-direction: column; gap: 10px; padding: 4px 2px 0; color: var(--faint); font-size: .8rem; }
+  .site-footer summary { cursor: pointer; user-select: none; color: var(--muted); }
+  .site-footer summary:hover { color: var(--ink); }
+  .site-footer ul { margin: 8px 0 0; padding-left: 18px; display: flex; flex-direction: column; gap: 4px; line-height: 1.7; }
+  .footer-note { letter-spacing: .02em; }
+
   /* ---- 手機響應式 ---- */
   @media (max-width: 640px) {
     body { font-size: 14.5px; }
@@ -622,6 +631,20 @@
     </div>
     <div id="meetingRows"><p class="empty-note">尚無會議紀錄</p></div>
   </div>
+
+  <!-- 隱私與資料處理 -->
+  <footer class="site-footer">
+    <details>
+      <summary>隱私與資料處理說明</summary>
+      <ul>
+        <li>你貼上或錄製的會議內容，只用於本次分析：文字與音訊會傳送給 Google Gemini API 進行轉錄與結構化分析。</li>
+        <li>分析產出的任務與會議紀錄存在伺服器的本地資料檔；上傳的音訊檔在轉錄後即不再使用。</li>
+        <li>本服務不會將你的內容用於任何模型訓練，也不會提供給第三方。</li>
+        <li>公開測試站的資料可能在系統重新部署時清空，請自行下載需要保留的會議紀錄（Markdown / CSV）。</li>
+      </ul>
+    </details>
+    <span class="footer-note">主動式會議 Agent · 逢甲大學資訊工程學系專題</span>
+  </footer>
 </div>
 
 <script>
@@ -683,13 +706,31 @@ async function loadHealth() {
       `<div class="tele-item ${h.gemini_key_set ? "ok" : "bad"}"><span class="tele-dot"></span><span class="tele-label">GEMINI</span><span class="tele-value">${h.gemini_key_set ? esc(h.gemini_model) : "未設定金鑰"}</span></div>`,
       `<div class="tele-item ${h.ffmpeg ? "ok" : "bad"}"><span class="tele-dot"></span><span class="tele-label">FFMPEG</span><span class="tele-value">${h.ffmpeg ? "可用" : "未安裝"}</span></div>`,
       `<div class="tele-item"><span class="tele-dot"></span><span class="tele-label">${engLabel}</span><span class="tele-value">${esc(engValue)}</span></div>`,
+      `<div class="tele-item"><span class="tele-dot"></span><span class="tele-label">今日用量</span><span class="tele-value" id="usageValue">—</span></div>`,
     ].join("");
+    loadUsage();
   } catch (e) { /* health 失敗不擋操作 */ }
 }
 loadHealth();
 
+// ---- 用量儀表板（Gemini 免費額度心安 + 口試數據） ----
+async function loadUsage() {
+  try {
+    const u = await jsonOrThrow(await fetch("/api/usage"));
+    const el = $("usageValue");
+    if (!el) return;
+    const t = u.today;
+    const parts = [];
+    if (t.analysis) parts.push(`分析 ${t.analysis} 次`);
+    if (t.live_chunk) parts.push(`即時 ${t.live_chunk} 段`);
+    if (t.media_upload) parts.push(`上傳 ${t.media_upload} 檔`);
+    el.textContent = parts.join(" · ") || "尚未使用";
+  } catch (e) { /* 靜默 */ }
+}
+
 // ---- 結果渲染 ----
 let currentTranscript = "";
+let analysisStartTime = null;
 
 function renderResult(result, transcript) {
   currentTranscript = (transcript || "").trim();
@@ -697,10 +738,17 @@ function renderResult(result, transcript) {
   $("rTransSec").open = false;
   $("rTranscript").textContent = currentTranscript;
   const a = result.analysis, m = a.meeting;
+  // 成效指標：這場會議 AI 幫你做了多少事、花了多久
+  const elapsed = analysisStartTime ? ((Date.now() - analysisStartTime) / 1000).toFixed(1) : null;
+  analysisStartTime = null;
+  const statsChip =
+    `<span class="meta-chip stats-chip">${currentTranscript ? `${currentTranscript.length} 字 → ` : ""}` +
+    `${a.todos.length} 任務・${a.decisions.length} 決議${elapsed ? `・${elapsed}s` : ""}</span>`;
   $("rTitle").textContent = m.title;
   $("rMeta").innerHTML =
     `<span class="meta-chip">${icon("calendar", "i-sm")}${esc(m.date)}</span>` +
-    m.attendees.map(p => `<span class="meta-chip">${icon("user", "i-sm")}${esc(p)}</span>`).join("");
+    m.attendees.map(p => `<span class="meta-chip">${icon("user", "i-sm")}${esc(p)}</span>`).join("") +
+    statsChip;
   $("rSummary").textContent = m.summary;
 
   $("rDecisions").innerHTML = a.decisions.length
@@ -735,6 +783,7 @@ function renderResult(result, transcript) {
   $("result").scrollIntoView({ behavior: "smooth" });
   refreshTasks();
   refreshMeetings();
+  loadUsage();
 }
 
 $("btnCopyDraft").addEventListener("click", async () => {
@@ -834,6 +883,7 @@ $("btnAnalyzeText").addEventListener("click", async () => {
   const btn = $("btnAnalyzeText");
   const original = btn.innerHTML;
   btn.disabled = true; btn.textContent = "AI 分析中…";
+  analysisStartTime = Date.now();
   try {
     const result = await jsonOrThrow(await fetch("/api/meetings", {
       method: "POST",
@@ -858,6 +908,7 @@ $("btnUpload").addEventListener("click", async () => {
 
   const btn = $("btnUpload");
   btn.disabled = true;
+  analysisStartTime = Date.now();
   $("fileProgress").style.display = "block";
   $("fileTranscript").style.display = "block";
   $("fileTranscript").textContent = "";
@@ -1006,6 +1057,7 @@ $("btnLiveStop").addEventListener("click", async () => {
   }
 
   $("liveStatus").textContent = "AI 分析整場會議中…";
+  analysisStartTime = Date.now();
   try {
     const result = await jsonOrThrow(await fetch(`/api/live/${liveSessionId}/finish`, {
       method: "POST",

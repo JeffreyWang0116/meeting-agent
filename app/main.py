@@ -27,6 +27,7 @@ from app.transcription import media
 from app.transcription.gemini_transcriber import GeminiTranscriber
 from app.transcription.live_session import LiveSessionManager, SessionNotFound
 from app.transcription.transcriber import Transcriber
+from app.usage import UsageTracker
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
@@ -76,10 +77,12 @@ def create_app(
         transcriber, orchestrator, settings.data_dir / "tmp"
     )
     uploads_dir = settings.data_dir / "tmp" / "uploads"
+    usage = UsageTracker(settings.data_dir / "output" / "usage.json")
 
     app = FastAPI(title="主動式會議 Agent")
 
     def run_analysis(text: str, meeting_date: date | None) -> dict:
+        usage.record("analysis")
         try:
             return orchestrator.process_transcript(text, meeting_date=meeting_date)
         except ValueError as exc:
@@ -119,6 +122,10 @@ def create_app(
     @app.get("/api/tasks")
     def list_tasks(meeting_id: Optional[str] = None):
         return {"tasks": store.list_tasks(meeting_id=meeting_id)}
+
+    @app.get("/api/usage")
+    def get_usage():
+        return usage.snapshot()
 
     # ---- 任務管理 ----
 
@@ -181,6 +188,7 @@ def create_app(
         with dest.open("wb") as out:  # 2 小時的影片可能數 GB，串流寫入不佔記憶體
             shutil.copyfileobj(file.file, out)
 
+        usage.record("media_upload")
         return {"job_id": job_manager.submit(dest, meeting_date=parsed_date)}
 
     @app.get("/api/media/{job_id}")
@@ -199,6 +207,7 @@ def create_app(
     @app.post("/api/live/{session_id}/chunk")
     def live_chunk(session_id: str, file: UploadFile = File(...)):
         suffix = Path(file.filename or "chunk.webm").suffix or ".webm"
+        usage.record("live_chunk")
         try:
             return live_manager.add_chunk(session_id, file.file.read(), suffix=suffix)
         except SessionNotFound as exc:

@@ -243,6 +243,14 @@ def test_meeting_markdown_report(client):
     assert client.get("/api/meetings/nope/report.md").status_code == 404
 
 
+def test_usage_endpoint_counts_analyses(client):
+    assert client.get("/api/usage").json()["total"] == {}
+    make_meeting(client)
+    usage = client.get("/api/usage").json()
+    assert usage["total"]["analysis"] == 1
+    assert usage["today"]["analysis"] == 1
+
+
 # ---- 其他 ----
 
 def test_health(client):
