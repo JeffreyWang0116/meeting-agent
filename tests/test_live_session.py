@@ -72,6 +72,44 @@ def test_unknown_session_raises(manager):
         mgr.finish("nope")
 
 
+class FakeTranslator:
+    def translate(self, text, target):
+        return f"[{target}] {text}"
+
+
+def test_chunk_translated_when_session_requests_it(tmp_path):
+    mgr = LiveSessionManager(
+        FakeTranscriber(["大家好"]), tmp_path, translator=FakeTranslator()
+    )
+    sid = mgr.start(translate_to="en")
+    r = mgr.add_chunk(sid, b"a")
+    assert r["text"] == "大家好"
+    assert r["translation"] == "[en] 大家好"
+
+
+def test_chunk_not_translated_by_default(tmp_path):
+    mgr = LiveSessionManager(
+        FakeTranscriber(["大家好"]), tmp_path, translator=FakeTranslator()
+    )
+    sid = mgr.start()
+    assert mgr.add_chunk(sid, b"a")["translation"] is None
+
+
+def test_translation_failure_does_not_break_transcription(tmp_path):
+    class BrokenTranslator:
+        def translate(self, text, target):
+            raise RuntimeError("quota")
+
+    mgr = LiveSessionManager(
+        FakeTranscriber(["大家好"]), tmp_path, translator=BrokenTranslator()
+    )
+    sid = mgr.start(translate_to="en")
+    r = mgr.add_chunk(sid, b"a")
+    # 翻譯壞了逐字稿仍要照常運作
+    assert r["text"] == "大家好"
+    assert r["translation"] is None
+
+
 def test_sessions_are_independent(manager, tmp_path):
     mgr = LiveSessionManager(FakeTranscriber(["s1 的話", "s2 的話"]), tmp_path)
     sid1, sid2 = mgr.start(), mgr.start()

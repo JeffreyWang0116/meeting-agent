@@ -313,6 +313,53 @@ def test_ask_backend_failure_returns_502(tmp_path):
     assert "RESOURCE_EXHAUSTED" in resp.json()["detail"]
 
 
+# ---- 翻譯 ----
+
+def make_client_with_translator(tmp_path, translator):
+    settings = Settings(gemini_api_key=None, data_dir=tmp_path)
+    app = create_app(settings, transcriber=FakeTranscriber(), translator=translator)
+    return TestClient(app)
+
+
+def test_translate_endpoint(tmp_path):
+    class FakeTranslator:
+        def translate(self, text, target):
+            return f"[{target}] {text}"
+
+    c = make_client_with_translator(tmp_path, FakeTranslator())
+    body = c.post("/api/translate", json={"text": "大家好", "target": "en"}).json()
+    assert body["translation"] == "[en] 大家好"
+    # 空字串與不支援的語言要擋
+    assert c.post("/api/translate", json={"text": " ", "target": "en"}).status_code == 400
+    assert c.post("/api/translate", json={"text": "hi", "target": "fr"}).status_code == 400
+
+
+def test_translate_backend_failure_returns_502(tmp_path):
+    class BrokenTranslator:
+        def translate(self, text, target):
+            raise RuntimeError("429 quota")
+
+    c = make_client_with_translator(tmp_path, BrokenTranslator())
+    resp = c.post("/api/translate", json={"text": "hi", "target": "en"})
+    assert resp.status_code == 502
+
+
+def test_live_start_accepts_translate_to_and_chunk_returns_translation(tmp_path):
+    class FakeTranslator:
+        def translate(self, text, target):
+            return f"[{target}] {text}"
+
+    c = make_client_with_translator(tmp_path, FakeTranslator())
+    sid = c.post("/api/live/start", json={"translate_to": "en"}).json()["session_id"]
+    r = c.post(
+        f"/api/live/{sid}/chunk",
+        files={"file": ("c.webm", io.BytesIO(b"x"), "audio/webm")},
+    ).json()
+    assert r["translation"].startswith("[en] ")
+    # 不支援的目標語言要擋
+    assert c.post("/api/live/start", json={"translate_to": "fr"}).status_code == 400
+
+
 # ---- 自訂詞彙 ----
 
 def test_glossary_roundtrip_and_validation(client):

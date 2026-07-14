@@ -27,6 +27,8 @@ from app.orchestrator import Orchestrator
 from app.rag import AskAgent, GeminiEmbedder, RagIndex
 from app.stores import make_store
 from app.transcription import media
+from app.translate import TARGETS as TRANSLATE_TARGETS
+from app.translate import Translator
 from app.transcription.gemini_transcriber import GeminiTranscriber
 from app.transcription.live_session import LiveSessionManager, SessionNotFound
 from app.transcription.transcriber import Transcriber
@@ -58,6 +60,15 @@ class GlossaryRequest(BaseModel):
     terms: list[dict]
 
 
+class LiveStartRequest(BaseModel):
+    translate_to: Optional[str] = None  # "en" / "zh"：逐段即時翻譯
+
+
+class TranslateRequest(BaseModel):
+    text: str
+    target: str
+
+
 def create_app(
     settings: Settings | None = None,
     *,
@@ -67,6 +78,7 @@ def create_app(
     live_manager=None,
     job_manager=None,
     ask_agent=None,
+    translator=None,
 ) -> FastAPI:
     settings = settings or get_settings()
     store = store or make_store(settings)
@@ -98,8 +110,14 @@ def create_app(
                 device=settings.whisper_device,
                 glossary=glossary.terms,
             )
+    # 翻譯與轉錄同樣高頻（即時聆聽逐段翻），用高額度的轉錄模型
+    translator = translator or Translator(
+        api_key=settings.gemini_api_key,
+        api_keys=settings.gemini_api_keys,
+        model=settings.transcribe_model,
+    )
     live_manager = live_manager or LiveSessionManager(
-        transcriber, settings.data_dir / "tmp" / "live"
+        transcriber, settings.data_dir / "tmp" / "live", translator=translator
     )
     job_manager = job_manager or MediaJobManager(
         transcriber, orchestrator, settings.data_dir / "tmp"
@@ -193,6 +211,26 @@ def create_app(
         except Exception as exc:  # 金鑰未設、配額爆掉…原因要透明
             raise HTTPException(status_code=502, detail=f"問答失敗：{exc}")
 
+    # ---- 翻譯 ----
+
+    @app.post("/api/translate")
+    def translate_text(req: TranslateRequest):
+        """通用翻譯：翻譯摘要、歷史會議內容等。"""
+        if not req.text.strip():
+            raise HTTPException(status_code=400, detail="翻譯內容不可為空")
+        if req.target not in TRANSLATE_TARGETS:
+            raise HTTPException(
+                status_code=400,
+                detail=f"target 只支援：{'、'.join(sorted(TRANSLATE_TARGETS))}",
+            )
+        usage.record("translate")
+        try:
+            return {"translation": translator.translate(req.text, req.target)}
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        except Exception as exc:  # 金鑰未設、配額爆掉…原因要透明
+            raise HTTPException(status_code=502, detail=f"翻譯失敗：{exc}")
+
     # ---- 自訂詞彙 ----
 
     @app.get("/api/glossary")
@@ -283,8 +321,14 @@ def create_app(
     # ---- 輸入路徑 3：即時聆聽 ----
 
     @app.post("/api/live/start")
-    def live_start():
-        return {"session_id": live_manager.start()}
+    def live_start(req: Optional[LiveStartRequest] = None):
+        translate_to = req.translate_to if req else None
+        if translate_to and translate_to not in TRANSLATE_TARGETS:
+            raise HTTPException(
+                status_code=400,
+                detail=f"translate_to 只支援：{'、'.join(sorted(TRANSLATE_TARGETS))}",
+            )
+        return {"session_id": live_manager.start(translate_to=translate_to)}
 
     @app.post("/api/live/{session_id}/chunk")
     def live_chunk(session_id: str, file: UploadFile = File(...)):
