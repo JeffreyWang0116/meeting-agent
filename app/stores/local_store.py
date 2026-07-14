@@ -122,6 +122,25 @@ class LocalJsonStore(TaskStore):
                     return dict(task)
         return None
 
+    def replace_tasks(self, meeting_id: str, todos: list[dict]) -> list[dict]:
+        created_at = datetime.now(timezone.utc).isoformat()
+        records = [
+            {
+                "id": uuid.uuid4().hex[:12],
+                "meeting_id": meeting_id,
+                "created_at": created_at,
+                "status": "todo",
+                **todo,
+            }
+            for todo in todos
+        ]
+        with self._lock:
+            self._data["tasks"] = [
+                t for t in self._data["tasks"] if t["meeting_id"] != meeting_id
+            ] + records
+            self._flush()
+        return [dict(r) for r in records]
+
     def delete_task(self, task_id: str) -> bool:
         with self._lock:
             before = len(self._data["tasks"])

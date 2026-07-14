@@ -234,6 +234,44 @@ def create_app(
         drop_from_rag(meeting_id)
         return {"deleted": meeting_id}
 
+    @app.post("/api/meetings/{meeting_id}/reanalyze")
+    def reanalyze_meeting(meeting_id: str):
+        """對（可能已編輯過的）逐字稿重跑 AI 分析：更新會議紀錄、整批換掉任務。"""
+        record = store.get_meeting(meeting_id)
+        if record is None:
+            raise HTTPException(status_code=404, detail=f"找不到會議：{meeting_id}")
+        transcript = (record.get("transcript") or "").strip()
+        if not transcript:
+            raise HTTPException(status_code=400, detail="此會議沒有逐字稿全文，無法重新分析")
+
+        try:
+            meeting_date = date.fromisoformat(record.get("meeting", {}).get("date", ""))
+        except ValueError:
+            meeting_date = None
+        usage.record("analysis")
+        try:
+            analysis = orchestrator.decision.analyze(
+                transcript, meeting_date=meeting_date, kind=record.get("kind")
+            )
+        except DecisionAgentError as exc:
+            raise HTTPException(status_code=502, detail=str(exc))
+
+        dumped = analysis.model_dump(mode="json")
+        store.update_meeting(meeting_id, {
+            "meeting": dumped["meeting"],
+            "decisions": dumped["decisions"],
+            "pending_items": dumped["pending_items"],
+        })
+        tasks = store.replace_tasks(meeting_id, dumped["todos"])
+        notifications = orchestrator.notifier.notify(meeting_id, analysis)
+        drop_from_rag(meeting_id)
+        return {
+            "meeting_id": meeting_id,
+            "analysis": dumped,
+            "notifications": notifications,
+            "tasks": tasks,
+        }
+
     @app.get("/api/tasks")
     def list_tasks(meeting_id: Optional[str] = None):
         return {"tasks": store.list_tasks(meeting_id=meeting_id)}

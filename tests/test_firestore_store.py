@@ -195,6 +195,21 @@ def test_delete_meeting_removes_meeting_and_its_tasks():
     assert store.delete_meeting(id1) is False
 
 
+def test_replace_tasks_swaps_meeting_tasks_only():
+    store = make_store()
+    id1 = store.save_meeting(make_analysis())
+    id2 = store.save_meeting(make_analysis())
+    old_task_ids = {t["id"] for t in store.list_tasks(meeting_id=id1)}
+
+    new_tasks = store.replace_tasks(
+        id1, [{"task": "新任務A", "owner": None, "due_date": None, "priority": "low"}]
+    )
+    assert len(new_tasks) == 1
+    assert new_tasks[0]["status"] == "todo"
+    assert {t["id"] for t in store.list_tasks(meeting_id=id1)}.isdisjoint(old_task_ids)
+    assert len(store.list_tasks(meeting_id=id2)) == 1
+
+
 def test_task_without_status_backfilled_to_todo():
     """舊資料（Firestore 上已存在、沒有 status 欄位）讀取時要補 todo。"""
     db = FakeFirestore()

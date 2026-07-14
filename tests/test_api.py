@@ -275,6 +275,31 @@ def test_delete_meeting_removes_meeting_and_tasks(client):
     assert client.delete(f"/api/meetings/{meeting_id}").status_code == 404
 
 
+def test_reanalyze_meeting_updates_analysis_and_replaces_tasks(client):
+    meeting_id = make_meeting(client)
+    old_task_ids = {t["id"] for t in client.get("/api/tasks").json()["tasks"]}
+    # 先編輯逐字稿，再重新分析（假 LLM 回固定 JSON，重點是流程與資料替換）
+    client.patch(f"/api/meetings/{meeting_id}", json={"transcript": "改過的內容"})
+
+    resp = client.post(f"/api/meetings/{meeting_id}/reanalyze")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["meeting_id"] == meeting_id  # 不會生出新會議
+    assert body["analysis"]["meeting"]["title"] == "專題進度會議"
+    assert "email_draft" in body["notifications"]
+
+    tasks = client.get("/api/tasks").json()["tasks"]
+    assert len(tasks) == 1
+    assert {t["id"] for t in tasks}.isdisjoint(old_task_ids)  # 任務整批換新
+    assert client.post("/api/meetings/nope/reanalyze").status_code == 404
+
+
+def test_reanalyze_without_transcript_400(client):
+    meeting_id = make_meeting(client)
+    client.patch(f"/api/meetings/{meeting_id}", json={"transcript": ""})
+    assert client.post(f"/api/meetings/{meeting_id}/reanalyze").status_code == 400
+
+
 def test_meeting_markdown_report(client):
     meeting_id = make_meeting(client)
     resp = client.get(f"/api/meetings/{meeting_id}/report.md")

@@ -48,3 +48,7 @@ class TaskStore(ABC):
     @abstractmethod
     def delete_task(self, task_id: str) -> bool:
         """刪除任務，回傳是否有刪到。"""
+
+    @abstractmethod
+    def replace_tasks(self, meeting_id: str, todos: list[dict]) -> list[dict]:
+        """整批替換某場會議的任務（重新分析時使用），回傳新任務紀錄。"""

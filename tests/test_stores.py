@@ -166,6 +166,27 @@ def test_delete_meeting_removes_meeting_and_its_tasks(tmp_path):
     assert LocalJsonStore(path).get_meeting(id1) is None
 
 
+def test_replace_tasks_swaps_meeting_tasks_only(tmp_path):
+    path = tmp_path / "db.json"
+    store = LocalJsonStore(path)
+    id1 = store.save_meeting(make_analysis())
+    id2 = store.save_meeting(make_analysis())
+    old_task_ids = {t["id"] for t in store.list_tasks(meeting_id=id1)}
+
+    new_tasks = store.replace_tasks(
+        id1, [{"task": "新任務A", "owner": None, "due_date": None, "priority": "low"}]
+    )
+    assert len(new_tasks) == 1
+    assert new_tasks[0]["task"] == "新任務A"
+    assert new_tasks[0]["status"] == "todo"
+    assert new_tasks[0]["meeting_id"] == id1
+    # 舊任務被換掉、別場會議的任務不受影響
+    assert {t["id"] for t in store.list_tasks(meeting_id=id1)}.isdisjoint(old_task_ids)
+    assert len(store.list_tasks(meeting_id=id2)) == 1
+    # 要落地
+    assert LocalJsonStore(path).list_tasks(meeting_id=id1)[0]["task"] == "新任務A"
+
+
 def test_list_meetings_newest_first(tmp_path):
     store = LocalJsonStore(tmp_path / "db.json")
     id1 = store.save_meeting(make_analysis())

@@ -151,6 +151,26 @@ class FirestoreStore(TaskStore):
             merged.setdefault("status", "todo")
             return merged
 
+    def replace_tasks(self, meeting_id: str, todos: list[dict]) -> list[dict]:
+        with self._lock:
+            for snap in self._db.collection(self._tasks).stream():
+                task = snap.to_dict()
+                if task.get("meeting_id") == meeting_id:
+                    self._db.collection(self._tasks).document(task["id"]).delete()
+            records = []
+            for todo in todos:
+                task_id = uuid.uuid4().hex[:12]
+                record = {
+                    "id": task_id,
+                    "meeting_id": meeting_id,
+                    "created_at": self._now(),
+                    "status": "todo",
+                    **todo,
+                }
+                self._db.collection(self._tasks).document(task_id).set(record)
+                records.append(record)
+            return records
+
     def delete_task(self, task_id: str) -> bool:
         with self._lock:
             ref = self._db.collection(self._tasks).document(task_id)
