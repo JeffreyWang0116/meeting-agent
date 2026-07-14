@@ -190,6 +190,12 @@
   textarea::placeholder { color: var(--faint); }
   textarea:focus, input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
   input[type="date"] { padding: 9px 12px; color-scheme: dark; }
+  select.field-sel {
+    font-family: var(--sans); font-size: .93rem; color: var(--ink);
+    background: var(--card-2); border: 1px solid var(--border); border-radius: var(--radius-md);
+    padding: 9px 12px; cursor: pointer; transition: border-color .15s, box-shadow .15s;
+  }
+  select.field-sel:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
   input[type="file"] { padding: 8px 10px; width: 100%; max-width: 440px; }
   input[type="file"]::file-selector-button {
     font-family: var(--sans); font-size: .85rem; font-weight: 500; color: var(--ink);
@@ -605,6 +611,17 @@
         <label class="lbl" for="meetingDate">會議日期</label>
         <input type="date" id="meetingDate">
       </div>
+      <div class="field">
+        <label class="lbl" for="meetingKind">錄音種類</label>
+        <select class="field-sel" id="meetingKind" title="AI 會依種類調整分析重點">
+          <option value="會議">會議</option>
+          <option value="通話">通話</option>
+          <option value="訪談">訪談</option>
+          <option value="語音備忘錄">語音備忘錄</option>
+          <option value="講座">講座</option>
+          <option value="其它">其它</option>
+        </select>
+      </div>
     </div>
 
     <!-- 文字貼上 -->
@@ -857,6 +874,16 @@ async function jsonOrThrow(resp) {
 // ---- 初始化 ----
 $("meetingDate").value = new Date().toLocaleDateString("sv");  // YYYY-MM-DD（本地時區）
 
+// 錄音種類：記住上次的選擇
+(function () {
+  const saved = localStorage.getItem("meetingKind");
+  if (saved && [...$("meetingKind").options].some(o => o.value === saved)) {
+    $("meetingKind").value = saved;
+  }
+  $("meetingKind").addEventListener("change", () =>
+    localStorage.setItem("meetingKind", $("meetingKind").value));
+})();
+
 document.querySelectorAll(".tab").forEach(tab => {
   tab.addEventListener("click", () => {
     document.querySelectorAll(".tab").forEach(t => t.classList.remove("active"));
@@ -893,6 +920,7 @@ function renderResult(result, transcript) {
   $("rTitle").textContent = m.title;
   $("rMeta").innerHTML =
     `<span class="meta-chip">${icon("calendar", "i-sm")}${esc(m.date)}</span>` +
+    `<span class="meta-chip">${esc($("meetingKind").value)}</span>` +
     m.attendees.map(p => `<span class="meta-chip">${icon("user", "i-sm")}${esc(p)}</span>`).join("") +
     statsChip;
   $("rSummary").textContent = m.summary;
@@ -1086,7 +1114,7 @@ async function refreshMeetings() {
       ? meetings.map(m => `<div class="meeting-item">
           <span class="meeting-info">
             <b>${esc(m.meeting.title)}</b>
-            <span class="meeting-meta mono">${esc(m.meeting.date)} · ${esc(m.id)}</span>
+            <span class="meeting-meta mono">${esc(m.meeting.date)}${m.kind ? ` · ${esc(m.kind)}` : ""} · ${esc(m.id)}</span>
           </span>
           <a class="ghost btn-link" href="/api/meetings/${esc(m.id)}/report.md" download>下載會議紀錄</a>
         </div>`).join("")
@@ -1228,7 +1256,11 @@ $("btnAnalyzeText").addEventListener("click", async () => {
     const result = await jsonOrThrow(await fetch("/api/meetings", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text: $("textInput").value, meeting_date: $("meetingDate").value || null }),
+      body: JSON.stringify({
+        text: $("textInput").value,
+        meeting_date: $("meetingDate").value || null,
+        kind: $("meetingKind").value,
+      }),
     }));
     renderResult(result, $("textInput").value);
   } catch (e) { showError(e.message); }
@@ -1257,6 +1289,7 @@ $("btnUpload").addEventListener("click", async () => {
     const form = new FormData();
     form.append("file", file);
     if ($("meetingDate").value) form.append("meeting_date", $("meetingDate").value);
+    form.append("kind", $("meetingKind").value);
     const { job_id } = await jsonOrThrow(await fetch("/api/media", { method: "POST", body: form }));
 
     while (true) {
@@ -1413,7 +1446,10 @@ $("btnLiveStop").addEventListener("click", async () => {
     const result = await jsonOrThrow(await fetch(`/api/live/${liveSessionId}/finish`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ meeting_date: $("meetingDate").value || null }),
+      body: JSON.stringify({
+        meeting_date: $("meetingDate").value || null,
+        kind: $("meetingKind").value,
+      }),
     }));
     $("liveStatus").textContent = "完成";
     renderResult(result, result.transcript);

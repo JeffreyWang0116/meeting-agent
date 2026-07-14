@@ -80,6 +80,28 @@ def test_prompt_instructs_dedupe_and_priority_reason():
     assert "priority_reason" in prompt
 
 
+def test_prompt_includes_kind_hint_when_given():
+    from app.agents.decision_agent import build_prompt
+
+    prompt = build_prompt("測試", MEETING_DATE, kind="講座")
+    assert "錄音種類：講座" in prompt
+    # 沒指定種類時不出現種類段落（維持通用行為）
+    assert "錄音種類" not in build_prompt("測試", MEETING_DATE)
+
+
+def test_analyze_passes_kind_into_prompt():
+    captured = {}
+
+    def fake_generate(prompt):
+        captured["prompt"] = prompt
+        return valid_json()
+
+    DecisionAgent(generate=fake_generate).analyze(
+        "測試", meeting_date=MEETING_DATE, kind="訪談"
+    )
+    assert "錄音種類：訪談" in captured["prompt"]
+
+
 def test_meeting_date_defaults_to_today():
     captured = {}
 

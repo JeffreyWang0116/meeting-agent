@@ -50,9 +50,20 @@ _SCHEMA_EXAMPLE = """{
 
 _WEEKDAY_ZH = "一二三四五六日"
 
+# 錄音種類 → 分析重點提示。輸出結構（schema）不變，只調整內容重點，
+# 讓任務庫、跨會議問答等下游功能對所有種類一體適用。
+KIND_HINTS = {
+    "會議": "這是一場多人會議：完整萃取決議、代辦與未決事項。",
+    "通話": "這是一通通話（通常只有兩位講者）：重點放在雙方承諾的事項與後續行動；正式決議通常較少。",
+    "訪談": "這是一場訪談：摘要應整理受訪者的重點回答與觀點（問答要點）；代辦通常是訪談後的跟進事項。",
+    "語音備忘錄": "這是個人語音備忘錄：通常只有一位講者，重點是講者自己的待辦與想法；attendees 可留空、決議通常沒有。",
+    "講座": "這是一場講座或課程：摘要應條列講者的重點內容與知識點；通常沒有決議；代辦是聽眾要跟進的行動（如作業、延伸閱讀）。",
+    "其它": "種類不明：依內容自行判斷重點。",
+}
+
 PROMPT_TEMPLATE = """你是「主動式會議 Agent」的決策模組。以下是一場會議的逐字稿或文字紀錄，內容可能中英夾雜、口語且混亂。請仔細閱讀並萃取結構化資訊。
 
-會議日期：{meeting_date}（星期{weekday}）
+會議日期：{meeting_date}（星期{weekday}）{kind_line}
 
 務必遵守的規則：
 1. 只輸出一個 JSON 物件。不要 markdown 圍欄、不要任何額外說明文字。
@@ -80,10 +91,14 @@ _RETRY_SUFFIX = """
 請修正並重新只輸出一個符合上述結構的 JSON 物件。"""
 
 
-def build_prompt(transcript: str, meeting_date: date) -> str:
+def build_prompt(transcript: str, meeting_date: date, kind: str | None = None) -> str:
+    kind_line = ""
+    if kind:
+        kind_line = f"\n錄音種類：{kind}。{KIND_HINTS.get(kind, '')}"
     return PROMPT_TEMPLATE.format(
         meeting_date=meeting_date.isoformat(),
         weekday=_WEEKDAY_ZH[meeting_date.weekday()],
+        kind_line=kind_line,
         schema=_SCHEMA_EXAMPLE,
         transcript=transcript,
     )
@@ -129,9 +144,11 @@ class DecisionAgent:
         )
         return response.text or ""
 
-    def analyze(self, transcript: str, meeting_date: date | None = None) -> MeetingAnalysis:
+    def analyze(
+        self, transcript: str, meeting_date: date | None = None, kind: str | None = None
+    ) -> MeetingAnalysis:
         meeting_date = meeting_date or date.today()
-        base_prompt = build_prompt(transcript, meeting_date)
+        base_prompt = build_prompt(transcript, meeting_date, kind=kind)
 
         prompt = base_prompt
         last_error: Exception | None = None

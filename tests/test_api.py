@@ -88,6 +88,14 @@ def test_meetings_listed(client):
     assert len(meetings) == 1
 
 
+def test_meeting_kind_saved_and_unknown_rejected(client):
+    resp = client.post("/api/meetings", json={"text": "講座內容", "kind": "講座"})
+    assert resp.status_code == 200
+    assert client.get("/api/meetings").json()["meetings"][0]["kind"] == "講座"
+    # 不在清單內的種類要擋下來
+    assert client.post("/api/meetings", json={"text": "x", "kind": "怪種類"}).status_code == 400
+
+
 # ---- 檔案上傳 ----
 
 def test_media_upload_and_poll_to_done(client):

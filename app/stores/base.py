@@ -12,8 +12,13 @@ from app.models import MeetingAnalysis
 
 class TaskStore(ABC):
     @abstractmethod
-    def save_meeting(self, analysis: MeetingAnalysis, transcript: str | None = None) -> str:
-        """儲存一場會議的分析結果（可附逐字稿原文供 RAG 檢索），回傳 meeting_id。"""
+    def save_meeting(
+        self,
+        analysis: MeetingAnalysis,
+        transcript: str | None = None,
+        kind: str | None = None,
+    ) -> str:
+        """儲存一場會議的分析結果（可附逐字稿原文供 RAG 檢索、錄音種類），回傳 meeting_id。"""
 
     @abstractmethod
     def get_meeting(self, meeting_id: str) -> dict | None: ...

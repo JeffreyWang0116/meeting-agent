@@ -22,7 +22,12 @@ class MediaJobManager:
         self._threads: dict[str, threading.Thread] = {}
         self._lock = threading.Lock()
 
-    def submit(self, file_path: Path | str, meeting_date: date | None = None) -> str:
+    def submit(
+        self,
+        file_path: Path | str,
+        meeting_date: date | None = None,
+        kind: str | None = None,
+    ) -> str:
         job_id = uuid.uuid4().hex[:12]
         with self._lock:
             self._jobs[job_id] = {
@@ -35,7 +40,7 @@ class MediaJobManager:
                 "file": Path(file_path).name,
             }
         thread = threading.Thread(
-            target=self._run, args=(job_id, Path(file_path), meeting_date), daemon=True
+            target=self._run, args=(job_id, Path(file_path), meeting_date, kind), daemon=True
         )
         self._threads[job_id] = thread
         thread.start()
@@ -56,7 +61,9 @@ class MediaJobManager:
         with self._lock:
             self._jobs[job_id].update(fields)
 
-    def _run(self, job_id: str, file_path: Path, meeting_date: date | None) -> None:
+    def _run(
+        self, job_id: str, file_path: Path, meeting_date: date | None, kind: str | None = None
+    ) -> None:
         try:
             path = file_path
             if media.is_video(path) and media.ffmpeg_available():
@@ -82,7 +89,9 @@ class MediaJobManager:
                 return
             self._update(job_id, transcript=transcript, progress=1.0, status="analyzing")
 
-            result = self._orchestrator.process_transcript(transcript, meeting_date=meeting_date)
+            result = self._orchestrator.process_transcript(
+                transcript, meeting_date=meeting_date, kind=kind
+            )
             self._update(job_id, status="done", result=result)
         except Exception as exc:  # 背景執行緒的例外必須被記錄，否則前端永遠在等
             self._update(job_id, status="error", error=str(exc))

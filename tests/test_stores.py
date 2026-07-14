@@ -119,6 +119,16 @@ def test_old_db_without_status_gets_todo_on_list(tmp_path):
     assert LocalJsonStore(path).list_tasks()[0]["status"] == "todo"
 
 
+def test_save_meeting_stores_kind(tmp_path):
+    store = LocalJsonStore(tmp_path / "db.json")
+    meeting_id = store.save_meeting(make_analysis(), kind="講座")
+    assert store.get_meeting(meeting_id)["kind"] == "講座"
+    assert store.list_meetings()[0]["kind"] == "講座"
+    # 沒給種類時為 None（相容舊資料）
+    other = store.save_meeting(make_analysis())
+    assert store.get_meeting(other)["kind"] is None
+
+
 def test_list_meetings_newest_first(tmp_path):
     store = LocalJsonStore(tmp_path / "db.json")
     id1 = store.save_meeting(make_analysis())

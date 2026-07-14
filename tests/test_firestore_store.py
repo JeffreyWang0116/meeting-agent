@@ -158,6 +158,13 @@ def test_transcript_stored_but_stripped_from_list():
     assert "transcript" not in store.list_meetings()[0]
 
 
+def test_save_meeting_stores_kind():
+    store = make_store()
+    meeting_id = store.save_meeting(make_analysis(), kind="通話")
+    assert store.get_meeting(meeting_id)["kind"] == "通話"
+    assert store.list_meetings()[0]["kind"] == "通話"
+
+
 def test_task_without_status_backfilled_to_todo():
     """舊資料（Firestore 上已存在、沒有 status 欄位）讀取時要補 todo。"""
     db = FakeFirestore()

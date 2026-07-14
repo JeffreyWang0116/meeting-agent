@@ -22,8 +22,8 @@ class FakeOrchestrator:
     def __init__(self):
         self.received = []
 
-    def process_transcript(self, text, meeting_date=None):
-        self.received.append((text, meeting_date))
+    def process_transcript(self, text, meeting_date=None, kind=None):
+        self.received.append((text, meeting_date, kind))
         return {"meeting_id": "m123", "analysis": {}, "notifications": {}}
 
 
@@ -137,3 +137,11 @@ def test_meeting_date_passed_through(tmp_path, audio_file):
     job_id = mgr.submit(audio_file, meeting_date=date(2026, 7, 12))
     mgr.wait(job_id, timeout=5)
     assert orch.received[0][1] == date(2026, 7, 12)
+
+
+def test_kind_passed_through(tmp_path, audio_file):
+    orch = FakeOrchestrator()
+    mgr = MediaJobManager(FakeTranscriber(), orch, tmp_path)
+    job_id = mgr.submit(audio_file, kind="講座")
+    mgr.wait(job_id, timeout=5)
+    assert orch.received[0][2] == "講座"

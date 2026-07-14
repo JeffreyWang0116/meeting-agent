@@ -35,7 +35,12 @@ class LocalJsonStore(TaskStore):
             encoding="utf-8",
         )
 
-    def save_meeting(self, analysis: MeetingAnalysis, transcript: str | None = None) -> str:
+    def save_meeting(
+        self,
+        analysis: MeetingAnalysis,
+        transcript: str | None = None,
+        kind: str | None = None,
+    ) -> str:
         meeting_id = uuid.uuid4().hex[:12]
         created_at = datetime.now(timezone.utc).isoformat()
         dumped = analysis.model_dump(mode="json")
@@ -47,6 +52,7 @@ class LocalJsonStore(TaskStore):
             "decisions": dumped["decisions"],
             "pending_items": dumped["pending_items"],
             "transcript": transcript,
+            "kind": kind,
         }
         task_records = [
             {
