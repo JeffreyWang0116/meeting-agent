@@ -397,6 +397,37 @@
   .cap-text { color: var(--ink); font-family: var(--sans); font-size: .9rem; }
   .caret-block { display: inline-block; width: 8px; height: 1.1em; background: var(--accent); vertical-align: -2px; animation: blink 1s steps(1) infinite; }
 
+  /* ---- 對話框式逐字稿（Messenger 風格：一句一泡泡、講者分色） ---- */
+  .chat-group {
+    display: flex; flex-direction: column; gap: 4px; align-items: flex-start;
+    margin: 10px 0; white-space: normal; font-family: var(--sans);
+  }
+  .chat-name { font-size: .74rem; font-weight: 600; color: var(--faint); padding-left: 12px; }
+  .chat-bubble {
+    max-width: 82%; width: fit-content; padding: 8px 14px;
+    border-radius: 16px; border-bottom-left-radius: 5px;
+    background: var(--card-3); border: 1px solid var(--border);
+    color: var(--ink); font-size: .9rem; line-height: 1.6; word-break: break-word;
+    animation: bubbleIn .18s ease;
+  }
+  @keyframes bubbleIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+  .chat-bubble.hl { border-color: var(--accent); background: var(--accent-soft); box-shadow: 0 0 0 1px var(--accent-border); }
+  .chat-time {
+    text-align: center; color: var(--faint); font-size: .72rem;
+    font-family: var(--mono); margin: 10px 0 2px; user-select: none; white-space: normal;
+  }
+  /* 講者配色（依出場順序輪替五色） */
+  .sp-0 .chat-name { color: var(--accent); }
+  .sp-0 .chat-bubble { background: var(--accent-soft); border-color: var(--accent-border); }
+  .sp-1 .chat-name { color: var(--medium); }
+  .sp-1 .chat-bubble { background: var(--medium-soft); border-color: var(--medium); }
+  .sp-2 .chat-name { color: var(--low); }
+  .sp-2 .chat-bubble { background: var(--low-soft); border-color: var(--low); }
+  .sp-3 .chat-name { color: var(--high); }
+  .sp-3 .chat-bubble { background: var(--high-soft); border-color: var(--high); }
+  .sp-4 .chat-name { color: var(--muted); }
+  .sp-4 .chat-bubble { background: var(--card-3); border-color: var(--border-strong); }
+
   /* ---- 頁尾（隱私說明） ---- */
   .site-footer { display: flex; flex-direction: column; gap: 10px; padding: 4px 2px 0; color: var(--faint); font-size: .8rem; }
   .site-footer summary { cursor: pointer; user-select: none; color: var(--muted); }
@@ -954,6 +985,62 @@ async function loadHealth() {
 }
 loadHealth();
 
+// ---- 對話框式逐字稿渲染（Messenger 風格）----
+// 偵測「講者：」「Kevin:」等前綴；一句一個泡泡（句尾標點或換行斷句）
+const SPEAKER_RE = /^([^：:\n]{1,12})[：:]\s*/;
+const SENTENCE_ENDERS = "。！？!?；;";
+
+function splitSentences(text) {
+  const out = [];
+  let buf = "";
+  for (const ch of text) {
+    buf += ch;
+    if (SENTENCE_ENDERS.includes(ch)) { out.push(buf.trim()); buf = ""; }
+  }
+  if (buf.trim()) out.push(buf.trim());
+  return out.filter(Boolean);
+}
+
+function parseChatMessages(text) {
+  const msgs = [];
+  for (const rawLine of String(text || "").split("\n")) {
+    const line = rawLine.trim();
+    if (!line) continue;
+    const m = line.match(SPEAKER_RE);
+    const speaker = m ? m[1].trim() : null;
+    const content = m ? line.slice(m[0].length) : line;
+    for (const s of splitSentences(content)) msgs.push({ speaker, text: s });
+  }
+  return msgs;
+}
+
+// speakerMap：跨段落維持同講者同色（即時聆聽逐段附加時傳入同一個 map）
+function chatHtml(text, speakerMap) {
+  const map = speakerMap || {};
+  const colorOf = s => {
+    if (!(s in map)) map[s] = Object.keys(map).length;
+    return map[s] % 5;
+  };
+  const msgs = parseChatMessages(text);
+  let html = "", open = false, prevSpeaker;
+  for (const m of msgs) {
+    if (!open || m.speaker !== prevSpeaker) {
+      if (open) html += "</div>";
+      html += `<div class="chat-group ${m.speaker ? `sp-${colorOf(m.speaker)}` : ""}">`;
+      if (m.speaker) html += `<div class="chat-name">${esc(m.speaker)}</div>`;
+      open = true;
+      prevSpeaker = m.speaker;
+    }
+    html += `<div class="chat-bubble">${esc(m.text)}</div>`;
+  }
+  if (open) html += "</div>";
+  return html;
+}
+
+function renderChat(container, text) {
+  container.innerHTML = chatHtml(text, {});
+}
+
 // ---- 結果渲染 ----
 let currentTranscript = "";
 let analysisStartTime = null;
@@ -962,7 +1049,7 @@ function renderResult(result, transcript) {
   currentTranscript = (transcript || "").trim();
   $("rTransSec").style.display = currentTranscript ? "block" : "none";
   $("rTransSec").open = false;
-  $("rTranscript").textContent = currentTranscript;
+  renderChat($("rTranscript"), currentTranscript);
   const a = result.analysis, m = a.meeting;
   // 成效指標：這場會議 AI 幫你做了多少事、花了多久
   const elapsed = analysisStartTime ? ((Date.now() - analysisStartTime) / 1000).toFixed(1) : null;
@@ -1353,7 +1440,7 @@ $("btnUpload").addEventListener("click", async () => {
       $("fileStatus").textContent =
         JOB_STATUS_ZH[job.status] + (job.status === "transcribing" ? `（${pct}%）` : "");
       if (job.transcript) {
-        $("fileTranscript").textContent = job.transcript;
+        renderChat($("fileTranscript"), job.transcript);
         $("fileTranscript").scrollTop = $("fileTranscript").scrollHeight;
       }
       if (job.status === "done") { renderResult(job.result, job.transcript); break; }
@@ -1398,14 +1485,16 @@ function liveTick() {
     `<span class="rec-dot"></span>聆聽中 ${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}（${sent}）`;
 }
 
-// 即時字幕流：逐段附加（帶會議進行時間戳），末端保留打字游標
+// 即時字幕流：逐段附加對話泡泡（段落間顯示會議進行時間），末端保留打字游標。
+// liveSpeakers 讓同一位講者在整場聆聽中維持同色。
+let liveSpeakers = {};
 function appendCaption(text) {
   const caret = $("liveCaret");
   if (!caret) return;
   const s = Math.floor((Date.now() - liveStartTime) / 1000);
   const t = `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
   caret.insertAdjacentHTML("beforebegin",
-    `<div class="cap-line"><span class="cap-time">[${t}]</span><span class="cap-text">${esc(text)}</span></div>`);
+    `<div class="chat-time">${t}</div>` + chatHtml(text, liveSpeakers));
   $("liveTranscript").scrollTop = $("liveTranscript").scrollHeight;
 }
 
@@ -1461,6 +1550,7 @@ $("btnLiveStart").addEventListener("click", async () => {
   liveStartTime = Date.now();
   liveSegIndex = 0;
   liveSentCount = 0;
+  liveSpeakers = {};
   acquireWakeLock();  // 保持螢幕常亮，避免手機鎖屏中斷錄音
   $("btnLiveStart").disabled = true;
   $("btnLiveStop").disabled = false;
@@ -1513,29 +1603,29 @@ $("btnLiveStop").addEventListener("click", async () => {
   }
 });
 
-// ---- 逐字稿對照：點任務卡的引用句 → 展開逐字稿、標亮出處 ----
+// ---- 逐字稿對照：點任務卡的引用句 → 展開逐字稿、標亮出處泡泡 ----
 $("rTodos").addEventListener("click", e => {
   const q = e.target.closest(".quote.clickable");
   if (!q || !currentTranscript) return;
-  let quote = q.dataset.quote || "";
-  let idx = currentTranscript.indexOf(quote);
-  while (idx < 0 && quote.length > 6) {  // 引用句可能被截斷或改寫，逐步縮短前綴比對
-    quote = quote.slice(0, Math.floor(quote.length * 0.7));
-    idx = currentTranscript.indexOf(quote);
-  }
   const sec = $("rTransSec");
   sec.style.display = "block";
   sec.open = true;
-  if (idx < 0) {  // 找不到就只展開逐字稿
-    $("rTranscript").textContent = currentTranscript;
+
+  const bubbles = [...$("rTranscript").querySelectorAll(".chat-bubble")];
+  bubbles.forEach(b => b.classList.remove("hl"));
+  // 引用句可能被截斷、改寫或跨泡泡，逐步縮短前綴比對
+  let quote = (q.dataset.quote || "").replace(/\s+/g, "");
+  let target = null;
+  while (!target && quote.length > 4) {
+    target = bubbles.find(b => b.textContent.replace(/\s+/g, "").includes(quote));
+    if (!target) quote = quote.slice(0, Math.floor(quote.length * 0.7));
+  }
+  if (!target) {  // 找不到就只展開逐字稿
     sec.scrollIntoView({ behavior: "smooth", block: "nearest" });
     return;
   }
-  $("rTranscript").innerHTML =
-    esc(currentTranscript.slice(0, idx)) +
-    `<mark id="quoteMark">${esc(currentTranscript.slice(idx, idx + quote.length))}</mark>` +
-    esc(currentTranscript.slice(idx + quote.length));
-  document.getElementById("quoteMark").scrollIntoView({ behavior: "smooth", block: "center" });
+  target.classList.add("hl");
+  target.scrollIntoView({ behavior: "smooth", block: "center" });
 });
 
 // ---- 深淺色主題切換（記住偏好） ----
