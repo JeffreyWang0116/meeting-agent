@@ -83,6 +83,29 @@ class LocalJsonStore(TaskStore):
                 for m in reversed(self._data["meetings"])
             ]
 
+    def update_meeting(self, meeting_id: str, fields: dict) -> dict | None:
+        with self._lock:
+            for m in self._data["meetings"]:
+                if m["id"] == meeting_id:
+                    f = dict(fields)
+                    nested = f.pop("meeting", None)
+                    if nested:
+                        m.setdefault("meeting", {}).update(nested)
+                    m.update(f)
+                    self._flush()
+                    return dict(m)
+        return None
+
+    def delete_meeting(self, meeting_id: str) -> bool:
+        with self._lock:
+            before = len(self._data["meetings"])
+            self._data["meetings"] = [m for m in self._data["meetings"] if m["id"] != meeting_id]
+            if len(self._data["meetings"]) == before:
+                return False
+            self._data["tasks"] = [t for t in self._data["tasks"] if t["meeting_id"] != meeting_id]
+            self._flush()
+            return True
+
     def list_tasks(self, meeting_id: str | None = None) -> list[dict]:
         with self._lock:
             tasks = self._data["tasks"]

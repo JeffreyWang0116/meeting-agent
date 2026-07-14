@@ -118,6 +118,17 @@ class RagIndex:
                 self._flush()
             return added
 
+    def drop_meeting(self, meeting_id: str) -> int:
+        """把某場會議的片段從索引移除（會議被編輯/刪除時呼叫），
+        回傳移除的片段數。編輯後下次 sync 會用新內容重建。"""
+        with self._lock:
+            before = len(self._records)
+            self._records = [r for r in self._records if r["meeting_id"] != meeting_id]
+            removed = before - len(self._records)
+            if removed:
+                self._flush()
+            return removed
+
     def search(self, query: str, k: int = 4) -> list[dict]:
         with self._lock:
             records = list(self._records)

@@ -103,6 +103,33 @@ class FirestoreStore(TaskStore):
         # 逐字稿可能數十 KB，列表回應剔除全文保持輕量（get_meeting 才回傳）
         return [{k: v for k, v in m.items() if k != "transcript"} for m in docs]
 
+    def update_meeting(self, meeting_id: str, fields: dict) -> dict | None:
+        with self._lock:
+            ref = self._db.collection(self._meetings).document(meeting_id)
+            snap = ref.get()
+            if not snap.exists:
+                return None
+            merged = snap.to_dict()
+            f = dict(fields)
+            nested = f.pop("meeting", None)
+            if nested:
+                merged.setdefault("meeting", {}).update(nested)
+            merged.update(f)
+            ref.set(merged)
+            return merged
+
+    def delete_meeting(self, meeting_id: str) -> bool:
+        with self._lock:
+            ref = self._db.collection(self._meetings).document(meeting_id)
+            if not ref.get().exists:
+                return False
+            ref.delete()
+            for snap in self._db.collection(self._tasks).stream():
+                task = snap.to_dict()
+                if task.get("meeting_id") == meeting_id:
+                    self._db.collection(self._tasks).document(task["id"]).delete()
+            return True
+
     def list_tasks(self, meeting_id: str | None = None) -> list[dict]:
         docs = [s.to_dict() for s in self._db.collection(self._tasks).stream()]
         if meeting_id is not None:

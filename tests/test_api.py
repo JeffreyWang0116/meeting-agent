@@ -241,6 +241,40 @@ def test_export_tasks_csv(client):
     assert "王鈺翔" in body
 
 
+def test_get_meeting_detail_includes_transcript(client):
+    meeting_id = make_meeting(client)
+    body = client.get(f"/api/meetings/{meeting_id}").json()
+    assert body["id"] == meeting_id
+    assert body["meeting"]["title"] == "專題進度會議"
+    assert body["transcript"]  # 詳情要含逐字稿全文
+    assert client.get("/api/meetings/nope").status_code == 404
+
+
+def test_patch_meeting_updates_title_and_transcript(client):
+    meeting_id = make_meeting(client)
+    resp = client.patch(
+        f"/api/meetings/{meeting_id}",
+        json={"title": "新標題", "summary": "新摘要", "transcript": "新逐字稿"},
+    )
+    assert resp.status_code == 200
+    body = client.get(f"/api/meetings/{meeting_id}").json()
+    assert body["meeting"]["title"] == "新標題"
+    assert body["meeting"]["summary"] == "新摘要"
+    assert body["transcript"] == "新逐字稿"
+    # 不允許的欄位要擋
+    assert client.patch(f"/api/meetings/{meeting_id}", json={"id": "hack"}).status_code == 400
+    assert client.patch("/api/meetings/nope", json={"title": "x"}).status_code == 404
+
+
+def test_delete_meeting_removes_meeting_and_tasks(client):
+    meeting_id = make_meeting(client)
+    assert client.get("/api/tasks").json()["tasks"]
+    assert client.delete(f"/api/meetings/{meeting_id}").status_code == 200
+    assert client.get(f"/api/meetings/{meeting_id}").status_code == 404
+    assert client.get("/api/tasks").json()["tasks"] == []
+    assert client.delete(f"/api/meetings/{meeting_id}").status_code == 404
+
+
 def test_meeting_markdown_report(client):
     meeting_id = make_meeting(client)
     resp = client.get(f"/api/meetings/{meeting_id}/report.md")

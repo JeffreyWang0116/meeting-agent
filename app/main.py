@@ -122,19 +122,26 @@ def create_app(
     job_manager = job_manager or MediaJobManager(
         transcriber, orchestrator, settings.data_dir / "tmp"
     )
+    rag_index = None
     if ask_agent is None:
-        ask_agent = AskAgent(
-            index=RagIndex(
-                settings.data_dir / "output" / "rag_index.json",
-                GeminiEmbedder(
-                    api_key=settings.gemini_api_key, api_keys=settings.gemini_api_keys
-                ),
+        rag_index = RagIndex(
+            settings.data_dir / "output" / "rag_index.json",
+            GeminiEmbedder(
+                api_key=settings.gemini_api_key, api_keys=settings.gemini_api_keys
             ),
+        )
+        ask_agent = AskAgent(
+            index=rag_index,
             store=store,
             api_key=settings.gemini_api_key,
             api_keys=settings.gemini_api_keys,
             model=settings.gemini_model,
         )
+
+    def drop_from_rag(meeting_id: str) -> None:
+        """會議被編輯/刪除後索引作廢，下次問答時以新內容重建。"""
+        if rag_index is not None:
+            rag_index.drop_meeting(meeting_id)
     uploads_dir = settings.data_dir / "tmp" / "uploads"
     usage = UsageTracker(settings.data_dir / "output" / "usage.json")
 
@@ -186,6 +193,46 @@ def create_app(
     @app.get("/api/meetings")
     def list_meetings():
         return {"meetings": store.list_meetings()}
+
+    @app.get("/api/meetings/{meeting_id}")
+    def get_meeting_detail(meeting_id: str):
+        record = store.get_meeting(meeting_id)
+        if record is None:
+            raise HTTPException(status_code=404, detail=f"找不到會議：{meeting_id}")
+        return record
+
+    # 會議資訊欄位（存在 meeting 子物件）與頂層欄位分開處理
+    _MEETING_INFO_FIELDS = {"title", "date", "summary", "attendees"}
+    _MEETING_TOP_FIELDS = {"transcript", "kind", "tags"}
+
+    @app.patch("/api/meetings/{meeting_id}")
+    def patch_meeting(meeting_id: str, fields: dict):
+        unknown = set(fields) - _MEETING_INFO_FIELDS - _MEETING_TOP_FIELDS
+        if unknown:
+            raise HTTPException(
+                status_code=400, detail=f"不允許修改的欄位：{'、'.join(sorted(unknown))}"
+            )
+        if "kind" in fields:
+            validate_kind(fields["kind"])
+        if "tags" in fields and not isinstance(fields["tags"], list):
+            raise HTTPException(status_code=400, detail="tags 必須是字串陣列")
+
+        update = {k: v for k, v in fields.items() if k in _MEETING_TOP_FIELDS}
+        nested = {k: v for k, v in fields.items() if k in _MEETING_INFO_FIELDS}
+        if nested:
+            update["meeting"] = nested
+        updated = store.update_meeting(meeting_id, update)
+        if updated is None:
+            raise HTTPException(status_code=404, detail=f"找不到會議：{meeting_id}")
+        drop_from_rag(meeting_id)
+        return updated
+
+    @app.delete("/api/meetings/{meeting_id}")
+    def delete_meeting(meeting_id: str):
+        if not store.delete_meeting(meeting_id):
+            raise HTTPException(status_code=404, detail=f"找不到會議：{meeting_id}")
+        drop_from_rag(meeting_id)
+        return {"deleted": meeting_id}
 
     @app.get("/api/tasks")
     def list_tasks(meeting_id: Optional[str] = None):

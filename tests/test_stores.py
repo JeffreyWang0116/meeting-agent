@@ -129,6 +129,43 @@ def test_save_meeting_stores_kind(tmp_path):
     assert store.get_meeting(other)["kind"] is None
 
 
+def test_update_meeting_merges_info_and_top_level_fields(tmp_path):
+    path = tmp_path / "db.json"
+    store = LocalJsonStore(path)
+    meeting_id = store.save_meeting(make_analysis(), transcript="原逐字稿")
+
+    updated = store.update_meeting(
+        meeting_id,
+        {"meeting": {"title": "改過的標題"}, "transcript": "改過的逐字稿"},
+    )
+    assert updated["meeting"]["title"] == "改過的標題"
+    assert updated["meeting"]["date"]  # 其餘欄位保留
+    assert updated["transcript"] == "改過的逐字稿"
+
+    # 要落地
+    reloaded = LocalJsonStore(path).get_meeting(meeting_id)
+    assert reloaded["meeting"]["title"] == "改過的標題"
+    assert store.update_meeting("no-such-id", {"transcript": "x"}) is None
+
+
+def test_delete_meeting_removes_meeting_and_its_tasks(tmp_path):
+    path = tmp_path / "db.json"
+    store = LocalJsonStore(path)
+    id1 = store.save_meeting(make_analysis())
+    id2 = store.save_meeting(make_analysis())
+
+    assert store.delete_meeting(id1) is True
+    assert store.get_meeting(id1) is None
+    assert store.list_tasks(meeting_id=id1) == []
+    # 其他會議不受影響
+    assert store.get_meeting(id2) is not None
+    assert len(store.list_tasks(meeting_id=id2)) == 1
+    assert store.delete_meeting(id1) is False
+
+    # 要落地
+    assert LocalJsonStore(path).get_meeting(id1) is None
+
+
 def test_list_meetings_newest_first(tmp_path):
     store = LocalJsonStore(tmp_path / "db.json")
     id1 = store.save_meeting(make_analysis())

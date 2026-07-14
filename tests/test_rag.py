@@ -113,6 +113,27 @@ def test_sync_is_incremental(tmp_path):
     assert emb.calls == calls_after_first
 
 
+def test_drop_meeting_invalidates_index_and_resync_reembeds(tmp_path):
+    """會議被編輯/刪除後索引要作廢，下次 sync 用新內容重建，問答才不會回舊資料。"""
+    store = make_store_with_meeting(tmp_path)
+    meeting_id = store.list_meetings()[0]["id"]
+    index = RagIndex(tmp_path / "rag.json", embedder=FakeEmbedder())
+    index.sync(store)
+
+    assert index.drop_meeting(meeting_id) > 0
+    assert index.search("API", k=5) == []  # 索引已清空
+    assert index.drop_meeting(meeting_id) == 0  # 再刪沒東西
+
+    # 會議還在 store（編輯情境）→ 下次 sync 重新向量化
+    assert index.sync(store) > 0
+    assert index.search("API", k=1)
+
+    # 作廢要落地：重新載入索引檔也不能殘留
+    index.drop_meeting(meeting_id)
+    reloaded = RagIndex(tmp_path / "rag.json", embedder=FakeEmbedder())
+    assert reloaded.search("API", k=5) == []
+
+
 def test_index_persists_to_disk(tmp_path):
     store = make_store_with_meeting(tmp_path)
     emb = FakeEmbedder()

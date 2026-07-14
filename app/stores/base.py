@@ -28,6 +28,16 @@ class TaskStore(ABC):
         """所有會議（新到舊），不含任務明細。"""
 
     @abstractmethod
+    def update_meeting(self, meeting_id: str, fields: dict) -> dict | None:
+        """更新會議紀錄。fields 的 "meeting" 子字典會併入會議資訊
+        （title/date/summary/attendees），其餘鍵（transcript/kind/tags…）
+        直接覆寫頂層欄位。找不到回傳 None。"""
+
+    @abstractmethod
+    def delete_meeting(self, meeting_id: str) -> bool:
+        """刪除會議與其所有任務，回傳是否有刪到。"""
+
+    @abstractmethod
     def list_tasks(self, meeting_id: str | None = None) -> list[dict]:
         """攤平的代辦事項清單，可依會議過濾。"""
 
