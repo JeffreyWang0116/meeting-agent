@@ -467,6 +467,43 @@
   .meeting-item + .meeting-item { margin-top: 10px; }
   .meeting-info { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
   .meeting-meta { color: var(--faint); font-size: .78rem; }
+  .meeting-ops { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+
+  /* 歷史會議展開詳情 */
+  .meeting-detail {
+    border: 1px solid var(--border); border-top: none;
+    border-radius: 0 0 var(--radius-md) var(--radius-md);
+    background: var(--card); padding: 16px; margin-top: -10px;
+    display: flex; flex-direction: column; gap: 14px; font-size: .9rem;
+  }
+  .meeting-item.expanded { border-radius: var(--radius-md) var(--radius-md) 0 0; margin-bottom: 0; }
+  .meeting-detail h4 {
+    margin: 0; font-size: .82rem; font-weight: 600; color: var(--muted);
+    letter-spacing: .03em; display: flex; align-items: center; gap: 8px;
+  }
+  .meeting-detail h4 .ghost { margin-left: auto; }
+  .detail-summary { margin: 0; line-height: 1.75; color: var(--ink); }
+  .detail-decisions { margin: 0; padding-left: 1.3em; display: flex; flex-direction: column; gap: 5px; }
+  .detail-transcript { max-height: 340px; overflow-y: auto; }
+  .detail-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .detail-actions .danger-ghost { color: var(--high); border-color: var(--high); }
+  .detail-actions .danger-ghost:hover { background: var(--high-soft); color: var(--high); }
+  .speaker-chips { display: flex; gap: 6px; flex-wrap: wrap; }
+  .speaker-chip {
+    display: inline-flex; align-items: center; gap: 5px; cursor: pointer;
+    font-size: .78rem; font-weight: 500; padding: 3px 10px; border-radius: 999px;
+    background: var(--card-3); border: 1px solid var(--border); color: var(--muted);
+    transition: border-color .15s, color .15s;
+  }
+  .speaker-chip:hover { border-color: var(--accent); color: var(--accent); }
+  .detail-edit textarea, .detail-edit input[type="text"] {
+    width: 100%; font-family: var(--sans); font-size: .9rem; color: var(--ink);
+    background: var(--card-2); border: 1px solid var(--border); border-radius: var(--radius-md);
+    padding: 10px 12px;
+  }
+  .detail-edit textarea { resize: vertical; }
+  .detail-edit { display: flex; flex-direction: column; gap: 10px; }
+  .detail-edit .lbl { font-size: .8rem; }
 
   .progress { height: 6px; background: var(--card-2); border-radius: 999px; overflow: hidden; }
   .progress > div { height: 100%; width: 0%; background: var(--ink); transition: width .4s; }
@@ -1314,21 +1351,246 @@ $("taskSearch").addEventListener("input", renderTasks);
 $("taskFilter").addEventListener("change", renderTasks);
 $("btnRefreshTasks").addEventListener("click", () => { refreshTasks(); refreshMeetings(); });
 
-// ---- 歷史會議 ----
-async function refreshMeetings() {
-  try {
-    const { meetings } = await jsonOrThrow(await fetch("/api/meetings"));
-    $("meetingRows").innerHTML = meetings.length
-      ? meetings.map(m => `<div class="meeting-item">
+// ---- 歷史會議（查閱 / 編輯 / 重新分析 / 分享 / 講者改名 / 刪除） ----
+let allMeetings = [];
+let expandedMeetingId = null;      // 展開詳情中的會議
+let detailEditing = false;
+const meetingDetailCache = {};     // id -> 完整紀錄（含逐字稿）
+
+function detectSpeakers(text) {
+  const found = new Set();
+  for (const line of String(text || "").split("\n")) {
+    const m = line.trim().match(SPEAKER_RE);
+    if (m) found.add(m[1].trim());
+  }
+  return [...found].slice(0, 12);
+}
+
+function meetingDetailHtml(id) {
+  const d = meetingDetailCache[id];
+  if (!d) return `<div class="meeting-detail"><p class="empty-note">載入中…</p></div>`;
+  if (detailEditing) {
+    return `<div class="meeting-detail detail-edit">
+        <label class="lbl">標題</label>
+        <input type="text" id="dTitle" value="${esc(d.meeting.title)}">
+        <label class="lbl">AI 摘要</label>
+        <textarea id="dSummary" rows="4">${esc(d.meeting.summary || "")}</textarea>
+        <label class="lbl">逐字稿全文</label>
+        <textarea id="dTranscript" rows="12">${esc(d.transcript || "")}</textarea>
+        <div class="detail-actions">
+          <button class="primary save-detail" data-id="${esc(id)}">儲存</button>
+          <button class="ghost cancel-detail">取消</button>
+        </div>
+      </div>`;
+  }
+  const decisions = (d.decisions || [])
+    .map(x => `<li>${esc(x.description)}${x.context ? `（${esc(x.context)}）` : ""}</li>`).join("");
+  const speakers = detectSpeakers(d.transcript);
+  return `<div class="meeting-detail">
+      <h4>AI 摘要 <button class="ghost trans-detail" data-id="${esc(id)}">翻譯</button></h4>
+      <p class="detail-summary">${esc(d.meeting.summary || "（無摘要）")}</p>
+      <div class="summary-trans" id="dSummaryTrans" style="display:none"></div>
+      ${decisions ? `<h4>決議事項</h4><ol class="detail-decisions">${decisions}</ol>` : ""}
+      ${speakers.length ? `<h4>講者（點擊改名，整份逐字稿跟著更新）</h4>
+        <div class="speaker-chips">${speakers.map(s =>
+          `<span class="speaker-chip" data-id="${esc(id)}" data-speaker="${esc(s)}">✎ ${esc(s)}</span>`).join("")}</div>` : ""}
+      <h4>完整逐字稿 <button class="ghost copy-detail" data-id="${esc(id)}">複製全文</button></h4>
+      <div class="detail-transcript" id="dTranscriptView"></div>
+      <div class="detail-actions">
+        <button class="ghost edit-detail" data-id="${esc(id)}">
+          <svg class="i-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.8 2.8 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>
+          編輯
+        </button>
+        <button class="ghost reanalyze-detail" data-id="${esc(id)}">
+          <svg class="i-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11a9 9 0 1 1-2.7-6.4"/><path d="M21 3v6h-6"/></svg>
+          重新分析
+        </button>
+        <button class="ghost share-detail" data-id="${esc(id)}">
+          <svg class="i-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="m8.6 13.5 6.8 4M15.4 6.5l-6.8 4"/></svg>
+          分享
+        </button>
+      </div>
+    </div>`;
+}
+
+function renderMeetings() {
+  $("meetingRows").innerHTML = allMeetings.length
+    ? allMeetings.map(m => `<div class="meeting-item ${m.id === expandedMeetingId ? "expanded" : ""}">
           <span class="meeting-info">
             <b>${esc(m.meeting.title)}</b>
             <span class="meeting-meta mono">${esc(m.meeting.date)}${m.kind ? ` · ${esc(m.kind)}` : ""} · ${esc(m.id)}</span>
           </span>
-          <a class="ghost btn-link" href="/api/meetings/${esc(m.id)}/report.md" download>下載會議紀錄</a>
-        </div>`).join("")
-      : `<p class="empty-note">尚無會議紀錄</p>`;
+          <span class="meeting-ops">
+            <button class="ghost view-meeting" data-id="${esc(m.id)}">${m.id === expandedMeetingId ? "收合" : "查閱"}</button>
+            <a class="ghost btn-link" href="/api/meetings/${esc(m.id)}/report.md" download>下載</a>
+            <button class="del-btn del-meeting" data-id="${esc(m.id)}" title="刪除此會議與其任務" aria-label="刪除">✕</button>
+          </span>
+        </div>` + (m.id === expandedMeetingId ? meetingDetailHtml(m.id) : "")).join("")
+    : `<p class="empty-note">尚無會議紀錄</p>`;
+  // 逐字稿泡泡要等 DOM 建立後渲染
+  const view = document.getElementById("dTranscriptView");
+  const d = meetingDetailCache[expandedMeetingId];
+  if (view && d) {
+    if (d.transcript) renderChat(view, d.transcript);
+    else view.innerHTML = `<p class="empty-note">此會議沒有存逐字稿全文</p>`;
+  }
+}
+
+async function refreshMeetings() {
+  try {
+    allMeetings = (await jsonOrThrow(await fetch("/api/meetings"))).meetings;
+    renderMeetings();
   } catch (e) { /* 靜默 */ }
 }
+
+async function openMeetingDetail(id) {
+  expandedMeetingId = id;
+  detailEditing = false;
+  renderMeetings();  // 先顯示「載入中」
+  if (!meetingDetailCache[id]) {
+    try {
+      meetingDetailCache[id] = await jsonOrThrow(await fetch(`/api/meetings/${id}`));
+    } catch (err) { showError("讀取會議失敗：" + err.message); return; }
+  }
+  renderMeetings();
+}
+
+function meetingShareText(d) {
+  const parts = [`${d.meeting.title}（${d.meeting.date}）`];
+  if (d.meeting.summary) parts.push(`【AI 摘要】\n${d.meeting.summary}`);
+  if ((d.decisions || []).length) {
+    parts.push("【決議事項】\n" + d.decisions.map((x, i) => `${i + 1}. ${x.description}`).join("\n"));
+  }
+  if (d.transcript) parts.push(`【完整逐字稿】\n${d.transcript}`);
+  return parts.join("\n\n");
+}
+
+$("meetingRows").addEventListener("click", async e => {
+  const view = e.target.closest(".view-meeting");
+  if (view) {
+    if (expandedMeetingId === view.dataset.id) { expandedMeetingId = null; renderMeetings(); }
+    else openMeetingDetail(view.dataset.id);
+    return;
+  }
+  const del = e.target.closest(".del-meeting");
+  if (del) {
+    if (!confirm("確定要刪除這場會議？它的任務也會一併刪除。")) return;
+    try {
+      await jsonOrThrow(await fetch(`/api/meetings/${del.dataset.id}`, { method: "DELETE" }));
+      delete meetingDetailCache[del.dataset.id];
+      if (expandedMeetingId === del.dataset.id) expandedMeetingId = null;
+      refreshMeetings(); refreshTasks(); refreshReminders();
+    } catch (err) { showError("刪除會議失敗：" + err.message); }
+    return;
+  }
+  if (e.target.closest(".edit-detail")) { detailEditing = true; renderMeetings(); return; }
+  if (e.target.closest(".cancel-detail")) { detailEditing = false; renderMeetings(); return; }
+
+  const save = e.target.closest(".save-detail");
+  if (save) {
+    try {
+      const updated = await jsonOrThrow(await fetch(`/api/meetings/${save.dataset.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: $("dTitle").value.trim() || "未命名會議",
+          summary: $("dSummary").value.trim(),
+          transcript: $("dTranscript").value,
+        }),
+      }));
+      meetingDetailCache[save.dataset.id] = updated;
+      detailEditing = false;
+      refreshMeetings();
+    } catch (err) { showError("儲存會議失敗：" + err.message); }
+    return;
+  }
+
+  const rean = e.target.closest(".reanalyze-detail");
+  if (rean) {
+    if (!confirm("重新分析會用目前的逐字稿重跑 AI，這場會議的任務會整批換新。繼續？")) return;
+    rean.disabled = true; rean.textContent = "分析中…";
+    try {
+      const r = await jsonOrThrow(await fetch(`/api/meetings/${rean.dataset.id}/reanalyze`, { method: "POST" }));
+      const cached = meetingDetailCache[rean.dataset.id];
+      if (cached) {
+        cached.meeting = r.analysis.meeting;
+        cached.decisions = r.analysis.decisions;
+        cached.pending_items = r.analysis.pending_items;
+      }
+      refreshMeetings(); refreshTasks(); refreshReminders();
+    } catch (err) { showError("重新分析失敗：" + err.message); refreshMeetings(); }
+    return;
+  }
+
+  const share = e.target.closest(".share-detail");
+  if (share) {
+    const d = meetingDetailCache[share.dataset.id];
+    if (!d) return;
+    const text = meetingShareText(d);
+    if (navigator.share) {
+      try { await navigator.share({ title: d.meeting.title, text }); } catch (err) { /* 使用者取消 */ }
+    } else {
+      await copyWithFeedback(share, text);  // 桌機沒有系統分享 → 複製全文
+    }
+    return;
+  }
+
+  const copyBtn = e.target.closest(".copy-detail");
+  if (copyBtn) {
+    const d = meetingDetailCache[copyBtn.dataset.id];
+    if (d) await copyWithFeedback(copyBtn, d.transcript || "");
+    return;
+  }
+
+  const trans = e.target.closest(".trans-detail");
+  if (trans) {
+    const d = meetingDetailCache[trans.dataset.id];
+    const box = document.getElementById("dSummaryTrans");
+    if (!d || !d.meeting.summary || !box) return;
+    if (box.style.display !== "none") { box.style.display = "none"; return; }
+    if (box.textContent) { box.style.display = "block"; return; }
+    trans.textContent = "翻譯中…";
+    try {
+      const r = await jsonOrThrow(await fetch("/api/translate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          text: d.meeting.summary,
+          target: /[一-鿿]/.test(d.meeting.summary) ? "en" : "zh",
+        }),
+      }));
+      box.textContent = r.translation;
+      box.style.display = "block";
+    } catch (err) { showError("翻譯失敗：" + err.message); }
+    finally { trans.textContent = "翻譯"; }
+    return;
+  }
+
+  const chip = e.target.closest(".speaker-chip");
+  if (chip) {
+    const d = meetingDetailCache[chip.dataset.id];
+    if (!d || !d.transcript) return;
+    const oldName = chip.dataset.speaker;
+    const newName = prompt(`把「${oldName}」改名為：`, oldName);
+    if (!newName || newName.trim() === "" || newName.trim() === oldName) return;
+    const renamed = d.transcript.split("\n").map(line => {
+      const t = line.trimStart();
+      if (t.startsWith(oldName + "：") || t.startsWith(oldName + ":")) {
+        return line.replace(oldName, newName.trim());  // 只換行首的講者標註
+      }
+      return line;
+    }).join("\n");
+    try {
+      meetingDetailCache[chip.dataset.id] = await jsonOrThrow(
+        await fetch(`/api/meetings/${chip.dataset.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ transcript: renamed }),
+        }));
+      renderMeetings();
+    } catch (err) { showError("講者改名失敗：" + err.message); }
+  }
+});
 
 refreshTasks();
 refreshMeetings();
