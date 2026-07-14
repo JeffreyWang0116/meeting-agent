@@ -129,9 +129,14 @@ class RagIndex:
                 self._flush()
             return removed
 
-    def search(self, query: str, k: int = 4) -> list[dict]:
+    def search(
+        self, query: str, k: int = 4, meeting_ids: list[str] | None = None
+    ) -> list[dict]:
         with self._lock:
             records = list(self._records)
+        if meeting_ids is not None:  # 限定檢索範圍（詢問時複選會議）
+            allowed = set(meeting_ids)
+            records = [r for r in records if r["meeting_id"] in allowed]
         if not records:
             return []
         [qvec] = self._embedder.embed([query])
@@ -179,14 +184,19 @@ class AskAgent:
         self.top_k = top_k
         self._generate = generate or self._generate_with_gemini
 
-    def ask(self, question: str) -> dict:
+    def ask(self, question: str, meeting_ids: list[str] | None = None) -> dict:
         question = question.strip()
         if not question:
             raise ValueError("問題不可為空")
         self._index.sync(self._store)
-        hits = self._index.search(question, k=self.top_k)
+        hits = self._index.search(question, k=self.top_k, meeting_ids=meeting_ids)
         if not hits:
-            return {"answer": "目前還沒有任何會議紀錄可供查詢，先分析一場會議吧。", "sources": []}
+            message = (
+                "所選會議中沒有可檢索的內容，換個範圍或先分析一場會議吧。"
+                if meeting_ids is not None
+                else "目前還沒有任何會議紀錄可供查詢，先分析一場會議吧。"
+            )
+            return {"answer": message, "sources": []}
 
         context = "\n\n".join(f"【{h['title']}｜{h['date']}】\n{h['text']}" for h in hits)
         answer = (self._generate(_ASK_PROMPT.format(context=context, question=question)) or "").strip()

@@ -54,6 +54,7 @@ class FinishRequest(BaseModel):
 
 class AskRequest(BaseModel):
     question: str
+    meeting_ids: Optional[list[str]] = None  # 限定檢索範圍（複選會議）；None = 全部
 
 
 class GlossaryRequest(BaseModel):
@@ -291,7 +292,7 @@ def create_app(
         """RAG 跨會議問答：檢索歷史會議片段，交給 Gemini 依據回答。"""
         usage.record("ask")
         try:
-            return ask_agent.ask(req.question)
+            return ask_agent.ask(req.question, meeting_ids=req.meeting_ids)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc))
         except Exception as exc:  # 金鑰未設、配額爆掉…原因要透明

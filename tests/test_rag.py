@@ -113,6 +113,22 @@ def test_sync_is_incremental(tmp_path):
     assert emb.calls == calls_after_first
 
 
+def test_search_can_scope_to_selected_meetings(tmp_path):
+    """詢問會議可複選範圍：檢索只在所選會議內進行。"""
+    store = LocalJsonStore(tmp_path / "db.json")
+    id1 = store.save_meeting(make_analysis(), transcript="Kevin：API 由小明負責。")
+    id2 = store.save_meeting(make_analysis(), transcript="Amy：資料庫下週遷移。")
+    index = RagIndex(tmp_path / "rag.json", embedder=FakeEmbedder())
+    index.sync(store)
+
+    hits = index.search("API 誰負責？", k=10, meeting_ids=[id2])
+    assert hits
+    assert all(h["meeting_id"] == id2 for h in hits)
+    assert index.search("API", k=10, meeting_ids=[]) == []  # 空範圍 = 無結果
+    # 不給範圍 → 全部會議
+    assert {h["meeting_id"] for h in index.search("API", k=10)} == {id1, id2}
+
+
 def test_drop_meeting_invalidates_index_and_resync_reembeds(tmp_path):
     """會議被編輯/刪除後索引要作廢，下次 sync 用新內容重建，問答才不會回舊資料。"""
     store = make_store_with_meeting(tmp_path)

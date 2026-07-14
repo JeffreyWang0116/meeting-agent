@@ -357,9 +357,26 @@ def test_ask_with_no_meetings_answers_gracefully(client):
     assert body["sources"] == []
 
 
+def test_ask_passes_meeting_ids_scope(tmp_path):
+    captured = {}
+
+    class ScopeAsk:
+        def ask(self, question, meeting_ids=None):
+            captured["meeting_ids"] = meeting_ids
+            return {"answer": "ok", "sources": []}
+
+    settings = Settings(gemini_api_key=None, data_dir=tmp_path)
+    app = create_app(settings, transcriber=FakeTranscriber(), ask_agent=ScopeAsk())
+    c = TestClient(app)
+    c.post("/api/ask", json={"question": "誰負責？", "meeting_ids": ["m1", "m2"]})
+    assert captured["meeting_ids"] == ["m1", "m2"]
+    c.post("/api/ask", json={"question": "誰負責？"})
+    assert captured["meeting_ids"] is None
+
+
 def test_ask_with_fake_agent_returns_answer_and_counts_usage(tmp_path):
     class FakeAsk:
-        def ask(self, question):
+        def ask(self, question, meeting_ids=None):
             return {"answer": f"回答：{question}", "sources": [{"meeting_id": "m1"}]}
 
     settings = Settings(gemini_api_key=None, data_dir=tmp_path)
@@ -373,7 +390,7 @@ def test_ask_with_fake_agent_returns_answer_and_counts_usage(tmp_path):
 
 def test_ask_backend_failure_returns_502(tmp_path):
     class BrokenAsk:
-        def ask(self, question):
+        def ask(self, question, meeting_ids=None):
             raise RuntimeError("429 RESOURCE_EXHAUSTED")
 
     settings = Settings(gemini_api_key=None, data_dir=tmp_path)

@@ -380,6 +380,14 @@
     font-family: var(--mono); font-size: .74rem; color: var(--faint);
     border: 1px solid var(--border); border-radius: 999px; padding: 2px 10px; background: var(--card);
   }
+  .ask-scope { border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--card-2); }
+  .ask-scope > summary { padding: 9px 14px; cursor: pointer; font-size: .84rem; color: var(--muted); user-select: none; }
+  .ask-scope > summary:hover { color: var(--ink); }
+  .ask-scope-list { display: flex; flex-direction: column; gap: 4px; padding: 4px 14px 12px; max-height: 220px; overflow-y: auto; }
+  .ask-scope-list label { display: flex; gap: 9px; align-items: center; font-size: .86rem; color: var(--muted); cursor: pointer; }
+  .ask-scope-list label:hover { color: var(--ink); }
+  .ask-scope-list input[type="checkbox"] { accent-color: var(--accent); }
+  .ask-scope-list .meta { color: var(--faint); font-size: .76rem; font-family: var(--mono); }
   .ask-bar { display: flex; gap: 10px; align-items: center; }
   #askInput {
     flex: 1; min-width: 0; padding: 11px 14px; font-family: var(--sans); font-size: .93rem; color: var(--ink);
@@ -839,6 +847,10 @@
         詢問會議
       </h2>
     </div>
+    <details class="ask-scope">
+      <summary id="askScopeSummary">範圍：全部會議（可複選特定會議一起詢問）</summary>
+      <div class="ask-scope-list" id="askScopeList"><p class="empty-note">尚無會議</p></div>
+    </details>
     <div class="ask-log" id="askLog"></div>
     <div class="ask-bar">
       <input type="text" id="askInput">
@@ -1479,6 +1491,7 @@ async function refreshMeetings() {
   try {
     allMeetings = (await jsonOrThrow(await fetch("/api/meetings"))).meetings;
     renderMeetings();
+    renderAskScope();
   } catch (e) { /* 靜默 */ }
 }
 
@@ -1698,6 +1711,34 @@ $("tagFilter").addEventListener("click", e => {
 });
 
 // ---- 跨會議問答（RAG） ----
+// 範圍複選：勾了哪些會議就只在那些會議裡檢索；都不勾 = 全部
+const askScopeIds = new Set();
+
+function renderAskScope() {
+  const list = $("askScopeList");
+  [...askScopeIds].forEach(id => {  // 會議被刪掉時同步移除
+    if (!allMeetings.some(m => m.id === id)) askScopeIds.delete(id);
+  });
+  list.innerHTML = allMeetings.length
+    ? allMeetings.map(m => `<label>
+        <input type="checkbox" value="${esc(m.id)}" ${askScopeIds.has(m.id) ? "checked" : ""}>
+        <span>${esc(m.meeting.title)}</span>
+        <span class="meta">${esc(m.meeting.date)}</span>
+      </label>`).join("")
+    : `<p class="empty-note">尚無會議</p>`;
+  $("askScopeSummary").textContent = askScopeIds.size
+    ? `範圍：已選 ${askScopeIds.size} 場會議`
+    : "範圍：全部會議（可複選特定會議一起詢問）";
+}
+
+$("askScopeList").addEventListener("change", e => {
+  const cb = e.target.closest("input[type=checkbox]");
+  if (!cb) return;
+  if (cb.checked) askScopeIds.add(cb.value);
+  else askScopeIds.delete(cb.value);
+  renderAskScope();
+});
+
 async function sendAsk() {
   const q = $("askInput").value.trim();
   if (!q) return;
@@ -1717,7 +1758,10 @@ async function sendAsk() {
     const r = await jsonOrThrow(await fetch("/api/ask", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ question: q }),
+      body: JSON.stringify({
+        question: q,
+        meeting_ids: askScopeIds.size ? [...askScopeIds] : null,
+      }),
     }));
     slot.classList.remove("pending");
     slot.innerHTML = `<span>A</span><div>${esc(r.answer)}${
