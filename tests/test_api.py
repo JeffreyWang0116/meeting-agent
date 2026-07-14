@@ -400,6 +400,23 @@ def test_ask_backend_failure_returns_502(tmp_path):
     assert "RESOURCE_EXHAUSTED" in resp.json()["detail"]
 
 
+# ---- 關鍵字搜尋 ----
+
+def test_keyword_search_finds_meetings_with_snippet(client):
+    make_meeting(client)  # 逐字稿 = 「鈺翔下週一交 prompt」
+    body = client.get("/api/search", params={"q": "prompt"}).json()
+    assert body["hits"]
+    hit = body["hits"][0]
+    assert hit["title"] == "專題進度會議"
+    assert "prompt" in hit["snippet"].lower()
+    assert hit["meeting_id"]
+    # 大小寫不敏感
+    assert client.get("/api/search", params={"q": "PROMPT"}).json()["hits"]
+    # 沒中就空陣列；空關鍵字要擋
+    assert client.get("/api/search", params={"q": "絕不存在的字串xyz"}).json()["hits"] == []
+    assert client.get("/api/search", params={"q": "  "}).status_code == 400
+
+
 # ---- 翻譯 ----
 
 def make_client_with_translator(tmp_path, translator):

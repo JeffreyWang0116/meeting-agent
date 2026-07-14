@@ -287,6 +287,46 @@ def create_app(
         """主動提醒：逾期/即將到期/未指派任務的催辦草稿＋未決事項追問。"""
         return scan_reminders(store.list_tasks(), store.list_meetings(), due_soon_days=days)
 
+    @app.get("/api/search")
+    def keyword_search(q: str = ""):
+        """關鍵字精確搜尋（標題/摘要/決議/逐字稿），與語意問答互補。"""
+        keyword = q.strip()
+        if not keyword:
+            raise HTTPException(status_code=400, detail="請輸入要搜尋的關鍵字")
+        kw = keyword.lower()
+        hits = []
+        for meta in store.list_meetings():
+            record = store.get_meeting(meta["id"]) or meta
+            info = record.get("meeting", {})
+            fields = [
+                ("標題", info.get("title") or ""),
+                ("摘要", info.get("summary") or ""),
+                ("決議", "\n".join(d.get("description") or "" for d in record.get("decisions", []))),
+                ("逐字稿", record.get("transcript") or ""),
+            ]
+            for label, text in fields:
+                idx = text.lower().find(kw)
+                if idx < 0:
+                    continue
+                start = max(0, idx - 30)
+                end = min(len(text), idx + len(keyword) + 50)
+                snippet = (
+                    ("…" if start > 0 else "")
+                    + text[start:end].replace("\n", " ")
+                    + ("…" if end < len(text) else "")
+                )
+                hits.append({
+                    "meeting_id": record["id"],
+                    "title": info.get("title", ""),
+                    "date": info.get("date", ""),
+                    "field": label,
+                    "snippet": snippet,
+                })
+                break  # 每場會議最多回一筆命中
+            if len(hits) >= 20:
+                break
+        return {"keyword": keyword, "hits": hits}
+
     @app.post("/api/ask")
     def ask_meetings(req: AskRequest):
         """RAG 跨會議問答：檢索歷史會議片段，交給 Gemini 依據回答。"""

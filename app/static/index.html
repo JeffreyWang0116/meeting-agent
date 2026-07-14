@@ -389,6 +389,22 @@
   .ask-scope-list input[type="checkbox"] { accent-color: var(--accent); }
   .ask-scope-list .meta { color: var(--faint); font-size: .76rem; font-family: var(--mono); }
   .ask-bar { display: flex; gap: 10px; align-items: center; }
+  .ask-search-hits {
+    display: none; flex-direction: column; gap: 6px;
+    border: 1px solid var(--border); border-radius: var(--radius-md);
+    background: var(--card-2); padding: 10px;
+  }
+  .ask-hits-head { font-size: .76rem; color: var(--faint); padding: 0 4px; }
+  .ask-hit {
+    display: flex; flex-direction: column; gap: 2px; cursor: pointer;
+    padding: 8px 10px; border-radius: var(--radius-sm); border: 1px solid transparent;
+    transition: background .12s, border-color .12s;
+  }
+  .ask-hit:hover { background: var(--card-3); border-color: var(--border); }
+  .ask-hit b { font-size: .86rem; }
+  .ask-hit .snippet { font-size: .8rem; color: var(--muted); }
+  .ask-hit .snippet mark { background: var(--accent-soft); color: var(--accent); padding: 0 2px; border-radius: 2px; }
+  .ask-hit .meta { font-size: .72rem; color: var(--faint); font-family: var(--mono); }
   #askInput {
     flex: 1; min-width: 0; padding: 11px 14px; font-family: var(--sans); font-size: .93rem; color: var(--ink);
     background: var(--card-2); border: 1px solid var(--border); border-radius: var(--radius-md);
@@ -859,6 +875,8 @@
         查詢
       </button>
     </div>
+    <div class="ask-search-hits" id="askSearchHits"></div>
+    <p class="hint">打字會即時列出含關鍵字的會議，按「查詢」則是把問題交給 AI 依會議內容回答。</p>
   </div>
 
   <!-- 結果 -->
@@ -1743,6 +1761,7 @@ async function sendAsk() {
   const q = $("askInput").value.trim();
   if (!q) return;
   $("askInput").value = "";
+  hideSearchHits();
   const log = $("askLog");
   log.style.display = "flex";
   log.insertAdjacentHTML("beforeend",
@@ -1780,6 +1799,52 @@ async function sendAsk() {
 }
 $("btnAsk").addEventListener("click", sendAsk);
 $("askInput").addEventListener("keydown", e => { if (e.key === "Enter") sendAsk(); });
+
+// ---- 一框兩用：打字即時關鍵字搜尋（精確比對），按查詢才是問 AI ----
+let searchTimer = null, searchSeq = 0;
+
+function hideSearchHits() { $("askSearchHits").style.display = "none"; }
+
+function snippetHtml(snippet, keyword) {
+  const idx = snippet.toLowerCase().indexOf(keyword.toLowerCase());
+  if (idx < 0) return esc(snippet);
+  return esc(snippet.slice(0, idx)) +
+    `<mark>${esc(snippet.slice(idx, idx + keyword.length))}</mark>` +
+    esc(snippet.slice(idx + keyword.length));
+}
+
+$("askInput").addEventListener("input", () => {
+  clearTimeout(searchTimer);
+  const kw = $("askInput").value.trim();
+  if (kw.length < 2) { hideSearchHits(); return; }
+  searchTimer = setTimeout(async () => {
+    const seq = ++searchSeq;
+    try {
+      const r = await jsonOrThrow(await fetch(`/api/search?q=${encodeURIComponent(kw)}`));
+      if (seq !== searchSeq) return;  // 已有更新的搜尋，丟棄舊結果
+      const box = $("askSearchHits");
+      if (!r.hits.length) { hideSearchHits(); return; }
+      box.innerHTML =
+        `<span class="ask-hits-head">含「${esc(r.keyword)}」的會議（點擊開啟）</span>` +
+        r.hits.map(h => `<div class="ask-hit" data-id="${esc(h.meeting_id)}">
+            <b>${esc(h.title)}</b>
+            <span class="snippet">${snippetHtml(h.snippet, r.keyword)}</span>
+            <span class="meta">${esc(h.date)} · ${esc(h.field)}</span>
+          </div>`).join("");
+      box.style.display = "flex";
+    } catch (err) { hideSearchHits(); }
+  }, 300);
+});
+
+$("askSearchHits").addEventListener("click", e => {
+  const hit = e.target.closest(".ask-hit");
+  if (!hit) return;
+  hideSearchHits();
+  const panel = $("meetingPanel");
+  panel.classList.remove("collapsed");  // 歷史面板若收合先展開
+  openMeetingDetail(hit.dataset.id);
+  panel.scrollIntoView({ behavior: "smooth", block: "start" });
+});
 // 每則問答各自刪除；刪到全空就把整個對話框收起來
 $("askLog").addEventListener("click", e => {
   const del = e.target.closest(".del-ask");
