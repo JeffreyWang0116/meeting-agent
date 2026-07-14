@@ -468,6 +468,19 @@
   .meeting-info { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
   .meeting-meta { color: var(--faint); font-size: .78rem; }
   .meeting-ops { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .meeting-tags { display: flex; gap: 5px; flex-wrap: wrap; margin-top: 4px; }
+  .mtag {
+    font-size: .72rem; padding: 1px 9px; border-radius: 999px;
+    border: 1px solid var(--accent-border); background: var(--accent-soft); color: var(--accent);
+  }
+  .tag-filter { display: flex; gap: 6px; flex-wrap: wrap; }
+  .tag-chip {
+    font-size: .78rem; font-weight: 500; padding: 4px 12px; border-radius: 999px; cursor: pointer;
+    border: 1px solid var(--border); background: var(--card-3); color: var(--muted);
+    transition: border-color .15s, color .15s, background .15s;
+  }
+  .tag-chip:hover { border-color: var(--ink); color: var(--ink); }
+  .tag-chip.active { background: var(--ink); color: var(--bg); border-color: var(--ink); }
 
   /* 歷史會議展開詳情 */
   .meeting-detail {
@@ -946,6 +959,7 @@
         歷史會議
       </h2>
     </div>
+    <div class="tag-filter" id="tagFilter" style="display:none"></div>
     <div id="meetingRows"><p class="empty-note">尚無會議紀錄</p></div>
   </div>
 
@@ -1140,6 +1154,7 @@ function renderResult(result, transcript) {
     `<span class="meta-chip">${icon("calendar", "i-sm")}${esc(m.date)}</span>` +
     `<span class="meta-chip">${esc($("meetingKind").value)}</span>` +
     m.attendees.map(p => `<span class="meta-chip">${icon("user", "i-sm")}${esc(p)}</span>`).join("") +
+    (a.tags || []).map(t => `<span class="meta-chip"><span class="mtag">${esc(t)}</span></span>`).join("") +
     statsChip;
   $("rSummary").textContent = m.summary;
   // 摘要翻譯：中文摘要→譯成英文，外文摘要→譯成中文
@@ -1373,6 +1388,8 @@ function meetingDetailHtml(id) {
     return `<div class="meeting-detail detail-edit">
         <label class="lbl">標題</label>
         <input type="text" id="dTitle" value="${esc(d.meeting.title)}">
+        <label class="lbl">分類標籤（用「、」或逗號分隔，可自訂）</label>
+        <input type="text" id="dTags" value="${esc((d.tags || []).join("、"))}">
         <label class="lbl">AI 摘要</label>
         <textarea id="dSummary" rows="4">${esc(d.meeting.summary || "")}</textarea>
         <label class="lbl">逐字稿全文</label>
@@ -1413,12 +1430,34 @@ function meetingDetailHtml(id) {
     </div>`;
 }
 
+let activeTag = "";  // 歷史會議標籤篩選（"" = 全部）
+
+function renderTagFilter() {
+  const tags = new Set();
+  allMeetings.forEach(m => {
+    if (m.kind) tags.add(m.kind);
+    (m.tags || []).forEach(t => tags.add(t));
+  });
+  const bar = $("tagFilter");
+  if (!tags.size) { bar.style.display = "none"; return; }
+  if (activeTag && !tags.has(activeTag)) activeTag = "";
+  bar.style.display = "flex";
+  bar.innerHTML = [`<span class="tag-chip ${activeTag ? "" : "active"}" data-tag="">全部</span>`]
+    .concat([...tags].map(t =>
+      `<span class="tag-chip ${t === activeTag ? "active" : ""}" data-tag="${esc(t)}">${esc(t)}</span>`))
+    .join("");
+}
+
 function renderMeetings() {
-  $("meetingRows").innerHTML = allMeetings.length
-    ? allMeetings.map(m => `<div class="meeting-item ${m.id === expandedMeetingId ? "expanded" : ""}">
+  renderTagFilter();
+  const shown = allMeetings.filter(m =>
+    !activeTag || m.kind === activeTag || (m.tags || []).includes(activeTag));
+  $("meetingRows").innerHTML = shown.length
+    ? shown.map(m => `<div class="meeting-item ${m.id === expandedMeetingId ? "expanded" : ""}">
           <span class="meeting-info">
             <b>${esc(m.meeting.title)}</b>
             <span class="meeting-meta mono">${esc(m.meeting.date)}${m.kind ? ` · ${esc(m.kind)}` : ""} · ${esc(m.id)}</span>
+            ${(m.tags || []).length ? `<span class="meeting-tags">${m.tags.map(t => `<span class="mtag">${esc(t)}</span>`).join("")}</span>` : ""}
           </span>
           <span class="meeting-ops">
             <button class="ghost view-meeting" data-id="${esc(m.id)}">${m.id === expandedMeetingId ? "收合" : "查閱"}</button>
@@ -1426,7 +1465,7 @@ function renderMeetings() {
             <button class="del-btn del-meeting" data-id="${esc(m.id)}" title="刪除此會議與其任務" aria-label="刪除">✕</button>
           </span>
         </div>` + (m.id === expandedMeetingId ? meetingDetailHtml(m.id) : "")).join("")
-    : `<p class="empty-note">尚無會議紀錄</p>`;
+    : `<p class="empty-note">${allMeetings.length ? "沒有符合此標籤的會議" : "尚無會議紀錄"}</p>`;
   // 逐字稿泡泡要等 DOM 建立後渲染
   const view = document.getElementById("dTranscriptView");
   const d = meetingDetailCache[expandedMeetingId];
@@ -1496,6 +1535,7 @@ $("meetingRows").addEventListener("click", async e => {
           title: $("dTitle").value.trim() || "未命名會議",
           summary: $("dSummary").value.trim(),
           transcript: $("dTranscript").value,
+          tags: $("dTags").value.split(/[、,，\s]+/).map(t => t.trim()).filter(Boolean),
         }),
       }));
       meetingDetailCache[save.dataset.id] = updated;
@@ -1648,6 +1688,14 @@ $("reminderBody").addEventListener("click", async e => {
 });
 $("btnRefreshReminders").addEventListener("click", refreshReminders);
 refreshReminders();
+
+// 標籤篩選
+$("tagFilter").addEventListener("click", e => {
+  const chip = e.target.closest(".tag-chip");
+  if (!chip) return;
+  activeTag = chip.dataset.tag;
+  renderMeetings();
+});
 
 // ---- 跨會議問答（RAG） ----
 async function sendAsk() {

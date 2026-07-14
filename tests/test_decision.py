@@ -102,6 +102,14 @@ def test_analyze_passes_kind_into_prompt():
     assert "錄音種類：訪談" in captured["prompt"]
 
 
+def test_prompt_asks_for_tags():
+    """schema 要包含 tags：AI 自動建議分類標籤，供歷史會議篩選。"""
+    from app.agents.decision_agent import build_prompt
+
+    prompt = build_prompt("測試", MEETING_DATE)
+    assert '"tags"' in prompt
+
+
 def test_prompt_includes_glossary_terms():
     from app.agents.decision_agent import build_prompt
 

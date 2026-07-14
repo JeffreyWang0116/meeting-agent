@@ -53,6 +53,7 @@ class LocalJsonStore(TaskStore):
             "pending_items": dumped["pending_items"],
             "transcript": transcript,
             "kind": kind,
+            "tags": dumped.get("tags", []),
         }
         task_records = [
             {

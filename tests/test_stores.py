@@ -119,6 +119,13 @@ def test_old_db_without_status_gets_todo_on_list(tmp_path):
     assert LocalJsonStore(path).list_tasks()[0]["status"] == "todo"
 
 
+def test_save_meeting_stores_ai_suggested_tags(tmp_path):
+    store = LocalJsonStore(tmp_path / "db.json")
+    meeting_id = store.save_meeting(make_analysis())
+    assert store.get_meeting(meeting_id)["tags"] == ["專題", "進度會議"]
+    assert store.list_meetings()[0]["tags"] == ["專題", "進度會議"]
+
+
 def test_save_meeting_stores_kind(tmp_path):
     store = LocalJsonStore(tmp_path / "db.json")
     meeting_id = store.save_meeting(make_analysis(), kind="講座")

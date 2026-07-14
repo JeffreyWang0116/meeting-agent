@@ -261,6 +261,7 @@ def create_app(
             "meeting": dumped["meeting"],
             "decisions": dumped["decisions"],
             "pending_items": dumped["pending_items"],
+            "tags": dumped.get("tags", []),
         })
         tasks = store.replace_tasks(meeting_id, dumped["todos"])
         notifications = orchestrator.notifier.notify(meeting_id, analysis)

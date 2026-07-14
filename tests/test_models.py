@@ -33,6 +33,7 @@ def make_valid_payload():
         "pending_items": [
             {"topic": "要不要支援英文介面", "reason": "等指導教授意見"}
         ],
+        "tags": ["專題", "進度會議"],
     }
 
 
@@ -85,6 +86,7 @@ def test_lists_default_to_empty():
     assert analysis.decisions == []
     assert analysis.todos == []
     assert analysis.pending_items == []
+    assert analysis.tags == []  # 舊版 LLM 輸出沒有 tags 也要能解析
 
 
 def test_todo_priority_defaults_to_medium():

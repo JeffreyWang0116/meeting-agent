@@ -250,6 +250,17 @@ def test_get_meeting_detail_includes_transcript(client):
     assert client.get("/api/meetings/nope").status_code == 404
 
 
+def test_meeting_tags_from_analysis_and_editable(client):
+    meeting_id = make_meeting(client)
+    # 分析時 AI 建議的標籤直接入庫
+    assert client.get("/api/meetings").json()["meetings"][0]["tags"] == ["專題", "進度會議"]
+    # 可自訂修改
+    resp = client.patch(f"/api/meetings/{meeting_id}", json={"tags": ["客戶", "週會"]})
+    assert resp.status_code == 200
+    assert client.get(f"/api/meetings/{meeting_id}").json()["tags"] == ["客戶", "週會"]
+    assert client.patch(f"/api/meetings/{meeting_id}", json={"tags": "不是陣列"}).status_code == 400
+
+
 def test_patch_meeting_updates_title_and_transcript(client):
     meeting_id = make_meeting(client)
     resp = client.patch(

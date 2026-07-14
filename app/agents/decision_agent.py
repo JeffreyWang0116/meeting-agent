@@ -46,7 +46,8 @@ _SCHEMA_EXAMPLE = """{
   ],
   "pending_items": [
     {"topic": "議而未決的議題", "reason": "未決原因，沒有就填 null"}
-  ]
+  ],
+  "tags": ["2~4 個簡短分類標籤（2~6 字），例如：產品、客戶會議、週會"]
 }"""
 
 _WEEKDAY_ZH = "一二三四五六日"

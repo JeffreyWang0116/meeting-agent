@@ -41,3 +41,5 @@ class MeetingAnalysis(BaseModel):
     decisions: list[Decision] = Field(default_factory=list)
     todos: list[TodoItem] = Field(default_factory=list)
     pending_items: list[PendingItem] = Field(default_factory=list)
+    # AI 建議的分類標籤（供歷史會議篩選），使用者可再自訂修改
+    tags: list[str] = Field(default_factory=list)

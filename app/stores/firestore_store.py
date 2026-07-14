@@ -81,6 +81,7 @@ class FirestoreStore(TaskStore):
                 "pending_items": dumped["pending_items"],
                 "transcript": transcript,
                 "kind": kind,
+                "tags": dumped.get("tags", []),
             })
             for todo in dumped["todos"]:
                 task_id = uuid.uuid4().hex[:12]
