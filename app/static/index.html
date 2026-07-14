@@ -696,6 +696,10 @@
       <summary>
         <svg class="i-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5.5A1.5 1.5 0 0 1 5.5 4h13A1.5 1.5 0 0 1 20 5.5v13a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 18.5Z"/><path d="M8 9h8M8 13h8M8 17h5"/></svg>
         會議逐字稿（點任務卡的引用句可跳到出處）
+        <button class="ghost" id="btnCopyTranscript" style="margin-left:auto">
+          <svg class="i-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="8.5" y="8.5" width="12" height="12" rx="1.5"/><path d="M15.5 8.5V5a1.5 1.5 0 0 0-1.5-1.5H5A1.5 1.5 0 0 0 3.5 5v9A1.5 1.5 0 0 0 5 15.5h3.5"/></svg>
+          複製全文
+        </button>
       </summary>
       <div class="transcript-full" id="rTranscript"></div>
     </details>
@@ -874,12 +878,18 @@ function renderResult(result, transcript) {
   refreshReminders();
 }
 
-$("btnCopyDraft").addEventListener("click", async () => {
-  await navigator.clipboard.writeText($("rDraft").textContent);
-  const btn = $("btnCopyDraft");
+// 複製按鈕通用行為：複製後短暫顯示「已複製」
+async function copyWithFeedback(btn, text) {
+  await navigator.clipboard.writeText(text);
   const original = btn.innerHTML;
   btn.textContent = "已複製";
   setTimeout(() => (btn.innerHTML = original), 1500);
+}
+$("btnCopyDraft").addEventListener("click", () => copyWithFeedback($("btnCopyDraft"), $("rDraft").textContent));
+$("btnCopyTranscript").addEventListener("click", e => {
+  e.preventDefault();  // 按鈕在 <summary> 裡，避免同時觸發展開/收合
+  e.stopPropagation();
+  copyWithFeedback($("btnCopyTranscript"), currentTranscript);
 });
 
 // ---- 資料庫 ----
