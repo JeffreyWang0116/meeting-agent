@@ -232,6 +232,19 @@
     padding: 4px 6px; border-radius: var(--radius-sm); transition: color .15s, background .15s;
   }
   .del-btn:hover { color: var(--high); background: var(--high-soft); }
+  .edit-btn {
+    background: none; border: none; color: var(--faint); line-height: 1;
+    padding: 4px 6px; border-radius: var(--radius-sm); transition: color .15s, background .15s;
+  }
+  .edit-btn:hover { color: var(--accent); background: var(--accent-soft); }
+  .edit-btn.save { color: var(--low); }
+  .cell-input {
+    font-family: var(--sans); font-size: .84rem; color: var(--ink); width: 100%;
+    background: var(--card); border: 1px solid var(--accent-border); border-radius: var(--radius-sm);
+    padding: 5px 8px;
+  }
+  .cell-input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+  td .row-ops { display: flex; gap: 2px; align-items: center; }
 
   /* ---- 拖曳上傳 ---- */
   .dropzone {
@@ -896,15 +909,24 @@ $("btnCopyTranscript").addEventListener("click", e => {
 const STATUS_ZH = { todo: "待辦", doing: "進行中", done: "完成" };
 let allTasks = [];
 
-function renderTasks() {
-  const q = $("taskSearch").value.trim().toLowerCase();
-  const st = $("taskFilter").value;
-  const rows = allTasks.filter(t =>
-    (!st || t.status === st) &&
-    (!q || `${t.task} ${t.owner || ""} ${t.meeting_id}`.toLowerCase().includes(q))
-  );
-  $("taskRows").innerHTML = rows.length
-    ? rows.map(t => `<tr class="${t.status === "done" ? "row-done" : ""}">
+let editingTaskId = null;  // 目前列內編輯中的任務
+
+function taskRowHtml(t) {
+  if (t.id === editingTaskId) {
+    return `<tr>
+        <td><input class="cell-input" id="editTask" value="${esc(t.task)}"></td>
+        <td><input class="cell-input" id="editOwner" value="${esc(t.owner || "")}" placeholder="未指派"></td>
+        <td><input class="cell-input" id="editDue" type="date" value="${esc(t.due_date || "")}"></td>
+        <td><span class="pr-dot ${t.priority}"></span>${PRIORITY_ZH[t.priority] || esc(t.priority)}</td>
+        <td>${STATUS_ZH[t.status] || esc(t.status)}</td>
+        <td class="mono">${esc(t.meeting_id)}</td>
+        <td><div class="row-ops">
+          <button class="edit-btn save save-edit" data-id="${esc(t.id)}" title="儲存" aria-label="儲存">✓</button>
+          <button class="del-btn cancel-edit" title="取消" aria-label="取消">✕</button>
+        </div></td>
+      </tr>`;
+  }
+  return `<tr class="${t.status === "done" ? "row-done" : ""}">
         <td>${esc(t.task)}</td>
         <td>${t.owner ? esc(t.owner) : `<span class="unassigned">未指派</span>`}</td>
         <td class="mono">${esc(t.due_date || "—")}</td>
@@ -914,8 +936,24 @@ function renderTasks() {
             `<option value="${v}" ${v === t.status ? "selected" : ""}>${zh}</option>`).join("")}
         </select></td>
         <td class="mono">${esc(t.meeting_id)}</td>
-        <td><button class="del-btn" data-id="${esc(t.id)}" title="刪除此任務" aria-label="刪除">✕</button></td>
-      </tr>`).join("")
+        <td><div class="row-ops">
+          <button class="edit-btn start-edit" data-id="${esc(t.id)}" title="編輯名稱、負責人、期限" aria-label="編輯">
+            <svg class="i-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.8 2.8 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>
+          </button>
+          <button class="del-btn" data-id="${esc(t.id)}" title="刪除此任務" aria-label="刪除">✕</button>
+        </div></td>
+      </tr>`;
+}
+
+function renderTasks() {
+  const q = $("taskSearch").value.trim().toLowerCase();
+  const st = $("taskFilter").value;
+  const rows = allTasks.filter(t =>
+    (!st || t.status === st) &&
+    (!q || `${t.task} ${t.owner || ""} ${t.meeting_id}`.toLowerCase().includes(q))
+  );
+  $("taskRows").innerHTML = rows.length
+    ? rows.map(taskRowHtml).join("")
     : `<tr><td colspan="7" class="empty-note">${allTasks.length ? "沒有符合條件的任務" : "尚無任務"}</td></tr>`;
 }
 
@@ -943,6 +981,40 @@ $("taskRows").addEventListener("change", async e => {
 });
 
 $("taskRows").addEventListener("click", async e => {
+  const start = e.target.closest(".start-edit");
+  if (start) {
+    editingTaskId = start.dataset.id;
+    renderTasks();
+    $("editTask").focus();
+    return;
+  }
+  if (e.target.closest(".cancel-edit")) {
+    editingTaskId = null;
+    renderTasks();
+    return;
+  }
+  const save = e.target.closest(".save-edit");
+  if (save) {
+    const fields = {
+      task: $("editTask").value.trim(),
+      owner: $("editOwner").value.trim() || null,
+      due_date: $("editDue").value || null,
+    };
+    if (!fields.task) { showError("任務名稱不可為空"); return; }
+    try {
+      const updated = await jsonOrThrow(await fetch(`/api/tasks/${save.dataset.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(fields),
+      }));
+      const i = allTasks.findIndex(t => t.id === updated.id);
+      if (i >= 0) allTasks[i] = updated;
+      editingTaskId = null;
+      renderTasks();
+      refreshReminders();  // 期限改動可能新增/解除逾期提醒
+    } catch (err) { showError("更新任務失敗：" + err.message); }
+    return;
+  }
   const btn = e.target.closest(".del-btn");
   if (!btn) return;
   if (!confirm("確定要刪除這筆任務？")) return;
@@ -952,6 +1024,13 @@ $("taskRows").addEventListener("click", async e => {
     renderTasks();
     refreshReminders();
   } catch (err) { showError("刪除任務失敗：" + err.message); }
+});
+
+// 編輯列快捷鍵：Enter 儲存、Esc 取消
+$("taskRows").addEventListener("keydown", e => {
+  if (!e.target.closest(".cell-input")) return;
+  if (e.key === "Enter") $("taskRows").querySelector(".save-edit")?.click();
+  if (e.key === "Escape") { editingTaskId = null; renderTasks(); }
 });
 
 $("taskSearch").addEventListener("input", renderTasks);
