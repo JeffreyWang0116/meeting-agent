@@ -169,6 +169,23 @@ def create_app(
     def index():
         return FileResponse(STATIC_DIR / "index.html")
 
+    # ---- PWA：manifest / service worker / 圖示 ----
+    # sw.js 必須從根路徑供應，service worker 的 scope 才涵蓋整個站
+
+    @app.get("/manifest.webmanifest", include_in_schema=False)
+    def pwa_manifest():
+        return FileResponse(
+            STATIC_DIR / "manifest.webmanifest", media_type="application/manifest+json"
+        )
+
+    @app.get("/sw.js", include_in_schema=False)
+    def pwa_sw():
+        return FileResponse(STATIC_DIR / "sw.js", media_type="text/javascript")
+
+    @app.get("/static/icon.svg", include_in_schema=False)
+    def pwa_icon():
+        return FileResponse(STATIC_DIR / "icon.svg", media_type="image/svg+xml")
+
     @app.get("/api/health")
     def health():
         return {

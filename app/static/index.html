@@ -4,6 +4,10 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#151515">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/static/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/static/icon.svg">
 <title>主動式會議 Agent</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -2225,6 +2229,11 @@ $("glosList").addEventListener("click", e => {
     $("fileStatus").textContent = `已選擇：${files[0].name}`;
   });
 })();
+
+// ---- PWA：註冊 service worker（讓手機可「加入主畫面」以近原生方式使用） ----
+if ("serviceWorker" in navigator) {
+  navigator.serviceWorker.register("/sw.js").catch(() => { /* 不支援就當一般網頁 */ });
+}
 
 // ---- 觸覺回饋：按鈕/分頁按下時輕震（支援的裝置多為手機）；桌機靠 :active 視覺回饋 ----
 (function () {

@@ -1,0 +1,13 @@
+{
+  "name": "主動式會議 Agent",
+  "short_name": "會議 Agent",
+  "description": "會議錄音/文字自動變成任務清單、確認信與行事曆事件，支援跨會議問答",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#151515",
+  "theme_color": "#151515",
+  "icons": [
+    { "src": "/static/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}

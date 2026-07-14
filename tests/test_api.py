@@ -525,3 +525,16 @@ def test_index_serves_html(client):
     resp = client.get("/")
     assert resp.status_code == 200
     assert "text/html" in resp.headers["content-type"]
+
+
+def test_pwa_manifest_sw_and_icon_served(client):
+    resp = client.get("/manifest.webmanifest")
+    assert resp.status_code == 200
+    assert resp.json()["name"] == "主動式會議 Agent"
+    assert resp.json()["icons"]
+
+    resp = client.get("/sw.js")
+    assert resp.status_code == 200
+    assert "javascript" in resp.headers["content-type"]
+
+    assert client.get("/static/icon.svg").status_code == 200
