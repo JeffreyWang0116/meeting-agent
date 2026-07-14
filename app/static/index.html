@@ -148,6 +148,33 @@
   .set-note { font-size: .78rem; color: var(--faint); padding: 2px 8px 4px; }
   .set-sep { border: none; border-top: 1px solid var(--border); margin: 4px 0; }
 
+  /* ---- 彈出視窗（自訂詞彙等） ---- */
+  .modal-overlay {
+    display: none; position: fixed; inset: 0; z-index: 100;
+    background: rgba(0, 0, 0, .55); align-items: flex-start; justify-content: center;
+    padding: 8vh 16px 16px;
+  }
+  .modal-overlay.open { display: flex; }
+  .modal {
+    background: var(--card-2); border: 1px solid var(--border-strong); border-radius: var(--radius);
+    padding: 22px; width: min(520px, 100%); max-height: 80vh; overflow-y: auto;
+    display: flex; flex-direction: column; gap: 14px;
+  }
+  .glossary-add { display: flex; gap: 8px; flex-wrap: wrap; }
+  .glossary-add input {
+    flex: 1 1 130px; min-width: 0; padding: 9px 12px; font-family: var(--sans); font-size: .9rem;
+    color: var(--ink); background: var(--card); border: 1px solid var(--border); border-radius: var(--radius-md);
+  }
+  .glossary-add input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+  .glos-item {
+    display: flex; align-items: center; gap: 10px;
+    border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--card);
+    padding: 9px 12px; font-size: .9rem;
+  }
+  .glos-item + .glos-item { margin-top: 8px; }
+  .glos-note { color: var(--faint); font-size: .8rem; }
+  .glos-item .del-btn { margin-left: auto; }
+
   /* ---- 錯誤橫幅 ---- */
   .banner {
     display: none; align-items: center; gap: 10px; padding: 13px 16px; border-radius: var(--radius-md);
@@ -577,6 +604,15 @@
             <hr class="set-sep">
             <div class="set-row">
               <span class="set-label">
+                <svg class="i-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2Z"/></svg>
+                自訂詞彙
+              </span>
+              <button class="ghost" id="btnGlossary">管理</button>
+            </div>
+            <p class="set-note">加入人名、產品名等專有名詞，轉錄與分析會優先採用這些寫法。</p>
+            <hr class="set-sep">
+            <div class="set-row">
+              <span class="set-label">
                 <svg class="i-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 18 0 9 9 0 0 0-18 0Z"/><path d="M12 7v5l3 2"/></svg>
                 今日 API 用量
               </span>
@@ -820,6 +856,23 @@
       </h2>
     </div>
     <div id="meetingRows"><p class="empty-note">尚無會議紀錄</p></div>
+  </div>
+
+  <!-- 自訂詞彙管理視窗 -->
+  <div class="modal-overlay" id="glossaryModal">
+    <div class="modal">
+      <div class="panel-head">
+        <h2>自訂詞彙</h2>
+        <button class="panel-x" id="btnGlossaryClose" aria-label="關閉">✕</button>
+      </div>
+      <p class="hint">會議中常出現的人名（例：王霖翔）或產品名，加進詞彙表後，錄音轉文字與 AI 分析都會優先採用這些寫法，之後就不必人工校正。</p>
+      <div class="glossary-add">
+        <input type="text" id="glosTerm" placeholder="詞彙，例：王霖翔">
+        <input type="text" id="glosNote" placeholder="說明（選填），例：人名">
+        <button class="primary" id="btnGlosAdd">新增</button>
+      </div>
+      <div id="glosList"><p class="empty-note">尚無詞彙</p></div>
+    </div>
   </div>
 
   <!-- 隱私與資料處理 -->
@@ -1518,6 +1571,62 @@ $("rTodos").addEventListener("click", e => {
     }
   });
 })();
+
+// ---- 自訂詞彙管理 ----
+let glosTerms = [];
+
+function renderGlossary() {
+  $("glosList").innerHTML = glosTerms.length
+    ? glosTerms.map((t, i) => `<div class="glos-item">
+        <b>${esc(t.term)}</b>
+        ${t.note ? `<span class="glos-note">${esc(t.note)}</span>` : ""}
+        <button class="del-btn" data-i="${i}" title="刪除此詞彙" aria-label="刪除">✕</button>
+      </div>`).join("")
+    : `<p class="empty-note">尚無詞彙</p>`;
+}
+
+async function saveGlossary() {
+  try {
+    const r = await jsonOrThrow(await fetch("/api/glossary", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ terms: glosTerms }),
+    }));
+    glosTerms = r.terms;
+    renderGlossary();
+  } catch (err) { showError("儲存詞彙失敗：" + err.message); }
+}
+
+$("btnGlossary").addEventListener("click", async () => {
+  $("settingsMenu").classList.remove("open");
+  $("glossaryModal").classList.add("open");
+  try {
+    glosTerms = (await jsonOrThrow(await fetch("/api/glossary"))).terms;
+    renderGlossary();
+  } catch (err) { /* 讀取失敗仍可新增 */ }
+  $("glosTerm").focus();
+});
+$("btnGlossaryClose").addEventListener("click", () => $("glossaryModal").classList.remove("open"));
+$("glossaryModal").addEventListener("click", e => {
+  if (e.target === $("glossaryModal")) $("glossaryModal").classList.remove("open");
+});
+$("btnGlosAdd").addEventListener("click", () => {
+  const term = $("glosTerm").value.trim();
+  if (!term) return;
+  glosTerms.push({ term, note: $("glosNote").value.trim() });
+  $("glosTerm").value = "";
+  $("glosNote").value = "";
+  saveGlossary();
+  $("glosTerm").focus();
+});
+$("glosTerm").addEventListener("keydown", e => { if (e.key === "Enter") $("btnGlosAdd").click(); });
+$("glosNote").addEventListener("keydown", e => { if (e.key === "Enter") $("btnGlosAdd").click(); });
+$("glosList").addEventListener("click", e => {
+  const btn = e.target.closest(".del-btn");
+  if (!btn) return;
+  glosTerms.splice(Number(btn.dataset.i), 1);
+  saveGlossary();
+});
 
 // ---- 拖曳上傳 ----
 (function () {

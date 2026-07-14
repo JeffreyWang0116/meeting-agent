@@ -14,6 +14,7 @@ from datetime import date
 from pydantic import ValidationError
 
 from app.gemini_keys import KeyPool, call_with_rotation
+from app.glossary import glossary_prompt_line
 from app.models import MeetingAnalysis
 
 
@@ -63,7 +64,7 @@ KIND_HINTS = {
 
 PROMPT_TEMPLATE = """你是「主動式會議 Agent」的決策模組。以下是一場會議的逐字稿或文字紀錄，內容可能中英夾雜、口語且混亂。請仔細閱讀並萃取結構化資訊。
 
-會議日期：{meeting_date}（星期{weekday}）{kind_line}
+會議日期：{meeting_date}（星期{weekday}）{kind_line}{glossary_line}
 
 務必遵守的規則：
 1. 只輸出一個 JSON 物件。不要 markdown 圍欄、不要任何額外說明文字。
@@ -91,14 +92,24 @@ _RETRY_SUFFIX = """
 請修正並重新只輸出一個符合上述結構的 JSON 物件。"""
 
 
-def build_prompt(transcript: str, meeting_date: date, kind: str | None = None) -> str:
+def build_prompt(
+    transcript: str,
+    meeting_date: date,
+    kind: str | None = None,
+    glossary: list[dict] | None = None,
+) -> str:
     kind_line = ""
     if kind:
         kind_line = f"\n錄音種類：{kind}。{KIND_HINTS.get(kind, '')}"
+    glossary_line = ""
+    terms = glossary_prompt_line(glossary or [])
+    if terms:
+        glossary_line = f"\n已知詞彙表（輸出的人名與專有名詞一律以此寫法為準）：{terms}。"
     return PROMPT_TEMPLATE.format(
         meeting_date=meeting_date.isoformat(),
         weekday=_WEEKDAY_ZH[meeting_date.weekday()],
         kind_line=kind_line,
+        glossary_line=glossary_line,
         schema=_SCHEMA_EXAMPLE,
         transcript=transcript,
     )
@@ -116,6 +127,7 @@ class DecisionAgent:
         generate=None,
         max_attempts: int = 3,
         api_keys=None,
+        glossary=None,
     ):
         # 多把 key 輪替（429 換下一把）；單把 api_key 為向後相容寫法
         self._pool = KeyPool(api_keys if api_keys else [api_key])
@@ -124,6 +136,8 @@ class DecisionAgent:
         self.max_attempts = max_attempts
         # 可注入 callable(prompt) -> str，測試時不需要真的呼叫 Gemini
         self._generate = generate or self._generate_with_gemini
+        # callable() -> list[dict]：自訂詞彙表，每次分析時讀最新內容
+        self._glossary = glossary
 
     def _generate_with_gemini(self, prompt: str) -> str:
         if not self._pool:
@@ -148,7 +162,12 @@ class DecisionAgent:
         self, transcript: str, meeting_date: date | None = None, kind: str | None = None
     ) -> MeetingAnalysis:
         meeting_date = meeting_date or date.today()
-        base_prompt = build_prompt(transcript, meeting_date, kind=kind)
+        base_prompt = build_prompt(
+            transcript,
+            meeting_date,
+            kind=kind,
+            glossary=self._glossary() if self._glossary else None,
+        )
 
         prompt = base_prompt
         last_error: Exception | None = None

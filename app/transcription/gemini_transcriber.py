@@ -13,6 +13,7 @@ import time
 from pathlib import Path
 
 from app.gemini_keys import KeyPool, call_with_rotation
+from app.glossary import glossary_prompt_line
 from app.transcription import media
 
 # Gemini 原生支援的音訊副檔名，這些不需要再轉檔
@@ -39,6 +40,7 @@ class GeminiTranscriber:
         upload=None,
         generate=None,
         api_keys=None,
+        glossary=None,
     ):
         # 多把 key 輪替（429 換下一把）；單把 api_key 為向後相容寫法
         self._pool = KeyPool(api_keys if api_keys else [api_key])
@@ -49,6 +51,17 @@ class GeminiTranscriber:
         self.model_size = model
         self._upload = upload
         self._generate = generate
+        # callable() -> list[dict]：自訂詞彙表，每次轉錄時讀最新內容
+        self._glossary = glossary
+
+    def build_prompt(self) -> str:
+        terms = glossary_prompt_line(self._glossary() if self._glossary else [])
+        if not terms:
+            return _TRANSCRIBE_PROMPT
+        return (
+            _TRANSCRIBE_PROMPT
+            + f"已知詞彙表（聽到相近發音時，人名與專有名詞一律採用以下寫法）：{terms}。"
+        )
 
     # ---- 對外介面（與 Whisper Transcriber 相同簽名）----
 
@@ -106,7 +119,7 @@ class GeminiTranscriber:
             uploaded = client.files.get(name=uploaded.name)
         response = client.models.generate_content(
             model=self.model,
-            contents=[_TRANSCRIBE_PROMPT, uploaded],
+            contents=[self.build_prompt(), uploaded],
             config={"temperature": 0.0},
         )
         return response.text or ""

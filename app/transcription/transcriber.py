@@ -56,6 +56,7 @@ class Transcriber:
         model_size: str | None = None,
         device: str | None = None,
         model=None,
+        glossary=None,
     ):
         self._configured_model = model_size
         self._configured_device = device
@@ -63,6 +64,8 @@ class Transcriber:
         self._lock = threading.Lock()
         self.device: str | None = None
         self.model_size: str | None = None
+        # callable() -> list[dict]：自訂詞彙表，每次轉錄時讀最新內容
+        self._glossary = glossary
 
     def _ensure_model(self):
         with self._lock:
@@ -120,10 +123,16 @@ class Transcriber:
             return self._run(self._rebuild_on_cpu(), path, on_progress)
 
     def _run(self, model, path, on_progress) -> str:
+        from app.glossary import glossary_prompt_line
+
+        initial_prompt = _INITIAL_PROMPT
+        terms = glossary_prompt_line(self._glossary() if self._glossary else [])
+        if terms:
+            initial_prompt += f"對話中出現的詞彙：{terms}。"
         segments, info = model.transcribe(
             str(path),
             vad_filter=True,
-            initial_prompt=_INITIAL_PROMPT,
+            initial_prompt=initial_prompt,
         )
         duration = getattr(info, "duration", 0) or 0
         parts: list[str] = []

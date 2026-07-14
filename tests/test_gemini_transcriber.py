@@ -31,6 +31,18 @@ def test_transcribe_prompt_asks_for_speaker_labels():
     assert "講者" in _TRANSCRIBE_PROMPT
 
 
+def test_prompt_includes_glossary_terms():
+    """自訂詞彙要進轉錄 prompt，人名/專有名詞才不會被聽錯。"""
+    t = GeminiTranscriber(
+        api_key="k",
+        glossary=lambda: [{"term": "王霖翔", "note": "人名"}],
+    )
+    prompt = t.build_prompt()
+    assert "王霖翔（人名）" in prompt
+    # 沒有詞彙時維持原本 prompt
+    assert "詞彙" not in GeminiTranscriber(api_key="k").build_prompt()
+
+
 def test_progress_callback_reaches_one(tmp_path):
     wav = tmp_path / "clip.wav"
     wav.write_bytes(b"RIFF-fake")

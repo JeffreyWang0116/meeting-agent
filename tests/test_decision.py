@@ -102,6 +102,34 @@ def test_analyze_passes_kind_into_prompt():
     assert "錄音種類：訪談" in captured["prompt"]
 
 
+def test_prompt_includes_glossary_terms():
+    from app.agents.decision_agent import build_prompt
+
+    prompt = build_prompt(
+        "測試", MEETING_DATE,
+        glossary=[{"term": "王霖翔", "note": "人名"}],
+    )
+    assert "王霖翔（人名）" in prompt
+    assert "詞彙" in prompt
+    # 空詞彙表不出現詞彙段落
+    assert "詞彙表" not in build_prompt("測試", MEETING_DATE)
+
+
+def test_analyze_uses_injected_glossary_provider():
+    captured = {}
+
+    def fake_generate(prompt):
+        captured["prompt"] = prompt
+        return valid_json()
+
+    agent = DecisionAgent(
+        generate=fake_generate,
+        glossary=lambda: [{"term": "TaskHub", "note": "產品名"}],
+    )
+    agent.analyze("測試", meeting_date=MEETING_DATE)
+    assert "TaskHub（產品名）" in captured["prompt"]
+
+
 def test_meeting_date_defaults_to_today():
     captured = {}
 

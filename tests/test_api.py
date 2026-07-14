@@ -313,6 +313,25 @@ def test_ask_backend_failure_returns_502(tmp_path):
     assert "RESOURCE_EXHAUSTED" in resp.json()["detail"]
 
 
+# ---- 自訂詞彙 ----
+
+def test_glossary_roundtrip_and_validation(client):
+    assert client.get("/api/glossary").json() == {"terms": []}
+
+    resp = client.put(
+        "/api/glossary",
+        json={"terms": [{"term": "王霖翔", "note": "人名"}, {"term": "TaskHub"}]},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["terms"] == [
+        {"term": "王霖翔", "note": "人名"},
+        {"term": "TaskHub", "note": ""},
+    ]
+    assert client.get("/api/glossary").json()["terms"][0]["term"] == "王霖翔"
+    # 空詞彙要擋
+    assert client.put("/api/glossary", json={"terms": [{"term": "  "}]}).status_code == 400
+
+
 # ---- 其他 ----
 
 def test_gemini_engine_uses_transcribe_model_not_analysis_model(tmp_path):

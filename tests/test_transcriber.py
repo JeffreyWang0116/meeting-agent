@@ -43,6 +43,23 @@ def test_progress_fraction_capped_at_one():
     assert calls == [1.0]
 
 
+def test_glossary_terms_injected_into_initial_prompt():
+    """自訂詞彙要進 whisper 的 initial_prompt，人名/專有名詞才不會被聽錯。"""
+    captured = {}
+
+    class PromptCapturingModel(FakeWhisperModel):
+        def transcribe(self, path, **kwargs):
+            captured.update(kwargs)
+            return super().transcribe(path, **kwargs)
+
+    t = Transcriber(
+        model=PromptCapturingModel([seg("x", 1.0)]),
+        glossary=lambda: [{"term": "王霖翔", "note": "人名"}],
+    )
+    t.transcribe("fake.wav")
+    assert "王霖翔" in captured["initial_prompt"]
+
+
 def test_detect_device_returns_valid_value():
     assert detect_device() in ("cuda", "cpu")
 

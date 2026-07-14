@@ -21,6 +21,7 @@ from app.agents.parser_agent import ParserAgent
 from app.agents.reminder_agent import scan as scan_reminders
 from app.config import Settings, get_settings
 from app.export import meeting_report_md, tasks_to_csv
+from app.glossary import Glossary
 from app.jobs import MediaJobManager
 from app.orchestrator import Orchestrator
 from app.rag import AskAgent, GeminiEmbedder, RagIndex
@@ -53,6 +54,10 @@ class AskRequest(BaseModel):
     question: str
 
 
+class GlossaryRequest(BaseModel):
+    terms: list[dict]
+
+
 def create_app(
     settings: Settings | None = None,
     *,
@@ -65,12 +70,15 @@ def create_app(
 ) -> FastAPI:
     settings = settings or get_settings()
     store = store or make_store(settings)
+    # 自訂詞彙表：以 callable 注入，轉錄/分析每次都讀到最新內容
+    glossary = Glossary(settings.data_dir / "output" / "glossary.json")
     orchestrator = orchestrator or Orchestrator(
         parser=ParserAgent(),
         decision=DecisionAgent(
             api_key=settings.gemini_api_key,
             api_keys=settings.gemini_api_keys,
             model=settings.gemini_model,
+            glossary=glossary.terms,
         ),
         executor=ExecutorAgent(store),
         notifier=NotifierAgent(settings.data_dir / "output" / "notifications"),
@@ -82,10 +90,13 @@ def create_app(
                 api_key=settings.gemini_api_key,
                 api_keys=settings.gemini_api_keys,
                 model=settings.transcribe_model,
+                glossary=glossary.terms,
             )
         else:
             transcriber = Transcriber(
-                model_size=settings.whisper_model, device=settings.whisper_device
+                model_size=settings.whisper_model,
+                device=settings.whisper_device,
+                glossary=glossary.terms,
             )
     live_manager = live_manager or LiveSessionManager(
         transcriber, settings.data_dir / "tmp" / "live"
@@ -181,6 +192,19 @@ def create_app(
             raise HTTPException(status_code=400, detail=str(exc))
         except Exception as exc:  # 金鑰未設、配額爆掉…原因要透明
             raise HTTPException(status_code=502, detail=f"問答失敗：{exc}")
+
+    # ---- 自訂詞彙 ----
+
+    @app.get("/api/glossary")
+    def get_glossary():
+        return {"terms": glossary.terms()}
+
+    @app.put("/api/glossary")
+    def put_glossary(req: GlossaryRequest):
+        try:
+            return {"terms": glossary.replace(req.terms)}
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
 
     # ---- 任務管理 ----
 
