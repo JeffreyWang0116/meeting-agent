@@ -151,6 +151,18 @@
   .set-row .set-label .i-sm { color: var(--faint); }
   .set-note { font-size: .78rem; color: var(--faint); padding: 2px 8px 4px; }
   .set-sep { border: none; border-top: 1px solid var(--border); margin: 4px 0; }
+  /* 今日用量：數字磚（大數字 + 小標籤，取代擠成一行的純文字） */
+  .usage-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; padding: 4px 8px 8px; }
+  .usage-tile {
+    display: flex; flex-direction: column; align-items: center; gap: 2px;
+    padding: 9px 4px; border-radius: var(--radius-sm);
+    background: var(--card); border: 1px solid var(--border);
+  }
+  .usage-num {
+    font-family: var(--label); font-size: 1.32rem; font-weight: 600; line-height: 1;
+    color: var(--ink); font-variant-numeric: tabular-nums;
+  }
+  .usage-lbl { font-size: .68rem; color: var(--faint); letter-spacing: .02em; }
 
   /* ---- 彈出視窗（自訂詞彙等） ---- */
   .modal-overlay {
@@ -726,14 +738,17 @@
               </span>
               <button class="ghost" id="btnGlossary">管理</button>
             </div>
-            <p class="set-note">加入人名、產品名等專有名詞，轉錄與分析會優先採用這些寫法。</p>
             <hr class="set-sep">
             <div class="set-row">
               <span class="set-label">
                 <svg class="i-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 18 0 9 9 0 0 0-18 0Z"/><path d="M12 7v5l3 2"/></svg>
                 今日 API 用量
               </span>
-              <span id="usageToday" class="mono">—</span>
+            </div>
+            <div class="usage-grid" id="usageToday">
+              <div class="usage-tile"><span class="usage-num" id="usageAnalysis">—</span><span class="usage-lbl">分析</span></div>
+              <div class="usage-tile"><span class="usage-num" id="usageAsk">—</span><span class="usage-lbl">問答</span></div>
+              <div class="usage-tile"><span class="usage-num" id="usageLive">—</span><span class="usage-lbl">錄音段</span></div>
             </div>
           </div>
         </div>
@@ -868,7 +883,7 @@
       </h2>
     </div>
     <details class="ask-scope">
-      <summary id="askScopeSummary">範圍：全部會議（可複選特定會議一起詢問）</summary>
+      <summary id="askScopeSummary">選取會議</summary>
       <div class="ask-scope-list" id="askScopeList"><p class="empty-note">尚無會議</p></div>
     </details>
     <div class="ask-log" id="askLog"></div>
@@ -880,7 +895,6 @@
       </button>
     </div>
     <div class="ask-search-hits" id="askSearchHits"></div>
-    <p class="hint">打字會即時列出含關鍵字的會議，按「查詢」則是把問題交給 AI 依會議內容回答。</p>
   </div>
 
   <!-- 結果 -->
@@ -1004,10 +1018,10 @@
         <h2>自訂詞彙</h2>
         <button class="panel-x" id="btnGlossaryClose" aria-label="關閉">✕</button>
       </div>
-      <p class="hint">會議中常出現的人名（例：王霖翔）或產品名，加進詞彙表後，錄音轉文字與 AI 分析都會優先採用這些寫法，之後就不必人工校正。</p>
+      <p class="hint">會議中常出現的名稱，加進詞彙表後，會優先採用這些寫法。</p>
       <div class="glossary-add">
-        <input type="text" id="glosTerm" placeholder="詞彙，例：王霖翔">
-        <input type="text" id="glosNote" placeholder="說明（選填），例：人名">
+        <input type="text" id="glosTerm" placeholder="名稱">
+        <input type="text" id="glosNote" placeholder="說明（選填）">
         <button class="primary" id="btnGlosAdd">新增</button>
       </div>
       <div id="glosList"><p class="empty-note">尚無詞彙</p></div>
@@ -1751,8 +1765,8 @@ function renderAskScope() {
       </label>`).join("")
     : `<p class="empty-note">尚無會議</p>`;
   $("askScopeSummary").textContent = askScopeIds.size
-    ? `範圍：已選 ${askScopeIds.size} 場會議`
-    : "範圍：全部會議（可複選特定會議一起詢問）";
+    ? `選取會議（已選 ${askScopeIds.size} 場）`
+    : "選取會議";
 }
 
 $("askScopeList").addEventListener("change", e => {
@@ -2146,9 +2160,12 @@ $("rTodos").addEventListener("click", e => {
       try {
         const u = await jsonOrThrow(await fetch("/api/usage"));
         const t = u.today || {};
-        $("usageToday").textContent =
-          `分析 ${t.analysis || 0}・問答 ${t.ask || 0}・錄音段 ${t.live_chunk || 0}`;
-      } catch (err) { $("usageToday").textContent = "—"; }
+        $("usageAnalysis").textContent = t.analysis || 0;
+        $("usageAsk").textContent = t.ask || 0;
+        $("usageLive").textContent = t.live_chunk || 0;
+      } catch (err) {
+        $("usageAnalysis").textContent = $("usageAsk").textContent = $("usageLive").textContent = "—";
+      }
     }
   });
   document.addEventListener("click", e => {
