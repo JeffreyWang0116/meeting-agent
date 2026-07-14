@@ -400,6 +400,20 @@ def test_ask_backend_failure_returns_502(tmp_path):
     assert "RESOURCE_EXHAUSTED" in resp.json()["detail"]
 
 
+def test_meeting_events_ics_download(client):
+    meeting_id = make_meeting(client)  # 任務含 due_date 2026-07-20
+    resp = client.get(f"/api/meetings/{meeting_id}/events.ics")
+    assert resp.status_code == 200
+    assert "text/calendar" in resp.headers["content-type"]
+    body = resp.text
+    assert "BEGIN:VCALENDAR" in body
+    assert "BEGIN:VEVENT" in body
+    assert "DTSTART;VALUE=DATE:20260720" in body
+    assert "DTEND;VALUE=DATE:20260721" in body  # 全天事件 end 是隔天（exclusive）
+    assert "完成 Prompt 初版" in body
+    assert client.get("/api/meetings/nope/events.ics").status_code == 404
+
+
 # ---- 關鍵字搜尋 ----
 
 def test_keyword_search_finds_meetings_with_snippet(client):

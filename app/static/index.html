@@ -919,7 +919,7 @@
     <h3 class="sub">
       <svg class="i-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4.5" width="18" height="16" rx="1.5"/><path d="M16 2.5v4M8 2.5v4M3 9.5h18"/></svg>
       行事曆事件
-      <span class="aux">Google Calendar 格式 · 9 月串接後自動建立</span>
+      <a class="ghost btn-link" id="icsLink" href="#" download style="margin-left:auto">下載 .ics 加入行事曆</a>
     </h3>
     <div class="event-list" id="rEvents"></div>
 
@@ -1214,6 +1214,7 @@ function renderResult(result, transcript) {
     ? a.pending_items.map(p => `<div class="pending-item">${icon("help")}<span>${esc(p.topic)}${p.reason ? `<span class="reason">${esc(p.reason)}</span>` : ""}</span></div>`).join("")
     : `<p class="empty-note">無</p>`;
 
+  $("icsLink").href = `/api/meetings/${encodeURIComponent(result.meeting_id)}/events.ics`;
   const events = result.notifications.calendar_events || [];
   $("rEvents").innerHTML = events.length
     ? events.map(e => `<div class="event-item">${icon("calendar")}<span><span class="when">${esc(e.start.date)}</span><b>${esc(e.summary)}</b><span class="desc">${esc(e.description).replace(/\n/g, " · ")}</span></span></div>`).join("")
@@ -1456,6 +1457,7 @@ function meetingDetailHtml(id) {
           <svg class="i-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="m8.6 13.5 6.8 4M15.4 6.5l-6.8 4"/></svg>
           分享
         </button>
+        <a class="ghost btn-link" href="/api/meetings/${esc(id)}/events.ics" download>加入行事曆</a>
       </div>
     </div>`;
 }

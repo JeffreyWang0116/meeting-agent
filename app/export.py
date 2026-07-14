@@ -1,8 +1,9 @@
-"""匯出：任務 CSV（Excel 可直開）與會議紀錄 Markdown。"""
+"""匯出：任務 CSV（Excel 可直開）、會議紀錄 Markdown 與行事曆 .ics。"""
 from __future__ import annotations
 
 import csv
 import io
+from datetime import date, datetime, timedelta, timezone
 
 _PRIORITY_ZH = {"high": "高", "medium": "中", "low": "低"}
 _STATUS_ZH = {"todo": "待辦", "doing": "進行中", "done": "完成"}
@@ -24,6 +25,43 @@ def tasks_to_csv(tasks: list[dict]) -> str:
             t.get("source_quote") or "",
         ])
     return "﻿" + buf.getvalue()
+
+
+def _ics_escape(text: str) -> str:
+    """RFC 5545 文字跳脫：反斜線、分號、逗號與換行。"""
+    return (
+        text.replace("\\", "\\\\").replace(";", "\\;").replace(",", "\\,").replace("\n", "\\n")
+    )
+
+
+def tasks_to_ics(meeting_title: str, tasks: list[dict]) -> str:
+    """把含期限的任務轉成 .ics 全天事件，可直接匯入 Google/Apple 行事曆。"""
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    lines = [
+        "BEGIN:VCALENDAR",
+        "VERSION:2.0",
+        "PRODID:-//meeting-agent//ZH-TW",
+        "CALSCALE:GREGORIAN",
+    ]
+    for t in tasks:
+        due = t.get("due_date")
+        if not due:
+            continue
+        d = date.fromisoformat(str(due))
+        description = f"負責人：{t.get('owner') or '未指派'}｜會議：{meeting_title}"
+        lines += [
+            "BEGIN:VEVENT",
+            f"UID:{t.get('id', '')}@meeting-agent",
+            f"DTSTAMP:{stamp}",
+            f"DTSTART;VALUE=DATE:{d.strftime('%Y%m%d')}",
+            # 全天事件的 DTEND 是 exclusive，要填隔天
+            f"DTEND;VALUE=DATE:{(d + timedelta(days=1)).strftime('%Y%m%d')}",
+            f"SUMMARY:{_ics_escape('【代辦】' + (t.get('task') or ''))}",
+            f"DESCRIPTION:{_ics_escape(description)}",
+            "END:VEVENT",
+        ]
+    lines.append("END:VCALENDAR")
+    return "\r\n".join(lines) + "\r\n"
 
 
 def meeting_report_md(meeting_record: dict, tasks: list[dict]) -> str:

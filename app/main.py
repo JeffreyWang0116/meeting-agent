@@ -20,7 +20,7 @@ from app.agents.notifier_agent import NotifierAgent
 from app.agents.parser_agent import ParserAgent
 from app.agents.reminder_agent import scan as scan_reminders
 from app.config import Settings, get_settings
-from app.export import meeting_report_md, tasks_to_csv
+from app.export import meeting_report_md, tasks_to_csv, tasks_to_ics
 from app.glossary import Glossary
 from app.jobs import MediaJobManager
 from app.orchestrator import Orchestrator
@@ -413,6 +413,22 @@ def create_app(
             content=meeting_report_md(record, store.list_tasks(meeting_id=meeting_id)),
             media_type="text/markdown; charset=utf-8",
             headers={"Content-Disposition": f'attachment; filename="meeting-{meeting_id}.md"'},
+        )
+
+    @app.get("/api/meetings/{meeting_id}/events.ics")
+    def meeting_events_ics(meeting_id: str):
+        """把此會議含期限的任務匯出成 .ics，一鍵加入 Google/Apple 行事曆。"""
+        record = store.get_meeting(meeting_id)
+        if record is None:
+            raise HTTPException(status_code=404, detail=f"找不到會議：{meeting_id}")
+        content = tasks_to_ics(
+            record.get("meeting", {}).get("title", ""),
+            store.list_tasks(meeting_id=meeting_id),
+        )
+        return Response(
+            content=content,
+            media_type="text/calendar; charset=utf-8",
+            headers={"Content-Disposition": f'attachment; filename="meeting-{meeting_id}.ics"'},
         )
 
     # ---- 輸入路徑 2：音檔 / 影片上傳（背景轉錄） ----
