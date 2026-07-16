@@ -194,6 +194,16 @@ def test_replace_tasks_swaps_meeting_tasks_only(tmp_path):
     assert LocalJsonStore(path).list_tasks(meeting_id=id1)[0]["task"] == "新任務A"
 
 
+def test_glossary_get_and_save_persists(tmp_path):
+    path = tmp_path / "db.json"
+    store = LocalJsonStore(path)
+    assert store.get_glossary() == []
+    store.save_glossary([{"term": "王霖翔", "note": "人名"}])
+    assert store.get_glossary() == [{"term": "王霖翔", "note": "人名"}]
+    # 重載後仍在（落地）
+    assert LocalJsonStore(path).get_glossary() == [{"term": "王霖翔", "note": "人名"}]
+
+
 def test_list_meetings_newest_first(tmp_path):
     store = LocalJsonStore(tmp_path / "db.json")
     id1 = store.save_meeting(make_analysis())

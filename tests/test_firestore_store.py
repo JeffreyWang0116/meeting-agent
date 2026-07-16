@@ -210,6 +210,16 @@ def test_replace_tasks_swaps_meeting_tasks_only():
     assert len(store.list_tasks(meeting_id=id2)) == 1
 
 
+def test_glossary_get_and_save_persists():
+    db = FakeFirestore()
+    store = make_store(db)
+    assert store.get_glossary() == []
+    store.save_glossary([{"term": "王霖翔", "note": "人名"}])
+    assert store.get_glossary() == [{"term": "王霖翔", "note": "人名"}]
+    # 換一個 store 連同一個後端（等同重啟）仍在
+    assert make_store(db).get_glossary() == [{"term": "王霖翔", "note": "人名"}]
+
+
 def test_task_without_status_backfilled_to_todo():
     """舊資料（Firestore 上已存在、沒有 status 欄位）讀取時要補 todo。"""
     db = FakeFirestore()

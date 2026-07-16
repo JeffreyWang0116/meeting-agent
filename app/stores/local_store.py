@@ -150,3 +150,21 @@ class LocalJsonStore(TaskStore):
                 return False
             self._flush()
             return True
+
+    # ---- 自訂詞彙（沿用同目錄的 glossary.json，與 db.json 並存） ----
+
+    def _glossary_path(self):
+        return self._path.with_name("glossary.json")
+
+    def get_glossary(self) -> list[dict]:
+        path = self._glossary_path()
+        if path.exists():
+            return json.loads(path.read_text(encoding="utf-8")).get("terms", [])
+        return []
+
+    def save_glossary(self, terms: list[dict]) -> None:
+        path = self._glossary_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps({"terms": terms}, ensure_ascii=False, indent=2), encoding="utf-8"
+        )

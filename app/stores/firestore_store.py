@@ -21,10 +21,18 @@ from app.stores.base import TaskStore
 class FirestoreStore(TaskStore):
     backend = "firestore"
 
-    def __init__(self, db, *, meetings: str = "meetings", tasks: str = "tasks"):
+    def __init__(
+        self,
+        db,
+        *,
+        meetings: str = "meetings",
+        tasks: str = "tasks",
+        meta: str = "meta",
+    ):
         self._db = db
         self._meetings = meetings
         self._tasks = tasks
+        self._meta = meta
         self._lock = threading.Lock()
         self._last_ts: datetime | None = None
 
@@ -179,3 +187,13 @@ class FirestoreStore(TaskStore):
                 return False
             ref.delete()
             return True
+
+    # ---- 自訂詞彙（meta collection 底下單一 glossary 文件） ----
+
+    def get_glossary(self) -> list[dict]:
+        snap = self._db.collection(self._meta).document("glossary").get()
+        return snap.to_dict().get("terms", []) if snap.exists else []
+
+    def save_glossary(self, terms: list[dict]) -> None:
+        with self._lock:
+            self._db.collection(self._meta).document("glossary").set({"terms": terms})

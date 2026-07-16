@@ -83,8 +83,9 @@ def create_app(
 ) -> FastAPI:
     settings = settings or get_settings()
     store = store or make_store(settings)
-    # 自訂詞彙表：以 callable 注入，轉錄/分析每次都讀到最新內容
-    glossary = Glossary(settings.data_dir / "output" / "glossary.json")
+    # 自訂詞彙表：持久化交給 store（本地 JSON / 雲端 Firestore，與任務同後端），
+    # 以 callable 注入，轉錄/分析每次都讀到最新內容
+    glossary = Glossary(store)
     orchestrator = orchestrator or Orchestrator(
         parser=ParserAgent(),
         decision=DecisionAgent(

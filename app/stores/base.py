@@ -52,3 +52,11 @@ class TaskStore(ABC):
     @abstractmethod
     def replace_tasks(self, meeting_id: str, todos: list[dict]) -> list[dict]:
         """整批替換某場會議的任務（重新分析時使用），回傳新任務紀錄。"""
+
+    @abstractmethod
+    def get_glossary(self) -> list[dict]:
+        """讀取自訂詞彙表（[{"term","note"}, ...]），沒有回傳空清單。"""
+
+    @abstractmethod
+    def save_glossary(self, terms: list[dict]) -> None:
+        """整份儲存自訂詞彙表。"""
