@@ -7,8 +7,10 @@ from __future__ import annotations
 
 import json
 import threading
-from datetime import date
 from pathlib import Path
+
+from app.atomicio import atomic_write_text
+from app.timeutil import today_local
 
 
 class UsageTracker:
@@ -23,13 +25,12 @@ class UsageTracker:
         return {"total": {}, "daily": {}}
 
     def _flush(self) -> None:
-        self._path.parent.mkdir(parents=True, exist_ok=True)
-        self._path.write_text(
-            json.dumps(self._data, ensure_ascii=False, indent=2), encoding="utf-8"
+        atomic_write_text(
+            self._path, json.dumps(self._data, ensure_ascii=False, indent=2)
         )
 
     def record(self, kind: str) -> None:
-        today = date.today().isoformat()
+        today = today_local().isoformat()
         with self._lock:
             self._data["total"][kind] = self._data["total"].get(kind, 0) + 1
             day = self._data["daily"].setdefault(today, {})
@@ -37,7 +38,7 @@ class UsageTracker:
             self._flush()
 
     def snapshot(self) -> dict:
-        today = date.today().isoformat()
+        today = today_local().isoformat()
         with self._lock:
             return {
                 "today": dict(self._data["daily"].get(today, {})),

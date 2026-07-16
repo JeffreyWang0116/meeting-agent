@@ -313,6 +313,17 @@
   .cell-input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
   td .row-ops { display: flex; gap: 2px; align-items: center; }
 
+  /* 手動新增任務列 */
+  .task-add { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding: 4px 2px 2px; }
+  .task-add input[type="text"], .task-add input[type="date"] {
+    font-family: var(--sans); font-size: .84rem; color: var(--ink);
+    background: var(--card-2); border: 1px solid var(--border); border-radius: var(--radius-sm);
+    padding: 8px 10px;
+  }
+  .task-add #newTaskName { flex: 1 1 200px; min-width: 140px; }
+  .task-add input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+  .task-add .primary { padding: 8px 18px; font-size: .84rem; }
+
   /* ---- 拖曳上傳 ---- */
   .dropzone {
     display: flex; flex-direction: column; align-items: center; gap: 10px;
@@ -741,6 +752,27 @@
             <hr class="set-sep">
             <div class="set-row">
               <span class="set-label">
+                <svg class="i-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v6c0 1.7 3.6 3 8 3s8-1.3 8-3V5"/><path d="M4 11v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/></svg>
+                資料備份
+              </span>
+              <span style="display:flex; gap:6px">
+                <a class="ghost btn-link" href="/api/backup" download>下載</a>
+                <button class="ghost" id="btnRestore">還原</button>
+              </span>
+            </div>
+            <input type="file" id="restoreFile" accept="application/json,.json" style="display:none">
+            <hr class="set-sep">
+            <div class="set-row">
+              <span class="set-label">
+                <svg class="i-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9a6 6 0 0 1 12 0c0 5 2 6 2 6H4s2-1 2-6"/><path d="M10 20a2 2 0 0 0 4 0"/></svg>
+                每日提醒通知
+              </span>
+              <button class="ghost" id="btnNotifyToggle">開啟</button>
+            </div>
+            <p class="set-note">開啟後，有逾期／即將到期的任務時，每天首次開啟頁面會跳一則瀏覽器通知。</p>
+            <hr class="set-sep">
+            <div class="set-row">
+              <span class="set-label">
                 <svg class="i-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 18 0 9 9 0 0 0-18 0Z"/><path d="M12 7v5l3 2"/></svg>
                 今日 API 用量
               </span>
@@ -847,6 +879,10 @@
         <button class="primary danger" id="btnLiveStop" disabled>
           <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="5" width="14" height="14" rx="1.5"/></svg>
           結束會議並分析
+        </button>
+        <button class="ghost" id="btnLiveRetry" style="display:none">
+          <svg class="i-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11a9 9 0 1 1-2.7-6.4"/><path d="M21 3v6h-6"/></svg>
+          重試分析
         </button>
         <span class="status-line" id="liveStatus"></span>
       </div>
@@ -971,6 +1007,10 @@
         任務庫
       </h2>
       <div class="panel-actions">
+        <button class="ghost" id="btnAddTask">
+          <svg class="i-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
+          新增任務
+        </button>
         <input type="search" id="taskSearch" placeholder="搜尋任務、負責人…">
         <select id="taskFilter">
           <option value="">全部狀態</option>
@@ -987,6 +1027,18 @@
           重新整理
         </button>
       </div>
+    </div>
+    <div class="task-add" id="taskAddRow" style="display:none">
+      <input type="text" id="newTaskName" placeholder="任務名稱">
+      <input type="text" id="newTaskOwner" placeholder="負責人（選填）">
+      <input type="date" id="newTaskDue" title="期限（選填）">
+      <select id="newTaskPriority" class="status-sel">
+        <option value="high">高</option>
+        <option value="medium" selected>中</option>
+        <option value="low">低</option>
+      </select>
+      <button class="primary" id="btnAddTaskSave">新增</button>
+      <button class="ghost" id="btnAddTaskCancel">取消</button>
     </div>
     <div class="table-wrap">
       <table>
@@ -1413,6 +1465,38 @@ $("taskSearch").addEventListener("input", renderTasks);
 $("taskFilter").addEventListener("change", renderTasks);
 $("btnRefreshTasks").addEventListener("click", () => { refreshTasks(); refreshMeetings(); });
 
+// 手動新增任務（會議之外臨時想到的待辦）
+$("btnAddTask").addEventListener("click", () => {
+  const row = $("taskAddRow");
+  const show = row.style.display === "none";
+  row.style.display = show ? "flex" : "none";
+  if (show) $("newTaskName").focus();
+});
+$("btnAddTaskCancel").addEventListener("click", () => { $("taskAddRow").style.display = "none"; });
+async function submitNewTask() {
+  const name = $("newTaskName").value.trim();
+  if (!name) { showError("任務名稱不可為空"); return; }
+  try {
+    await jsonOrThrow(await fetch("/api/tasks", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        task: name,
+        owner: $("newTaskOwner").value.trim() || null,
+        due_date: $("newTaskDue").value || null,
+        priority: $("newTaskPriority").value,
+      }),
+    }));
+    $("newTaskName").value = ""; $("newTaskOwner").value = ""; $("newTaskDue").value = "";
+    $("newTaskPriority").value = "medium";
+    $("taskAddRow").style.display = "none";
+    refreshTasks(); refreshReminders();
+  } catch (err) { showError("新增任務失敗：" + err.message); }
+}
+$("btnAddTaskSave").addEventListener("click", submitNewTask);
+$("newTaskName").addEventListener("keydown", e => { if (e.key === "Enter") submitNewTask(); });
+$("newTaskOwner").addEventListener("keydown", e => { if (e.key === "Enter") submitNewTask(); });
+
 // ---- 歷史會議（查閱 / 編輯 / 重新分析 / 分享 / 講者改名 / 刪除） ----
 let allMeetings = [];
 let expandedMeetingId = null;      // 展開詳情中的會議
@@ -1657,26 +1741,39 @@ $("meetingRows").addEventListener("click", async e => {
 
   const chip = e.target.closest(".speaker-chip");
   if (chip) {
-    const d = meetingDetailCache[chip.dataset.id];
+    const id = chip.dataset.id;
+    const d = meetingDetailCache[id];
     if (!d || !d.transcript) return;
     const oldName = chip.dataset.speaker;
-    const newName = prompt(`把「${oldName}」改名為：`, oldName);
-    if (!newName || newName.trim() === "" || newName.trim() === oldName) return;
+    const newName = (prompt(`把「${oldName}」改名為：`, oldName) || "").trim();
+    if (!newName || newName === oldName) return;
     const renamed = d.transcript.split("\n").map(line => {
       const t = line.trimStart();
       if (t.startsWith(oldName + "：") || t.startsWith(oldName + ":")) {
-        return line.replace(oldName, newName.trim());  // 只換行首的講者標註
+        return line.replace(oldName, newName);  // 只換行首的講者標註
       }
       return line;
     }).join("\n");
+    // 出席者名單裡的舊名一併換成新名（下游不再殘留「講者A」）
+    const attendees = (d.meeting.attendees || []).map(a => (a === oldName ? newName : a));
     try {
-      meetingDetailCache[chip.dataset.id] = await jsonOrThrow(
-        await fetch(`/api/meetings/${chip.dataset.id}`, {
+      meetingDetailCache[id] = await jsonOrThrow(
+        await fetch(`/api/meetings/${id}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ transcript: renamed }),
+          body: JSON.stringify({ transcript: renamed, attendees }),
         }));
+      // 這場會議中「負責人＝舊名」的任務也跟著改名
+      const owned = allTasks.filter(t => t.meeting_id === id && t.owner === oldName);
+      for (const t of owned) {
+        await fetch(`/api/tasks/${t.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ owner: newName }),
+        });
+      }
       renderMeetings();
+      if (owned.length) { refreshTasks(); refreshReminders(); }
     } catch (err) { showError("講者改名失敗：" + err.message); }
   }
 });
@@ -1717,8 +1814,44 @@ async function refreshReminders() {
       ? items.join("")
       : `<div class="empty-alert">${icon("check")}<p>尚無提醒</p></div>`;
     updateAlertCount();
+    lastReminders = r;
+    maybeNotifyReminders(false);
   } catch (e) { /* 靜默：提醒失敗不擋主流程 */ }
 }
+
+// ---- 每日提醒通知（Notification API）----
+let lastReminders = null;
+const NOTIFY_KEY = "dailyNotify", NOTIFY_DATE_KEY = "dailyNotifyDate";
+const notifyEnabled = () => localStorage.getItem(NOTIFY_KEY) === "1";
+function updateNotifyBtn() {
+  $("btnNotifyToggle").textContent = notifyEnabled() ? "已開啟" : "開啟";
+}
+function maybeNotifyReminders(force) {
+  if (!notifyEnabled() || !("Notification" in window) || Notification.permission !== "granted") return;
+  if (!lastReminders) return;
+  const urgent = lastReminders.reminders.filter(x => x.kind === "overdue" || x.kind === "due_soon");
+  if (!urgent.length) return;
+  const today = new Date().toLocaleDateString("sv");
+  if (!force && localStorage.getItem(NOTIFY_DATE_KEY) === today) return;  // 一天最多一次
+  localStorage.setItem(NOTIFY_DATE_KEY, today);
+  const overdue = urgent.filter(x => x.kind === "overdue").length;
+  const soon = urgent.length - overdue;
+  const parts = [overdue ? `${overdue} 項逾期` : "", soon ? `${soon} 項即將到期` : ""].filter(Boolean);
+  try {
+    new Notification("會議 Agent 待辦提醒", { body: parts.join("、") + "，點開看看吧。", icon: "/static/icon.svg" });
+  } catch (e) { /* 部分瀏覽器需由 service worker 發送，失敗就略過 */ }
+}
+$("btnNotifyToggle").addEventListener("click", async () => {
+  if (notifyEnabled()) { localStorage.setItem(NOTIFY_KEY, "0"); updateNotifyBtn(); return; }
+  if (!("Notification" in window)) { showError("此瀏覽器不支援通知功能"); return; }
+  let perm = Notification.permission;
+  if (perm !== "granted") perm = await Notification.requestPermission();
+  if (perm !== "granted") { showError("尚未允許通知權限，請到瀏覽器網站設定開啟"); return; }
+  localStorage.setItem(NOTIFY_KEY, "1");
+  updateNotifyBtn();
+  maybeNotifyReminders(true);  // 開啟當下先示範一次
+});
+updateNotifyBtn();
 
 $("reminderBody").addEventListener("click", async e => {
   // 刪除單則：只移除畫面，不動後端；按「重新掃描」即可全部復原
@@ -1958,7 +2091,7 @@ $("btnUpload").addEventListener("click", async () => {
 // ---- 路徑 3：即時聆聽 ----
 let liveStream = null, liveRecorder = null, liveSessionId = null;
 let liveRecording = false, liveSegTimer = null, uploadsInFlight = 0, liveStartTime = null, liveTickTimer = null;
-let liveSegIndex = 0, liveSentCount = 0, liveWakeLock = null;
+let liveSegIndex = 0, liveSentCount = 0, liveWakeLock = null, liveStarting = false;
 
 // 手機螢幕熄滅會讓瀏覽器暫停錄音 → 聆聽期間用 Wake Lock 保持螢幕常亮
 async function acquireWakeLock() {
@@ -2016,25 +2149,31 @@ async function uploadLiveChunk(blob) {
   finally { uploadsInFlight--; }
 }
 
-// 每段用「新的 MediaRecorder」錄，確保每段都有完整檔頭、可獨立解碼
+// 每段用「新的 MediaRecorder」錄，確保每段都有完整檔頭、可獨立解碼。
+// liveStarting 旗標＋「已在錄就不重啟」的檢查，避免 onstop 與 visibilitychange
+// 同時觸發時建立兩個錄音器造成段落重複。
 function recordSegment() {
-  if (!liveRecording) return;
+  if (!liveRecording || liveStarting) return;
+  if (liveRecorder && liveRecorder.state === "recording") return;
+  liveStarting = true;
   const chunks = [];
   const mime = pickMime();
-  liveRecorder = new MediaRecorder(liveStream, mime ? { mimeType: mime } : undefined);
-  liveRecorder.ondataavailable = e => { if (e.data.size) chunks.push(e.data); };
-  liveRecorder.onerror = e => showError("錄音發生錯誤：" + ((e.error && e.error.message) || "未知原因"));
-  liveRecorder.onstop = () => {
+  const recorder = new MediaRecorder(liveStream, mime ? { mimeType: mime } : undefined);
+  liveRecorder = recorder;
+  recorder.ondataavailable = e => { if (e.data.size) chunks.push(e.data); };
+  recorder.onerror = e => showError("錄音發生錯誤：" + ((e.error && e.error.message) || "未知原因"));
+  recorder.onstop = () => {
     if (liveRecording) recordSegment();  // 先無縫接錄下一段，再上傳
-    const blob = new Blob(chunks, { type: liveRecorder.mimeType });
+    const blob = new Blob(chunks, { type: recorder.mimeType });
     if (blob.size > 0) uploadLiveChunk(blob);
   };
-  liveRecorder.start();
+  recorder.start();
+  liveStarting = false;
   // 第一段縮短到 12 秒：讓使用者快速看到第一句逐字稿，確認「真的有在聽」
   const secs = liveSegIndex === 0 ? Math.min(12, chunkSeconds) : chunkSeconds;
   liveSegIndex++;
   liveSegTimer = setTimeout(() => {
-    if (liveRecorder.state !== "inactive") liveRecorder.stop();
+    if (recorder.state !== "inactive") recorder.stop();
   }, secs * 1000);
 }
 
@@ -2063,6 +2202,7 @@ $("btnLiveStart").addEventListener("click", async () => {
   acquireWakeLock();  // 保持螢幕常亮，避免手機鎖屏中斷錄音
   $("btnLiveStart").disabled = true;
   $("btnLiveStop").disabled = false;
+  $("btnLiveRetry").style.display = "none";  // 開新一場，清掉上一場的重試入口
   $("liveTranscript").style.display = "block";
   $("liveTranscript").innerHTML =
     `<div class="cap-line" id="liveCaret"><span class="cap-time">[--:--]</span><span class="caret-block"></span></div>`;
@@ -2092,6 +2232,15 @@ $("btnLiveStop").addEventListener("click", async () => {
   const caret = $("liveCaret");
   if (caret) caret.remove();  // 收起打字游標
 
+  await finishLiveSession();
+});
+
+// 結束彙整分析：失敗時「不」丟掉 session id，讓使用者可按「重試分析」再試，
+// 不會因為一次額度/網路錯誤就白錄整場會議。
+async function finishLiveSession() {
+  if (!liveSessionId) return;
+  $("btnLiveRetry").style.display = "none";
+  $("btnLiveRetry").disabled = true;
   $("liveStatus").textContent = "AI 分析整場會議中…";
   analysisStartTime = Date.now();
   try {
@@ -2104,13 +2253,18 @@ $("btnLiveStop").addEventListener("click", async () => {
       }),
     }));
     $("liveStatus").textContent = "完成";
-    renderResult(result, result.transcript);
-  } catch (e) { showError(e.message); $("liveStatus").textContent = "分析失敗"; }
-  finally {
-    $("btnLiveStart").disabled = false;
     liveSessionId = null;
+    $("btnLiveStart").disabled = false;
+    renderResult(result, result.transcript);
+  } catch (e) {
+    showError("分析失敗：" + e.message + "（逐字稿仍在，可按「重試分析」再試一次）");
+    $("liveStatus").textContent = "分析失敗";
+    $("btnLiveStart").disabled = false;  // 也可放棄、重新開始新的一場
+    $("btnLiveRetry").style.display = "inline-flex";
+    $("btnLiveRetry").disabled = false;
   }
-});
+}
+$("btnLiveRetry").addEventListener("click", finishLiveSession);
 
 // ---- 逐字稿對照：點任務卡的引用句 → 展開逐字稿、標亮出處泡泡 ----
 $("rTodos").addEventListener("click", e => {
@@ -2198,6 +2352,29 @@ async function saveGlossary() {
     renderGlossary();
   } catch (err) { showError("儲存詞彙失敗：" + err.message); }
 }
+
+// ---- 資料還原（從備份 JSON 覆蓋現有資料）----
+$("btnRestore").addEventListener("click", () => $("restoreFile").click());
+$("restoreFile").addEventListener("change", async () => {
+  const file = $("restoreFile").files[0];
+  if (!file) return;
+  if (!confirm("還原會用備份內容『覆蓋』目前所有會議與任務，現有資料將被取代。確定？")) {
+    $("restoreFile").value = "";
+    return;
+  }
+  try {
+    const data = JSON.parse(await file.text());
+    const r = await jsonOrThrow(await fetch("/api/restore", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    }));
+    $("settingsMenu").classList.remove("open");
+    alert(`已還原 ${r.restored.meetings} 場會議、${r.restored.tasks} 筆任務。`);
+    refreshTasks(); refreshMeetings(); refreshReminders();
+  } catch (err) { showError("還原失敗：" + err.message); }
+  finally { $("restoreFile").value = ""; }
+});
 
 $("btnGlossary").addEventListener("click", async () => {
   $("settingsMenu").classList.remove("open");

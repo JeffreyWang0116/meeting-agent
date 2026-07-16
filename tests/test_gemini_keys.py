@@ -217,7 +217,7 @@ def test_gemini_transcriber_rotates_key_on_quota_error(tmp_path, monkeypatch):
     t = GeminiTranscriber(api_keys=["k1", "k2"])
     used = []
 
-    def fake_run(key, path):
+    def fake_run(key, path, hint=None):
         used.append(key)
         if key == "k1":
             raise _quota_exc()

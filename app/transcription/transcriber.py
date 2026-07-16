@@ -105,11 +105,14 @@ class Transcriber:
             logger.info("Whisper 模型已載入：%s（cpu）", model_size)
             return self._model
 
-    def transcribe(self, path, on_progress=None) -> str:
+    def transcribe(self, path, on_progress=None, hint: str | None = None) -> str:
         """轉錄音檔/影片檔，回傳全文。
 
         on_progress(fraction, segment_text)：每完成一個段落呼叫一次，
         供長檔進度條與部分逐字稿顯示使用。
+
+        hint：跨段講者提示，僅為與 GeminiTranscriber 介面對齊而接收；
+        Whisper 不做講者分離，這裡不使用。
         """
         model = self._ensure_model()
         try:

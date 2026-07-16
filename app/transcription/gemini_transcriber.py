@@ -19,11 +19,16 @@ from app.transcription import media
 # Gemini 原生支援的音訊副檔名，這些不需要再轉檔
 _SAFE_AUDIO_EXTS = {".wav", ".mp3", ".flac", ".ogg", ".aiff"}
 
+# 轉錄 prompt：務必強力要求分辨講者。實測 gemini-flash-lite 在「弱提示」下
+# 幾乎不標講者（多人對話被併成一段，使用者只看到講者A/B 甚至沒標），把要求
+# 講清楚後，連 lite 模型也能穩定標出講者A/B/C。
 _TRANSCRIBE_PROMPT = (
-    "請將這段會議錄音完整逐字轉錄成繁體中文。"
+    "這是一段可能有多位講者的會議錄音，請完整逐字轉錄成繁體中文。"
     "中英夾雜的地方保留原文（英文單字、技術名詞不要翻譯）。"
-    "若有多位講者，每句開頭標註講者：聽得出名字就用名字（如「小明：」），"
-    "聽不出名字就用「講者A：」「講者B：」區分；只有一位講者則不必標註。"
+    "務必分辨不同說話者：即使聲音、口音或語速相近，只要是不同人輪流發言，"
+    "就在每一句話開頭標註講者——聽得出名字就用名字（如「小明：」），聽不出名字"
+    "就用「講者A：」「講者B：」「講者C：」依序區分，不要把不同人的話併成同一段；"
+    "只有在整段自始至終確定是同一位講者時，才可以不標註。"
     "只輸出逐字稿本身，不要加任何標題、說明或時間戳。"
 )
 
@@ -54,18 +59,20 @@ class GeminiTranscriber:
         # callable() -> list[dict]：自訂詞彙表，每次轉錄時讀最新內容
         self._glossary = glossary
 
-    def build_prompt(self) -> str:
+    def build_prompt(self, hint: str | None = None) -> str:
+        prompt = _TRANSCRIBE_PROMPT
         terms = glossary_prompt_line(self._glossary() if self._glossary else [])
-        if not terms:
-            return _TRANSCRIBE_PROMPT
-        return (
-            _TRANSCRIBE_PROMPT
-            + f"已知詞彙表（聽到相近發音時，人名與專有名詞一律採用以下寫法）：{terms}。"
-        )
+        if terms:
+            prompt += (
+                f"已知詞彙表（聽到相近發音時，人名與專有名詞一律採用以下寫法）：{terms}。"
+            )
+        if hint:  # 跨段講者一致性提示（即時聆聽逐段轉錄時帶入）
+            prompt += hint
+        return prompt
 
     # ---- 對外介面（與 Whisper Transcriber 相同簽名）----
 
-    def transcribe(self, path, on_progress=None) -> str:
+    def transcribe(self, path, on_progress=None, hint: str | None = None) -> str:
         audio_path = self._ensure_audio(Path(path))
         if on_progress:
             on_progress(0.1, "")
@@ -76,7 +83,8 @@ class GeminiTranscriber:
             # 上傳的檔案綁在該 key 的專案底下，所以「上傳＋轉錄」必須整組用同一把 key
             text = (
                 call_with_rotation(
-                    self._pool, lambda key: self._transcribe_with_key(key, audio_path)
+                    self._pool,
+                    lambda key: self._transcribe_with_key(key, audio_path, hint),
                 )
                 or ""
             ).strip()
@@ -104,22 +112,30 @@ class GeminiTranscriber:
 
         return genai.Client(api_key=key)
 
-    def _transcribe_with_key(self, key: str | None, path: Path) -> str:
+    def _transcribe_with_key(self, key: str | None, path: Path, hint: str | None = None) -> str:
         client = self._client(key)
         uploaded = client.files.upload(file=str(path))
-        # 音訊通常上傳即就緒；video 或大檔可能要等處理，輪詢到 ACTIVE
-        for _ in range(60):
-            state = getattr(uploaded, "state", None)
-            name = getattr(state, "name", str(state))
-            if name == "ACTIVE":
-                break
-            if name == "FAILED":
-                raise GeminiTranscribeError("Gemini 檔案處理失敗，請換一個檔案再試")
-            time.sleep(1)
-            uploaded = client.files.get(name=uploaded.name)
-        response = client.models.generate_content(
-            model=self.model,
-            contents=[self.build_prompt(), uploaded],
-            config={"temperature": 0.0},
-        )
-        return response.text or ""
+        try:
+            # 音訊通常上傳即就緒；video 或大檔可能要等處理，輪詢到 ACTIVE
+            for _ in range(60):
+                state = getattr(uploaded, "state", None)
+                name = getattr(state, "name", str(state))
+                if name == "ACTIVE":
+                    break
+                if name == "FAILED":
+                    raise GeminiTranscribeError("Gemini 檔案處理失敗，請換一個檔案再試")
+                time.sleep(1)
+                uploaded = client.files.get(name=uploaded.name)
+            response = client.models.generate_content(
+                model=self.model,
+                contents=[self.build_prompt(hint), uploaded],
+                config={"temperature": 0.0},
+            )
+            return response.text or ""
+        finally:
+            # Files API 有 20GB 儲存上限；即時聆聽每 45 秒上傳一個檔，用完即刪，
+            # 不留給 48 小時自動清除（否則長時間聆聽很快撞到上限）
+            try:
+                client.files.delete(name=uploaded.name)
+            except Exception:
+                pass

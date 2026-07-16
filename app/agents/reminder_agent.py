@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from datetime import date
 
+from app.timeutil import today_local
+
 
 def _parse_date(raw) -> date | None:
     if not raw:
@@ -61,7 +63,7 @@ def scan(
     today: date | None = None,
     due_soon_days: int = 2,
 ) -> dict:
-    today = today or date.today()
+    today = today or today_local()
 
     reminders = []
     for task in tasks:

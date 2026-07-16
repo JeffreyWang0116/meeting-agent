@@ -7,8 +7,26 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
+from app.atomicio import atomic_write_text
 from app.models import MeetingAnalysis
 from app.stores.base import TaskStore
+
+# 手動任務可填的欄位（與 AI 產出的任務同型別，缺的補預設）
+_MANUAL_TASK_FIELDS = ("task", "owner", "due_date", "priority", "source_quote")
+
+
+def _new_task_record(task: dict) -> dict:
+    """把使用者手動輸入的任務正規化成與 AI 任務一致的完整紀錄。"""
+    record = {
+        "id": uuid.uuid4().hex[:12],
+        "meeting_id": task.get("meeting_id"),
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "status": task.get("status") or "todo",
+        "priority": task.get("priority") or "medium",
+    }
+    for field_name in _MANUAL_TASK_FIELDS:
+        record.setdefault(field_name, task.get(field_name))
+    return record
 
 
 class LocalJsonStore(TaskStore):
@@ -29,10 +47,8 @@ class LocalJsonStore(TaskStore):
         return data
 
     def _flush(self) -> None:
-        self._path.parent.mkdir(parents=True, exist_ok=True)
-        self._path.write_text(
-            json.dumps(self._data, ensure_ascii=False, indent=2),
-            encoding="utf-8",
+        atomic_write_text(
+            self._path, json.dumps(self._data, ensure_ascii=False, indent=2)
         )
 
     def save_meeting(
@@ -114,6 +130,13 @@ class LocalJsonStore(TaskStore):
                 tasks = [t for t in tasks if t["meeting_id"] == meeting_id]
             return list(tasks)
 
+    def add_task(self, task: dict) -> dict:
+        record = _new_task_record(task)
+        with self._lock:
+            self._data["tasks"].append(record)
+            self._flush()
+        return dict(record)
+
     def update_task(self, task_id: str, **fields) -> dict | None:
         with self._lock:
             for task in self._data["tasks"]:
@@ -151,6 +174,27 @@ class LocalJsonStore(TaskStore):
             self._flush()
             return True
 
+    # ---- 備份 / 還原 ----
+
+    def export_all(self) -> dict:
+        with self._lock:
+            return {
+                "meetings": [dict(m) for m in self._data["meetings"]],
+                "tasks": [dict(t) for t in self._data["tasks"]],
+                "glossary": self.get_glossary(),
+            }
+
+    def import_all(self, data: dict) -> None:
+        meetings = [dict(m) for m in data.get("meetings", [])]
+        tasks = [dict(t) for t in data.get("tasks", [])]
+        for t in tasks:
+            t.setdefault("status", "todo")
+        with self._lock:
+            self._data = {"meetings": meetings, "tasks": tasks}
+            self._flush()
+        if "glossary" in data:
+            self.save_glossary(data.get("glossary") or [])
+
     # ---- 自訂詞彙（沿用同目錄的 glossary.json，與 db.json 並存） ----
 
     def _glossary_path(self):
@@ -163,8 +207,7 @@ class LocalJsonStore(TaskStore):
         return []
 
     def save_glossary(self, terms: list[dict]) -> None:
-        path = self._glossary_path()
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(
-            json.dumps({"terms": terms}, ensure_ascii=False, indent=2), encoding="utf-8"
+        atomic_write_text(
+            self._glossary_path(),
+            json.dumps({"terms": terms}, ensure_ascii=False, indent=2),
         )

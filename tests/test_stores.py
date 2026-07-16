@@ -210,3 +210,40 @@ def test_list_meetings_newest_first(tmp_path):
     id2 = store.save_meeting(make_analysis())
     meetings = store.list_meetings()
     assert [m["id"] for m in meetings] == [id2, id1]
+
+
+def test_add_manual_task_normalizes_and_persists(tmp_path):
+    path = tmp_path / "db.json"
+    store = LocalJsonStore(path)
+    t = store.add_task(
+        {"task": "買咖啡", "due_date": "2026-08-01", "priority": "high", "meeting_id": None}
+    )
+    assert t["id"]
+    assert t["status"] == "todo"  # 補上預設狀態
+    assert t["priority"] == "high"
+    assert t["meeting_id"] is None  # 手動任務不綁會議
+    assert t["owner"] is None
+    # 落地
+    assert LocalJsonStore(path).list_tasks()[0]["task"] == "買咖啡"
+
+
+def test_export_import_roundtrip_and_overwrite(tmp_path):
+    store = LocalJsonStore(tmp_path / "db.json")
+    store.save_meeting(make_analysis(), transcript="逐字稿原文")
+    store.save_glossary([{"term": "TaskHub", "note": ""}])
+
+    dump = store.export_all()
+    assert dump["meetings"][0]["transcript"] == "逐字稿原文"  # 備份含逐字稿全文
+    assert dump["tasks"] and dump["glossary"]
+
+    # 匯入到全新的 store → 內容一致
+    fresh = LocalJsonStore(tmp_path / "db2.json")
+    fresh.import_all(dump)
+    assert fresh.list_meetings()[0]["meeting"]["title"] == "專題進度會議"
+    assert fresh.list_tasks()[0]["task"] == "完成 Prompt 初版"
+    assert fresh.get_glossary() == [{"term": "TaskHub", "note": ""}]
+
+    # import 是「整份覆蓋」：匯入空資料會清掉現有內容
+    fresh.import_all({"meetings": [], "tasks": []})
+    assert fresh.list_meetings() == []
+    assert fresh.list_tasks() == []

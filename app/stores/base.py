@@ -42,6 +42,11 @@ class TaskStore(ABC):
         """攤平的代辦事項清單，可依會議過濾。"""
 
     @abstractmethod
+    def add_task(self, task: dict) -> dict:
+        """新增一筆手動任務（非 AI 分析產生），補上 id/created_at/status，回傳完整紀錄。
+        手動任務的 meeting_id 為 None（不屬於任何一場會議）。"""
+
+    @abstractmethod
     def update_task(self, task_id: str, **fields) -> dict | None:
         """更新任務欄位，回傳更新後的紀錄；找不到回傳 None。"""
 
@@ -60,3 +65,11 @@ class TaskStore(ABC):
     @abstractmethod
     def save_glossary(self, terms: list[dict]) -> None:
         """整份儲存自訂詞彙表。"""
+
+    @abstractmethod
+    def export_all(self) -> dict:
+        """匯出整份資料（meetings + tasks + glossary）供備份下載。"""
+
+    @abstractmethod
+    def import_all(self, data: dict) -> None:
+        """以備份資料整份覆蓋現有資料（還原備份時使用）。"""

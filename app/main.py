@@ -4,6 +4,7 @@
 """
 from __future__ import annotations
 
+import json
 import shutil
 import uuid
 from datetime import date
@@ -41,6 +42,30 @@ STATIC_DIR = Path(__file__).resolve().parent / "static"
 MEETING_KINDS = {"會議", "通話", "訪談", "語音備忘錄", "講座", "其它"}
 
 
+def _is_iso_date(value) -> bool:
+    if not isinstance(value, str):
+        return False
+    try:
+        date.fromisoformat(value)
+        return True
+    except ValueError:
+        return False
+
+
+def _parse_iso_date_or_none(value) -> date | None:
+    """把可能是字串/None/亂填的日期安全轉成 date；轉不動回 None，絕不拋例外。"""
+    if not isinstance(value, str):
+        return None
+    try:
+        return date.fromisoformat(value)
+    except ValueError:
+        return None
+
+
+def _is_str_list(value) -> bool:
+    return isinstance(value, list) and all(isinstance(x, str) for x in value)
+
+
 class MeetingRequest(BaseModel):
     text: str
     meeting_date: Optional[date] = None
@@ -59,6 +84,13 @@ class AskRequest(BaseModel):
 
 class GlossaryRequest(BaseModel):
     terms: list[dict]
+
+
+class TaskCreateRequest(BaseModel):
+    task: str
+    owner: Optional[str] = None
+    due_date: Optional[str] = None
+    priority: str = "medium"
 
 
 class LiveStartRequest(BaseModel):
@@ -233,8 +265,12 @@ def create_app(
             )
         if "kind" in fields:
             validate_kind(fields["kind"])
-        if "tags" in fields and not isinstance(fields["tags"], list):
+        if "tags" in fields and not _is_str_list(fields["tags"]):
             raise HTTPException(status_code=400, detail="tags 必須是字串陣列")
+        if "attendees" in fields and not _is_str_list(fields["attendees"]):
+            raise HTTPException(status_code=400, detail="attendees 必須是字串陣列")
+        if "date" in fields and not _is_iso_date(fields["date"]):
+            raise HTTPException(status_code=400, detail="date 必須是 YYYY-MM-DD 格式")
 
         update = {k: v for k, v in fields.items() if k in _MEETING_TOP_FIELDS}
         nested = {k: v for k, v in fields.items() if k in _MEETING_INFO_FIELDS}
@@ -263,10 +299,7 @@ def create_app(
         if not transcript:
             raise HTTPException(status_code=400, detail="此會議沒有逐字稿全文，無法重新分析")
 
-        try:
-            meeting_date = date.fromisoformat(record.get("meeting", {}).get("date", ""))
-        except ValueError:
-            meeting_date = None
+        meeting_date = _parse_iso_date_or_none(record.get("meeting", {}).get("date"))
         usage.record("analysis")
         try:
             analysis = orchestrator.decision.analyze(
@@ -394,6 +427,24 @@ def create_app(
     _EDITABLE_FIELDS = {"status", "task", "owner", "due_date", "priority"}
     _VALID_STATUS = {"todo", "doing", "done"}
 
+    @app.post("/api/tasks")
+    def create_task(req: TaskCreateRequest):
+        """手動新增一筆任務（會議之外臨時想到的待辦），不綁定任何會議。"""
+        task = req.task.strip()
+        if not task:
+            raise HTTPException(status_code=400, detail="任務名稱不可為空")
+        if req.priority not in {"high", "medium", "low"}:
+            raise HTTPException(status_code=400, detail="priority 只能是 high / medium / low")
+        if req.due_date not in (None, "") and not _is_iso_date(req.due_date):
+            raise HTTPException(status_code=400, detail="due_date 必須是 YYYY-MM-DD 格式或留空")
+        return store.add_task({
+            "task": task,
+            "owner": (req.owner or "").strip() or None,
+            "due_date": req.due_date or None,
+            "priority": req.priority,
+            "meeting_id": None,
+        })
+
     @app.patch("/api/tasks/{task_id}")
     def patch_task(task_id: str, fields: dict):
         unknown = set(fields) - _EDITABLE_FIELDS
@@ -403,6 +454,12 @@ def create_app(
             raise HTTPException(status_code=400, detail="status 只能是 todo / doing / done")
         if "priority" in fields and fields["priority"] not in {"high", "medium", "low"}:
             raise HTTPException(status_code=400, detail="priority 只能是 high / medium / low")
+        if (
+            "due_date" in fields
+            and fields["due_date"] not in (None, "")
+            and not _is_iso_date(fields["due_date"])
+        ):
+            raise HTTPException(status_code=400, detail="due_date 必須是 YYYY-MM-DD 格式或留空")
         updated = store.update_task(task_id, **fields)
         if updated is None:
             raise HTTPException(status_code=404, detail=f"找不到任務：{task_id}")
@@ -413,6 +470,29 @@ def create_app(
         if not store.delete_task(task_id):
             raise HTTPException(status_code=404, detail=f"找不到任務：{task_id}")
         return {"deleted": task_id}
+
+    @app.get("/api/backup")
+    def download_backup():
+        """整份資料（會議＋任務＋詞彙）打包成 JSON 下載，供離線保存或搬移。"""
+        return Response(
+            content=json.dumps(store.export_all(), ensure_ascii=False, indent=2),
+            media_type="application/json; charset=utf-8",
+            headers={"Content-Disposition": 'attachment; filename="meeting-agent-backup.json"'},
+        )
+
+    @app.post("/api/restore")
+    def restore_backup(data: dict):
+        """以備份 JSON 整份覆蓋現有資料。"""
+        if not isinstance(data.get("meetings"), list) or not isinstance(data.get("tasks"), list):
+            raise HTTPException(
+                status_code=400, detail="備份格式不正確：需要 meetings 與 tasks 陣列"
+            )
+        store.import_all(data)
+        if rag_index is not None:  # 舊向量已不對應新資料，整份作廢待重建
+            rag_index.reset()
+        return {
+            "restored": {"meetings": len(data["meetings"]), "tasks": len(data["tasks"])}
+        }
 
     @app.get("/api/export/tasks.csv")
     def export_tasks_csv():

@@ -148,6 +148,21 @@ class FirestoreStore(TaskStore):
             t.setdefault("status", "todo")
         return docs
 
+    def add_task(self, task: dict) -> dict:
+        task_id = uuid.uuid4().hex[:12]
+        record = {
+            "id": task_id,
+            "meeting_id": task.get("meeting_id"),
+            "created_at": self._now(),
+            "status": task.get("status") or "todo",
+            "priority": task.get("priority") or "medium",
+        }
+        for field_name in ("task", "owner", "due_date", "source_quote"):
+            record[field_name] = task.get(field_name)
+        with self._lock:
+            self._db.collection(self._tasks).document(task_id).set(record)
+        return record
+
     def update_task(self, task_id: str, **fields) -> dict | None:
         with self._lock:
             ref = self._db.collection(self._tasks).document(task_id)
@@ -187,6 +202,27 @@ class FirestoreStore(TaskStore):
                 return False
             ref.delete()
             return True
+
+    # ---- 備份 / 還原 ----
+
+    def export_all(self) -> dict:
+        meetings = [s.to_dict() for s in self._db.collection(self._meetings).stream()]
+        tasks = [s.to_dict() for s in self._db.collection(self._tasks).stream()]
+        return {"meetings": meetings, "tasks": tasks, "glossary": self.get_glossary()}
+
+    def import_all(self, data: dict) -> None:
+        with self._lock:
+            for coll in (self._meetings, self._tasks):
+                for snap in self._db.collection(coll).stream():
+                    self._db.collection(coll).document(snap.id).delete()
+            for m in data.get("meetings", []):
+                self._db.collection(self._meetings).document(m["id"]).set(dict(m))
+            for t in data.get("tasks", []):
+                t = dict(t)
+                t.setdefault("status", "todo")
+                self._db.collection(self._tasks).document(t["id"]).set(t)
+        if "glossary" in data:
+            self.save_glossary(data.get("glossary") or [])
 
     # ---- 自訂詞彙（meta collection 底下單一 glossary 文件） ----
 

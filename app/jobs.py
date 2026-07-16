@@ -22,6 +22,9 @@ class MediaJobManager:
         self._threads: dict[str, threading.Thread] = {}
         self._lock = threading.Lock()
 
+    # 保留最近的工作記錄即可；避免長時間運行下 _jobs / _threads 無限成長
+    _MAX_JOBS = 100
+
     def submit(
         self,
         file_path: Path | str,
@@ -30,6 +33,7 @@ class MediaJobManager:
     ) -> str:
         job_id = uuid.uuid4().hex[:12]
         with self._lock:
+            self._prune_locked()
             self._jobs[job_id] = {
                 "id": job_id,
                 "status": "queued",
@@ -61,11 +65,22 @@ class MediaJobManager:
         with self._lock:
             self._jobs[job_id].update(fields)
 
+    def _prune_locked(self) -> None:
+        """在鎖內把已結束的舊工作清掉，只保留最近 _MAX_JOBS 筆。"""
+        if len(self._jobs) < self._MAX_JOBS:
+            return
+        finished = [
+            jid for jid, j in self._jobs.items() if j["status"] in ("done", "error")
+        ]
+        for jid in finished[: len(self._jobs) - self._MAX_JOBS + 1]:
+            self._jobs.pop(jid, None)
+            self._threads.pop(jid, None)
+
     def _run(
         self, job_id: str, file_path: Path, meeting_date: date | None, kind: str | None = None
     ) -> None:
+        path = file_path
         try:
-            path = file_path
             if media.is_video(path) and media.ffmpeg_available():
                 self._update(job_id, status="extracting")
                 path = media.extract_audio(path)
@@ -95,3 +110,10 @@ class MediaJobManager:
             self._update(job_id, status="done", result=result)
         except Exception as exc:  # 背景執行緒的例外必須被記錄，否則前端永遠在等
             self._update(job_id, status="error", error=str(exc))
+        finally:
+            # 轉錄後原始上傳檔與抽出的音軌都不再需要，刪掉釋放磁碟
+            for p in {file_path, path}:
+                try:
+                    Path(p).unlink(missing_ok=True)
+                except OSError:
+                    pass

@@ -231,6 +231,65 @@ def test_delete_task(client):
     assert client.delete(f"/api/tasks/{task_id}").status_code == 404
 
 
+def test_create_manual_task_and_validation(client):
+    r = client.post("/api/tasks", json={"task": "買便當", "priority": "low"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["task"] == "買便當"
+    assert body["status"] == "todo"
+    assert body["meeting_id"] is None
+    assert any(t["task"] == "買便當" for t in client.get("/api/tasks").json()["tasks"])
+    # 驗證：空名稱、非法優先級、非法日期都要擋
+    assert client.post("/api/tasks", json={"task": "  "}).status_code == 400
+    assert client.post("/api/tasks", json={"task": "x", "priority": "urgent"}).status_code == 400
+    assert client.post("/api/tasks", json={"task": "x", "due_date": "下週五"}).status_code == 400
+
+
+def test_patch_task_rejects_bad_due_date(client):
+    make_meeting(client)
+    tid = client.get("/api/tasks").json()["tasks"][0]["id"]
+    assert client.patch(f"/api/tasks/{tid}", json={"due_date": "下週五"}).status_code == 400
+    assert client.patch(f"/api/tasks/{tid}", json={"due_date": None}).status_code == 200
+    assert client.patch(f"/api/tasks/{tid}", json={"due_date": "2026-09-01"}).status_code == 200
+
+
+def test_patch_meeting_rejects_bad_date_and_attendees(client):
+    mid = make_meeting(client)
+    assert client.patch(f"/api/meetings/{mid}", json={"date": "not-a-date"}).status_code == 400
+    assert client.patch(f"/api/meetings/{mid}", json={"tags": [1, 2]}).status_code == 400
+    assert client.patch(f"/api/meetings/{mid}", json={"attendees": "x"}).status_code == 400
+    assert client.patch(f"/api/meetings/{mid}", json={"attendees": ["Amy"]}).status_code == 200
+    assert client.get(f"/api/meetings/{mid}").json()["meeting"]["attendees"] == ["Amy"]
+
+
+def test_backup_and_restore_roundtrip(client):
+    make_meeting(client)
+    dump = client.get("/api/backup").json()
+    assert dump["meetings"] and dump["tasks"]
+
+    mid = dump["meetings"][0]["id"]
+    client.delete(f"/api/meetings/{mid}")
+    assert client.get("/api/meetings").json()["meetings"] == []
+
+    r = client.post("/api/restore", json=dump)
+    assert r.status_code == 200
+    assert r.json()["restored"]["meetings"] == 1
+    assert len(client.get("/api/meetings").json()["meetings"]) == 1
+    assert len(client.get("/api/tasks").json()["tasks"]) == 1
+    # 格式不對要擋
+    assert client.post("/api/restore", json={"foo": 1}).status_code == 400
+
+
+def test_parse_iso_date_or_none_is_typeerror_safe():
+    from datetime import date
+
+    from app.main import _parse_iso_date_or_none
+
+    assert _parse_iso_date_or_none(None) is None  # 不會拋 TypeError
+    assert _parse_iso_date_or_none("garbage") is None
+    assert _parse_iso_date_or_none("2026-07-12") == date(2026, 7, 12)
+
+
 def test_export_tasks_csv(client):
     make_meeting(client)
     resp = client.get("/api/export/tasks.csv")

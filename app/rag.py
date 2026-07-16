@@ -14,7 +14,13 @@ import math
 import threading
 from pathlib import Path
 
+from app.atomicio import atomic_write_text
 from app.gemini_keys import KeyPool, call_with_rotation
+
+# 向量維度：gemini-embedding-001 預設 3072 維，每場會議的索引 JSON 會膨脹到
+# 數 MB。降到 768 維品質幾乎不變，索引小 4 倍、cosine 也快 4 倍。改這個值會
+# 讓舊索引失效（維度不符），RagIndex 載入時偵測到就整份重建。
+EMBED_DIM = 768
 
 
 class RagError(Exception):
@@ -53,9 +59,16 @@ def _summary_card(meeting: dict, tasks: list[dict]) -> str:
 
 
 class GeminiEmbedder:
-    def __init__(self, api_key=None, api_keys=None, model: str = "gemini-embedding-001"):
+    def __init__(
+        self,
+        api_key=None,
+        api_keys=None,
+        model: str = "gemini-embedding-001",
+        dim: int = EMBED_DIM,
+    ):
         self._pool = KeyPool(api_keys if api_keys else [api_key])
         self.model = model
+        self.dim = dim
 
     def embed(self, texts: list[str]) -> list[list[float]]:
         if not self._pool:
@@ -68,7 +81,11 @@ class GeminiEmbedder:
         from google import genai
 
         client = genai.Client(api_key=key)
-        result = client.models.embed_content(model=self.model, contents=list(texts))
+        result = client.models.embed_content(
+            model=self.model,
+            contents=list(texts),
+            config={"output_dimensionality": self.dim},
+        )
         return [list(e.values) for e in result.embeddings]
 
 
@@ -80,14 +97,23 @@ class RagIndex:
         self._records = self._load()
 
     def _load(self) -> list[dict]:
-        if self._path.exists():
-            return json.loads(self._path.read_text(encoding="utf-8"))["records"]
-        return []
+        if not self._path.exists():
+            return []
+        data = json.loads(self._path.read_text(encoding="utf-8"))
+        expected = getattr(self._embedder, "dim", None)
+        # 向量維度改過（例如從 3072 降到 768）→ 舊向量與新問題向量不同長，
+        # 直接作廢整份索引，下次 sync 用新維度重建。
+        if expected is not None and data.get("dim") != expected:
+            return []
+        return data.get("records", [])
 
     def _flush(self) -> None:
-        self._path.parent.mkdir(parents=True, exist_ok=True)
-        self._path.write_text(
-            json.dumps({"records": self._records}, ensure_ascii=False), encoding="utf-8"
+        atomic_write_text(
+            self._path,
+            json.dumps(
+                {"dim": getattr(self._embedder, "dim", None), "records": self._records},
+                ensure_ascii=False,
+            ),
         )
 
     def sync(self, store) -> int:
@@ -117,6 +143,12 @@ class RagIndex:
             if added:
                 self._flush()
             return added
+
+    def reset(self) -> None:
+        """清空整份索引（還原備份後呼叫：舊會議的向量已不再對應現有資料）。"""
+        with self._lock:
+            self._records = []
+            self._flush()
 
     def drop_meeting(self, meeting_id: str) -> int:
         """把某場會議的片段從索引移除（會議被編輯/刪除時呼叫），

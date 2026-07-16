@@ -1,4 +1,6 @@
 """即時聆聽 session 管理測試。"""
+import threading
+
 import pytest
 
 from app.transcription.live_session import LiveSessionManager, SessionNotFound
@@ -117,3 +119,74 @@ def test_sessions_are_independent(manager, tmp_path):
     mgr.add_chunk(sid2, b"b")
     assert mgr.transcript(sid1) == "s1 的話"
     assert mgr.transcript(sid2) == "s2 的話"
+
+
+# ---- 並發：段落順序＝錄音順序，而非「哪段先辨識完」 ----
+
+class HintRecordingTranscriber:
+    def __init__(self, texts):
+        self.texts = list(texts)
+        self.hints = []
+
+    def transcribe(self, path, on_progress=None, hint=None):
+        self.hints.append(hint)
+        return self.texts.pop(0)
+
+
+def test_known_speakers_passed_as_hint_to_next_chunk(tmp_path):
+    """跨段講者一致性：第二段轉錄要帶入前面已出現的講者，模型才能沿用標籤。"""
+    tr = HintRecordingTranscriber(["講者A：大家好", "講者B：你好"])
+    mgr = LiveSessionManager(tr, tmp_path)
+    sid = mgr.start()
+    mgr.add_chunk(sid, b"a")
+    mgr.add_chunk(sid, b"b")
+    assert tr.hints[0] is None  # 第一段沒有先前講者
+    assert tr.hints[1] and "講者A" in tr.hints[1]  # 第二段帶入已知講者
+
+
+class GatedTranscriber:
+    """轉錄結果＝檔案內容；每段先等對應的閘門開啟，好在測試裡控制完成順序。"""
+
+    def __init__(self):
+        self.gates = {}
+
+    def transcribe(self, path, on_progress=None, hint=None):
+        from pathlib import Path
+
+        text = Path(path).read_bytes().decode()
+        self.gates.setdefault(text, threading.Event()).wait(2)
+        return text
+
+
+def test_chunk_order_follows_submission_not_completion(tmp_path):
+    tr = GatedTranscriber()
+    mgr = LiveSessionManager(tr, tmp_path)
+    sid = mgr.start()
+    session_dir = tmp_path / sid
+
+    def add(data):
+        mgr.add_chunk(sid, data)
+
+    t1 = threading.Thread(target=add, args=(b"first",))
+    t1.start()
+    _wait_for(session_dir / "chunk_000.webm")  # first 已配到 index 0
+    t2 = threading.Thread(target=add, args=(b"second",))
+    t2.start()
+    _wait_for(session_dir / "chunk_001.webm")  # second 已配到 index 1
+
+    # 讓第二段先辨識完，第一段後完成
+    tr.gates.setdefault("second", threading.Event()).set()
+    tr.gates.setdefault("first", threading.Event()).set()
+    t1.join(2)
+    t2.join(2)
+
+    # 完成順序是 second→first，但最終逐字稿仍照錄音順序
+    assert mgr.transcript(sid) == "first\nsecond"
+
+
+def _wait_for(path, timeout=2.0):
+    import time
+
+    deadline = time.time() + timeout
+    while not path.exists() and time.time() < deadline:
+        time.sleep(0.01)

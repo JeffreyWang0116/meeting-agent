@@ -220,6 +220,38 @@ def test_glossary_get_and_save_persists():
     assert make_store(db).get_glossary() == [{"term": "王霖翔", "note": "人名"}]
 
 
+def test_add_manual_task():
+    db = FakeFirestore()
+    store = make_store(db)
+    t = store.add_task({"task": "買咖啡", "priority": "high", "meeting_id": None})
+    assert t["id"] and t["status"] == "todo" and t["priority"] == "high"
+    assert t["meeting_id"] is None
+    assert make_store(db).list_tasks()[0]["task"] == "買咖啡"
+
+
+def test_export_import_roundtrip():
+    db = FakeFirestore()
+    store = make_store(db)
+    store.save_meeting(make_analysis(), transcript="逐字稿原文")
+    store.save_glossary([{"term": "TaskHub", "note": ""}])
+
+    dump = store.export_all()
+    assert dump["meetings"][0]["transcript"] == "逐字稿原文"
+    assert dump["tasks"] and dump["glossary"]
+
+    # 匯入到另一個後端 → 內容一致
+    other = make_store(FakeFirestore())
+    other.import_all(dump)
+    assert other.list_meetings()[0]["meeting"]["title"] == "專題進度會議"
+    assert other.list_tasks()[0]["task"] == "完成 Prompt 初版"
+    assert other.get_glossary() == [{"term": "TaskHub", "note": ""}]
+
+    # 整份覆蓋：同一後端匯入空資料會清掉
+    store.import_all({"meetings": [], "tasks": []})
+    assert make_store(db).list_meetings() == []
+    assert make_store(db).list_tasks() == []
+
+
 def test_task_without_status_backfilled_to_todo():
     """舊資料（Firestore 上已存在、沒有 status 欄位）讀取時要補 todo。"""
     db = FakeFirestore()

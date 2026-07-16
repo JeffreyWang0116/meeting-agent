@@ -162,6 +162,38 @@ def test_index_persists_to_disk(tmp_path):
     assert emb2.calls == 1
 
 
+def test_index_wiped_when_embedding_dim_changes(tmp_path):
+    """向量維度改過（例如 3072→768）時，舊索引要作廢，避免與新問題向量不同長。"""
+    store = make_store_with_meeting(tmp_path)
+
+    class Emb768(FakeEmbedder):
+        dim = 768
+
+    class Emb1536(FakeEmbedder):
+        dim = 1536
+
+    RagIndex(tmp_path / "rag.json", embedder=Emb768()).sync(store)
+
+    # 用不同維度的 embedder 載入 → 舊索引視為失效（清空）
+    reloaded = RagIndex(tmp_path / "rag.json", embedder=Emb1536())
+    assert reloaded.search("API", k=5) == []
+
+    # 同維度載入 → 仍保留（載入不會覆寫，檔案還是 768 維）
+    same = RagIndex(tmp_path / "rag.json", embedder=Emb768())
+    assert same.search("API", k=1)
+
+
+def test_reset_clears_index(tmp_path):
+    store = make_store_with_meeting(tmp_path)
+    index = RagIndex(tmp_path / "rag.json", embedder=FakeEmbedder())
+    index.sync(store)
+    assert index.search("API", k=1)
+    index.reset()
+    assert index.search("API", k=5) == []
+    # 落地：重新載入也空
+    assert RagIndex(tmp_path / "rag.json", embedder=FakeEmbedder()).search("API", k=5) == []
+
+
 def test_summary_card_indexed_even_without_transcript(tmp_path):
     """舊會議沒存逐字稿，至少摘要/決議/代辦要可被檢索。"""
     store = LocalJsonStore(tmp_path / "db.json")
