@@ -67,6 +67,7 @@ class LocalJsonStore(TaskStore):
             "meeting": dumped["meeting"],
             "decisions": dumped["decisions"],
             "pending_items": dumped["pending_items"],
+            "highlights": dumped.get("highlights", []),
             "transcript": transcript,
             "kind": kind,
             "tags": dumped.get("tags", []),

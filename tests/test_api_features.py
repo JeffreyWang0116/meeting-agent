@@ -175,3 +175,30 @@ def test_reanalyze_defaults_features_from_stored_kind(client):
     assert a["meeting"]["summary"] is None
     assert a["todos"] == []
     assert client.get("/api/tasks").json()["tasks"] == []
+
+
+# ---- 會議重點（highlights）----
+
+def test_meeting_kind_includes_highlights_and_persists(client):
+    resp = client.post("/api/meetings", json={"text": "開會內容", "kind": "會議"})
+    body = resp.json()
+    assert body["analysis"]["highlights"][0]["time"] == "1:02"
+    # 存進會議紀錄，歷史查閱也拿得到
+    detail = client.get(f"/api/meetings/{body['meeting_id']}").json()
+    assert detail["highlights"][0]["text"]
+
+
+def test_non_meeting_kind_clears_highlights(client):
+    resp = client.post("/api/meetings", json={"text": "打給客戶討論報價", "kind": "通話"})
+    assert resp.json()["analysis"]["highlights"] == []
+
+
+def test_live_chunk_offset_prefixes_timestamp(client):
+    """前端隨每段附上開始秒數，逐字稿段首要出現整場時間標記。"""
+    sid = client.post("/api/live/start").json()["session_id"]
+    r = client.post(
+        f"/api/live/{sid}/chunk",
+        files={"file": ("c.webm", io.BytesIO(b"fake"), "audio/webm")},
+        data={"offset": "45"},
+    )
+    assert r.json()["text"].startswith("[0:45] ")

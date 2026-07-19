@@ -24,6 +24,50 @@ from pathlib import Path
 # 行首「講者A：」「Kevin:」等講者標註（與前端 SPEAKER_RE 對齊）
 _SPEAKER_RE = re.compile(r"^\s*([^：:\n]{1,12})[：:]")
 
+# 行首「[1:02]」「[1:02:03]」時間標記（與前端 TIME_RE 對齊）
+_TIME_PREFIX_RE = re.compile(r"^\s*\[(\d{1,2}(?::\d{2}){1,2})\]\s*")
+
+
+def _parse_time_label(label: str) -> int:
+    seconds = 0
+    for part in label.split(":"):
+        seconds = seconds * 60 + int(part)
+    return seconds
+
+
+def _format_time(seconds: float) -> str:
+    total = max(0, int(seconds))
+    hours, rem = divmod(total, 3600)
+    minutes, secs = divmod(rem, 60)
+    return f"{hours}:{minutes:02d}:{secs:02d}" if hours else f"{minutes}:{secs:02d}"
+
+
+def _shift_timestamps(text: str, offset_seconds: float | None) -> str:
+    """把 chunk 內「相對本段開頭」的時間戳平移成整場會議時間。
+
+    每段錄音獨立轉錄，模型標的 [0:05] 是該段的第 5 秒；前端會隨上傳附上
+    本段在整場會議中的開始秒數（offset），加總後才是使用者看到的時間軸。
+    沒傳 offset（舊前端）就把相對時間剝掉，避免顯示錯誤的時間。
+    轉錄後端完全沒標時間時，在段首補一個 offset 標記，維持段落級時間軸。
+    """
+    lines = []
+    any_marker = False
+    for line in text.split("\n"):
+        m = _TIME_PREFIX_RE.match(line)
+        if not m:
+            lines.append(line)
+            continue
+        any_marker = True
+        rest = line[m.end():]
+        if offset_seconds is None:
+            lines.append(rest)
+        else:
+            t = _format_time(_parse_time_label(m.group(1)) + offset_seconds)
+            lines.append(f"[{t}] {rest}")
+    if not any_marker and offset_seconds is not None and lines:
+        lines[0] = f"[{_format_time(offset_seconds)}] {lines[0]}"
+    return "\n".join(lines)
+
 
 class SessionNotFound(KeyError):
     pass
@@ -76,7 +120,13 @@ class LiveSessionManager:
             raise SessionNotFound(f"找不到聆聽 session：{session_id}")
         return session
 
-    def add_chunk(self, session_id: str, data: bytes, suffix: str = ".webm") -> dict:
+    def add_chunk(
+        self,
+        session_id: str,
+        data: bytes,
+        suffix: str = ".webm",
+        offset_seconds: float | None = None,
+    ) -> dict:
         session = self._get(session_id)
         # 配位＋佔槽＋算提示，全在鎖內完成，避免多段並發時互相踩踏
         with self._lock:
@@ -91,12 +141,14 @@ class LiveSessionManager:
         chunk_path.write_bytes(data)
 
         text = self._transcribe(chunk_path, hint).strip()
+        if text:
+            text = _shift_timestamps(text, offset_seconds)
 
         with self._lock:
             session.parts[index] = text
             if text:
                 for line in text.split("\n"):
-                    m = _SPEAKER_RE.match(line)
+                    m = _SPEAKER_RE.match(_TIME_PREFIX_RE.sub("", line))
                     if m:
                         name = m.group(1).strip()
                         if name and name not in session.speakers:
@@ -105,8 +157,10 @@ class LiveSessionManager:
 
         translation = None
         if text and session.translate_to and self._translator:
+            # 剝掉行首時間標記再翻譯，時間戳不需要翻、也避免譯文格式被帶歪
+            plain = "\n".join(_TIME_PREFIX_RE.sub("", ln) for ln in text.split("\n"))
             try:
-                translation = self._translator.translate(text, session.translate_to)
+                translation = self._translator.translate(plain, session.translate_to)
             except Exception:  # 翻譯失敗不擋逐字稿主流程
                 translation = None
 

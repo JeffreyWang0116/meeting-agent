@@ -368,6 +368,7 @@ def create_app(
             "meeting": dumped["meeting"],
             "decisions": dumped["decisions"],
             "pending_items": dumped["pending_items"],
+            "highlights": dumped.get("highlights", []),
             "tags": dumped.get("tags", []),
         })
         tasks = store.replace_tasks(meeting_id, dumped["todos"])
@@ -633,11 +634,17 @@ def create_app(
         return {"session_id": live_manager.start(translate_to=translate_to)}
 
     @app.post("/api/live/{session_id}/chunk")
-    def live_chunk(session_id: str, file: UploadFile = File(...)):
+    def live_chunk(
+        session_id: str,
+        file: UploadFile = File(...),
+        offset: Optional[float] = Form(None),  # 本段在整場會議中的開始秒數
+    ):
         suffix = Path(file.filename or "chunk.webm").suffix or ".webm"
         usage.record("live_chunk")
         try:
-            return live_manager.add_chunk(session_id, file.file.read(), suffix=suffix)
+            return live_manager.add_chunk(
+                session_id, file.file.read(), suffix=suffix, offset_seconds=offset
+            )
         except SessionNotFound as exc:
             raise HTTPException(status_code=404, detail=str(exc))
         except ValueError as exc:

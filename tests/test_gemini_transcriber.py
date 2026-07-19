@@ -112,3 +112,11 @@ def test_wav_is_not_reconverted(tmp_path, monkeypatch):
     )
     t.transcribe(wav)
     assert uploaded == [wav]
+
+
+def test_transcribe_prompt_asks_for_timestamps():
+    """每句要標 [分:秒]：會議重點跳轉與逐字稿時間軸都靠這個。"""
+    from app.transcription.gemini_transcriber import _TRANSCRIBE_PROMPT
+
+    assert "[1:02]" in _TRANSCRIBE_PROMPT
+    assert "時間" in _TRANSCRIBE_PROMPT

@@ -19,3 +19,16 @@ def test_meeting_report_md_handles_missing_summary():
     record["meeting"]["summary"] = None
     md = meeting_report_md(record, tasks=[])
     assert "None" not in md
+
+
+def test_meeting_report_md_includes_highlights_with_time():
+    record = make_record()
+    record["highlights"] = make_valid_payload()["highlights"]
+    md = meeting_report_md(record, tasks=[])
+    assert "## 會議重點" in md
+    assert "1. 決定後端採用 FastAPI（1:02）" in md
+
+
+def test_meeting_report_md_omits_highlights_section_when_empty():
+    md = meeting_report_md(make_record(), tasks=[])
+    assert "會議重點" not in md

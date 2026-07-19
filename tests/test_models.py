@@ -33,6 +33,13 @@ def make_valid_payload():
         "pending_items": [
             {"topic": "要不要支援英文介面", "reason": "等指導教授意見"}
         ],
+        "highlights": [
+            {
+                "text": "決定後端採用 FastAPI",
+                "time": "1:02",
+                "source_quote": "那我們後端就用 FastAPI",
+            }
+        ],
         "tags": ["專題", "進度會議"],
     }
 
@@ -114,3 +121,21 @@ def test_round_trip_serialization():
     dumped = analysis.model_dump(mode="json")
     assert dumped["todos"][0]["due_date"] == "2026-07-20"
     assert MeetingAnalysis.model_validate(dumped) == analysis
+
+
+def test_highlights_parse_with_time():
+    analysis = MeetingAnalysis.model_validate(make_valid_payload())
+    assert analysis.highlights[0].text == "決定後端採用 FastAPI"
+    assert analysis.highlights[0].time == "1:02"
+
+
+def test_highlights_time_and_quote_optional():
+    """貼上的舊逐字稿沒有時間標記時，time 可為 null；highlights 整欄可缺（舊資料）。"""
+    payload = make_valid_payload()
+    payload["highlights"] = [{"text": "只有重點文字"}]
+    analysis = MeetingAnalysis.model_validate(payload)
+    assert analysis.highlights[0].time is None
+    assert analysis.highlights[0].source_quote is None
+
+    del payload["highlights"]
+    assert MeetingAnalysis.model_validate(payload).highlights == []

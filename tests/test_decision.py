@@ -195,3 +195,31 @@ def test_meeting_date_defaults_to_today():
 
     DecisionAgent(generate=fake_generate).analyze("測試")
     assert str(date.today()) in captured["prompt"]
+
+
+def test_schema_includes_highlights_when_enabled():
+    """會議重點功能開啟時，schema 範例要包含 highlights 與時間標記說明。"""
+    from app.agents.decision_agent import build_prompt
+
+    prompt = build_prompt("測試", MEETING_DATE, features={"highlights"})
+    assert '"highlights"' in prompt
+    assert "時間標記" in prompt
+
+    disabled = build_prompt("測試", MEETING_DATE, features={"summary"})
+    assert '"highlights"' not in disabled
+    assert "不需要" in disabled and "highlights" in disabled  # feature_note 明講不要輸出
+
+
+def test_highlights_cleared_when_feature_disabled():
+    """LLM 就算硬回傳 highlights，功能沒開也要被強制清空。"""
+    agent = DecisionAgent(generate=lambda prompt: valid_json())
+    analysis = agent.analyze(
+        "測試", meeting_date=MEETING_DATE, features={"summary", "decisions", "todos"}
+    )
+    assert analysis.highlights == []
+
+
+def test_highlights_kept_when_feature_enabled():
+    agent = DecisionAgent(generate=lambda prompt: valid_json())
+    analysis = agent.analyze("測試", meeting_date=MEETING_DATE, features={"highlights"})
+    assert analysis.highlights[0].time == "1:02"

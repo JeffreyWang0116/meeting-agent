@@ -190,3 +190,59 @@ def _wait_for(path, timeout=2.0):
     deadline = time.time() + timeout
     while not path.exists() and time.time() < deadline:
         time.sleep(0.01)
+
+
+# ---- 時間戳平移：chunk 內相對時間 → 整場會議時間 ----
+
+def test_chunk_timestamps_shifted_by_offset(tmp_path):
+    """每段獨立轉錄時模型標的是段內相對時間，要加上段落開始秒數。"""
+    mgr = LiveSessionManager(
+        FakeTranscriber(["[0:03] 講者A：開始討論\n[0:41] 講者B：我補充一下"]),
+        tmp_path,
+    )
+    sid = mgr.start()
+    r = mgr.add_chunk(sid, b"a", offset_seconds=45)
+    assert "[0:48] 講者A：開始討論" in r["text"]
+    assert "[1:26] 講者B：我補充一下" in r["text"]
+    # 講者掃描不受時間前綴影響
+    assert mgr._sessions[sid].speakers == ["講者A", "講者B"]
+
+
+def test_chunk_without_offset_strips_relative_timestamps(tmp_path):
+    """舊前端沒傳 offset：段內相對時間是錯的，寧可剝掉也不誤導。"""
+    mgr = LiveSessionManager(FakeTranscriber(["[0:03] 講者A：哈囉"]), tmp_path)
+    sid = mgr.start()
+    r = mgr.add_chunk(sid, b"a")
+    assert r["text"] == "講者A：哈囉"
+
+
+def test_chunk_without_markers_gets_offset_prefix(tmp_path):
+    """轉錄後端沒標時間（如本地 Whisper）：段首補開始時間，保住段落級時間軸。"""
+    mgr = LiveSessionManager(FakeTranscriber(["講者A：哈囉"]), tmp_path)
+    sid = mgr.start()
+    r = mgr.add_chunk(sid, b"a", offset_seconds=90)
+    assert r["text"] == "[1:30] 講者A：哈囉"
+
+
+def test_offset_over_an_hour_uses_hms(tmp_path):
+    mgr = LiveSessionManager(FakeTranscriber(["[0:10] 講者A：收尾"]), tmp_path)
+    sid = mgr.start()
+    r = mgr.add_chunk(sid, b"a", offset_seconds=3600)
+    assert r["text"].startswith("[1:00:10]")
+
+
+def test_translation_receives_text_without_timestamps(tmp_path):
+    captured = {}
+
+    class SpyTranslator:
+        def translate(self, text, target):
+            captured["text"] = text
+            return "hello"
+
+    mgr = LiveSessionManager(
+        FakeTranscriber(["[0:03] 講者A：哈囉"]), tmp_path, translator=SpyTranslator()
+    )
+    sid = mgr.start(translate_to="en")
+    r = mgr.add_chunk(sid, b"a", offset_seconds=0)
+    assert captured["text"] == "講者A：哈囉"
+    assert r["translation"] == "hello"

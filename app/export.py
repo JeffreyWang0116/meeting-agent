@@ -86,6 +86,14 @@ def meeting_report_md(meeting_record: dict, tasks: list[dict]) -> str:
         for d in decisions
     ] or ["（本次會議無正式決議）"]
 
+    highlights = meeting_record.get("highlights", [])
+    if highlights:
+        lines += ["", "## 會議重點", ""]
+        lines += [
+            f"{i}. {h['text']}" + (f"（{h['time']}）" if h.get("time") else "")
+            for i, h in enumerate(highlights, 1)
+        ]
+
     lines += ["", "## 代辦事項", ""]
     if tasks:
         lines += [
