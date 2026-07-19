@@ -1187,20 +1187,8 @@ async function loadHealth() {
 loadHealth();
 
 // ---- 對話框式逐字稿渲染（Messenger 風格）----
-// 偵測「講者：」「Kevin:」等前綴；一句一個泡泡（句尾標點或換行斷句）
+// 偵測「講者：」「Kevin:」等前綴；基本逐字稿：一行（一個講者輪）一個泡泡，不再按句尾標點拆句
 const SPEAKER_RE = /^([^：:\n]{1,12})[：:]\s*/;
-const SENTENCE_ENDERS = "。！？!?；;";
-
-function splitSentences(text) {
-  const out = [];
-  let buf = "";
-  for (const ch of text) {
-    buf += ch;
-    if (SENTENCE_ENDERS.includes(ch)) { out.push(buf.trim()); buf = ""; }
-  }
-  if (buf.trim()) out.push(buf.trim());
-  return out.filter(Boolean);
-}
 
 function parseChatMessages(text) {
   const msgs = [];
@@ -1210,7 +1198,7 @@ function parseChatMessages(text) {
     const m = line.match(SPEAKER_RE);
     const speaker = m ? m[1].trim() : null;
     const content = m ? line.slice(m[0].length) : line;
-    for (const s of splitSentences(content)) msgs.push({ speaker, text: s });
+    msgs.push({ speaker, text: content });
   }
   return msgs;
 }
