@@ -1097,6 +1097,26 @@ const $ = id => document.getElementById(id);
 const PRIORITY_ZH = { high: "高", medium: "中", low: "低" };
 let chunkSeconds = 45;
 
+// ---- API 認證：伺服器設了 API_TOKEN 時，所有 /api/* 請求要帶 Authorization ----
+const API_TOKEN_KEY = "apiToken";
+const nativeFetch = window.fetch.bind(window);
+window.fetch = async (input, init = {}) => {
+  const url = typeof input === "string" ? input : input.url;
+  if (url.startsWith("/api/")) {
+    const token = localStorage.getItem(API_TOKEN_KEY);
+    if (token) init = { ...init, headers: { ...(init.headers || {}), Authorization: `Bearer ${token}` } };
+  }
+  const resp = await nativeFetch(input, init);
+  if (resp.status === 401 && url.startsWith("/api/")) {
+    const entered = window.prompt("此伺服器需要 API Token 才能使用，請輸入：");
+    if (entered) {
+      localStorage.setItem(API_TOKEN_KEY, entered.trim());
+      location.reload();
+    }
+  }
+  return resp;
+};
+
 // ---- 圖示（線條風，24x24 viewBox，currentColor） ----
 const ICON_PATHS = {
   calendar: '<rect x="3" y="4.5" width="18" height="16" rx="1.5"/><path d="M16 2.5v4M8 2.5v4M3 9.5h18"/>',

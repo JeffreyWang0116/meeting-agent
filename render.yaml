@@ -24,3 +24,7 @@ services:
       # 留空則用本地 JSON（重啟會清空）
       - key: FIREBASE_CREDENTIALS_JSON
         sync: false
+      # 強烈建議設定：不設的話這個公開網址任何人都能讀寫/刪除全部資料
+      # （例如 /api/backup、/api/restore）。填一串隨機字串即可。
+      - key: API_TOKEN
+        sync: false

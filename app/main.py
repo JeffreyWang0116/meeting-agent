@@ -11,8 +11,8 @@ from datetime import date
 from pathlib import Path
 from typing import Optional
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
-from fastapi.responses import FileResponse, Response
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel
 
 from app.agents.decision_agent import DecisionAgent, DecisionAgentError
@@ -180,6 +180,19 @@ def create_app(
     usage = UsageTracker(settings.data_dir / "output" / "usage.json")
 
     app = FastAPI(title="主動式會議 Agent")
+
+    # 設了 API_TOKEN 才驗證：本機開發預設不擋，部署到公開網址時務必設定，
+    # 否則 /api/backup、/api/restore 等端點任何人都能直接讀寫全部資料
+    if settings.api_token:
+        expected = f"Bearer {settings.api_token}"
+
+        @app.middleware("http")
+        async def require_bearer_token(request: Request, call_next):
+            path = request.url.path
+            if path.startswith("/api/") and path != "/api/health":
+                if request.headers.get("authorization") != expected:
+                    return JSONResponse({"detail": "未授權：缺少或錯誤的 API token"}, status_code=401)
+            return await call_next(request)
 
     def validate_kind(kind: str | None) -> str | None:
         if kind and kind not in MEETING_KINDS:

@@ -30,6 +30,8 @@ class Settings:
     # Firebase 金鑰：任一有值就用 Firestore 雲端儲存，否則用本地 JSON
     firebase_credentials_json: str | None = None  # service account JSON 字串（Render 用）
     firebase_credentials_file: str | None = None  # service account JSON 檔路徑（本機用）
+    # 有設就要求所有 /api/* 請求帶 Authorization: Bearer <token>；不設 = 不驗證（本機開發預設）
+    api_token: str | None = None
 
 
 def get_settings() -> Settings:
@@ -57,4 +59,5 @@ def get_settings() -> Settings:
             or os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
             or None
         ),
+        api_token=os.environ.get("API_TOKEN") or None,
     )
