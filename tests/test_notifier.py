@@ -39,6 +39,15 @@ def test_email_draft_contains_key_sections(tmp_path, analysis):
     assert "高" in draft                                   # 優先級中文化
 
 
+def test_email_draft_handles_missing_summary(tmp_path):
+    """summary 功能沒被使用（None）時，草稿不能出現 Python 的 "None" 字樣。"""
+    payload = make_valid_payload()
+    payload["meeting"]["summary"] = None
+    analysis = MeetingAnalysis.model_validate(payload)
+    draft = NotifierAgent(tmp_path).notify("m001", analysis)["email_draft"]
+    assert "None" not in draft
+
+
 def test_calendar_event_shape_matches_google_api(tmp_path, analysis):
     result = NotifierAgent(tmp_path).notify("m001", analysis)
     events = result["calendar_events"]

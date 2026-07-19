@@ -29,7 +29,7 @@ def build_email_draft(analysis: MeetingAnalysis) -> str:
         "、".join(m.attendees) if m.attendees else "（未識別）",
         "",
         "■ 會議摘要",
-        m.summary,
+        m.summary or "（未產生摘要）",
         "",
         "■ 決議事項",
     ]

@@ -41,6 +41,17 @@ def test_empty_input_raises_value_error(orchestrator):
         pipeline.process_transcript("   ")
 
 
+def test_disabled_todos_feature_creates_no_tasks(orchestrator):
+    """代辦事項功能沒開時，不只畫面不顯示，任務庫也不該真的多出任務。"""
+    pipeline, store = orchestrator
+    result = pipeline.process_transcript(
+        "鈺翔：我下週一前把 prompt 寫好", features=set()
+    )
+    assert result["analysis"]["todos"] == []
+    assert result["analysis"]["meeting"]["summary"] is None
+    assert store.list_tasks(meeting_id=result["meeting_id"]) == []
+
+
 def test_analysis_is_json_serializable(orchestrator):
     import json
 

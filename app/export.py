@@ -75,7 +75,7 @@ def meeting_report_md(meeting_record: dict, tasks: list[dict]) -> str:
         "",
         "## 摘要",
         "",
-        m["summary"],
+        m.get("summary") or "（未產生摘要）",
         "",
         "## 決議",
         "",

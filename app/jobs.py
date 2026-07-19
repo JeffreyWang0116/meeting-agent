@@ -30,6 +30,7 @@ class MediaJobManager:
         file_path: Path | str,
         meeting_date: date | None = None,
         kind: str | None = None,
+        features: set[str] | None = None,
     ) -> str:
         job_id = uuid.uuid4().hex[:12]
         with self._lock:
@@ -44,7 +45,9 @@ class MediaJobManager:
                 "file": Path(file_path).name,
             }
         thread = threading.Thread(
-            target=self._run, args=(job_id, Path(file_path), meeting_date, kind), daemon=True
+            target=self._run,
+            args=(job_id, Path(file_path), meeting_date, kind, features),
+            daemon=True,
         )
         self._threads[job_id] = thread
         thread.start()
@@ -77,7 +80,12 @@ class MediaJobManager:
             self._threads.pop(jid, None)
 
     def _run(
-        self, job_id: str, file_path: Path, meeting_date: date | None, kind: str | None = None
+        self,
+        job_id: str,
+        file_path: Path,
+        meeting_date: date | None,
+        kind: str | None = None,
+        features: set[str] | None = None,
     ) -> None:
         path = file_path
         try:
@@ -105,7 +113,7 @@ class MediaJobManager:
             self._update(job_id, transcript=transcript, progress=1.0, status="analyzing")
 
             result = self._orchestrator.process_transcript(
-                transcript, meeting_date=meeting_date, kind=kind
+                transcript, meeting_date=meeting_date, kind=kind, features=features
             )
             self._update(job_id, status="done", result=result)
         except Exception as exc:  # 背景執行緒的例外必須被記錄，否則前端永遠在等

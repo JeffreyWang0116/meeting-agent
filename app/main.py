@@ -15,7 +15,7 @@ from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel
 
-from app.agents.decision_agent import DecisionAgent, DecisionAgentError
+from app.agents.decision_agent import FEATURE_KEYS, DecisionAgent, DecisionAgentError
 from app.agents.executor_agent import ExecutorAgent
 from app.agents.notifier_agent import NotifierAgent
 from app.agents.parser_agent import ParserAgent
@@ -40,6 +40,31 @@ STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 # 錄音種類：影響 Decision Agent 的分析重點（見 KIND_HINTS），也存進會議紀錄供分類
 MEETING_KINDS = {"會議", "通話", "訪談", "語音備忘錄", "講座", "其它"}
+
+
+def validate_features(raw) -> set[str] | None:
+    """raw 可以是 list[str]（JSON 請求）或逗號分隔字串（multipart 表單欄位）。
+    None 代表使用者沒有明確指定，交給 default_features_for_kind 決定預設值。"""
+    if raw is None:
+        return None
+    keys = [s.strip() for s in raw.split(",") if s.strip()] if isinstance(raw, str) else list(raw)
+    unknown = set(keys) - FEATURE_KEYS
+    if unknown:
+        raise HTTPException(
+            status_code=400, detail=f"不支援的 features：{'、'.join(sorted(unknown))}"
+        )
+    return set(keys)
+
+
+def default_features_for_kind(kind: str | None) -> set[str]:
+    """會議摘要／決議事項／代辦事項只在錄音種類是「會議」（或未指定）時預設開啟，
+    其他錄音種類（通話、訪談…）預設不使用，除非使用者明確用 features 勾選開啟。"""
+    return set(FEATURE_KEYS) if kind in (None, "會議") else set()
+
+
+def resolve_features(raw, kind: str | None) -> set[str]:
+    explicit = validate_features(raw)
+    return explicit if explicit is not None else default_features_for_kind(kind)
 
 
 def _is_iso_date(value) -> bool:
@@ -70,11 +95,18 @@ class MeetingRequest(BaseModel):
     text: str
     meeting_date: Optional[date] = None
     kind: Optional[str] = None
+    # 會議摘要／決議事項／代辦事項可各自開關；None＝依 kind 決定預設值
+    features: Optional[list[str]] = None
 
 
 class FinishRequest(BaseModel):
     meeting_date: Optional[date] = None
     kind: Optional[str] = None
+    features: Optional[list[str]] = None
+
+
+class ReanalyzeRequest(BaseModel):
+    features: Optional[list[str]] = None
 
 
 class AskRequest(BaseModel):
@@ -202,10 +234,17 @@ def create_app(
             )
         return kind
 
-    def run_analysis(text: str, meeting_date: date | None, kind: str | None = None) -> dict:
+    def run_analysis(
+        text: str,
+        meeting_date: date | None,
+        kind: str | None = None,
+        features: set[str] | None = None,
+    ) -> dict:
         usage.record("analysis")
         try:
-            return orchestrator.process_transcript(text, meeting_date=meeting_date, kind=kind)
+            return orchestrator.process_transcript(
+                text, meeting_date=meeting_date, kind=kind, features=features
+            )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc))
         except DecisionAgentError as exc:
@@ -252,7 +291,8 @@ def create_app(
 
     @app.post("/api/meetings")
     def analyze_meeting(req: MeetingRequest):
-        return run_analysis(req.text, req.meeting_date, validate_kind(req.kind))
+        kind = validate_kind(req.kind)
+        return run_analysis(req.text, req.meeting_date, kind, resolve_features(req.features, kind))
 
     @app.get("/api/meetings")
     def list_meetings():
@@ -303,7 +343,7 @@ def create_app(
         return {"deleted": meeting_id}
 
     @app.post("/api/meetings/{meeting_id}/reanalyze")
-    def reanalyze_meeting(meeting_id: str):
+    def reanalyze_meeting(meeting_id: str, req: Optional[ReanalyzeRequest] = None):
         """對（可能已編輯過的）逐字稿重跑 AI 分析：更新會議紀錄、整批換掉任務。"""
         record = store.get_meeting(meeting_id)
         if record is None:
@@ -312,11 +352,13 @@ def create_app(
         if not transcript:
             raise HTTPException(status_code=400, detail="此會議沒有逐字稿全文，無法重新分析")
 
+        kind = record.get("kind")
+        features = resolve_features(req.features if req else None, kind)
         meeting_date = _parse_iso_date_or_none(record.get("meeting", {}).get("date"))
         usage.record("analysis")
         try:
             analysis = orchestrator.decision.analyze(
-                transcript, meeting_date=meeting_date, kind=record.get("kind")
+                transcript, meeting_date=meeting_date, kind=kind, features=features
             )
         except DecisionAgentError as exc:
             raise HTTPException(status_code=502, detail=str(exc))
@@ -549,12 +591,14 @@ def create_app(
         file: UploadFile = File(...),
         meeting_date: Optional[str] = Form(None),
         kind: Optional[str] = Form(None),
+        features: Optional[str] = Form(None),
     ):
         try:
             parsed_date = date.fromisoformat(meeting_date) if meeting_date else None
         except ValueError:
             raise HTTPException(status_code=400, detail="meeting_date 必須是 YYYY-MM-DD 格式")
         validate_kind(kind)
+        resolved_features = resolve_features(features, kind)
 
         suffix = Path(file.filename or "upload.bin").suffix or ".bin"
         uploads_dir.mkdir(parents=True, exist_ok=True)
@@ -563,7 +607,11 @@ def create_app(
             shutil.copyfileobj(file.file, out)
 
         usage.record("media_upload")
-        return {"job_id": job_manager.submit(dest, meeting_date=parsed_date, kind=kind)}
+        return {
+            "job_id": job_manager.submit(
+                dest, meeting_date=parsed_date, kind=kind, features=resolved_features
+            )
+        }
 
     @app.get("/api/media/{job_id}")
     def media_status(job_id: str):
@@ -607,11 +655,9 @@ def create_app(
             raise HTTPException(
                 status_code=400, detail="這場聆聽沒有收到任何語音內容，無法分析"
             )
-        result = run_analysis(
-            transcript,
-            req.meeting_date if req else None,
-            validate_kind(req.kind if req else None),
-        )
+        kind = validate_kind(req.kind if req else None)
+        features = resolve_features(req.features if req else None, kind)
+        result = run_analysis(transcript, req.meeting_date if req else None, kind, features)
         return {"transcript": transcript, **result}
 
     return app

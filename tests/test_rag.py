@@ -7,8 +7,10 @@ from pathlib import Path
 
 import pytest
 
+from app.models import MeetingAnalysis
 from app.rag import AskAgent, RagIndex, chunk_text, cosine
 from app.stores.local_store import LocalJsonStore
+from tests.test_models import make_valid_payload
 from tests.test_stores import make_analysis
 
 
@@ -202,6 +204,19 @@ def test_summary_card_indexed_even_without_transcript(tmp_path):
     assert index.sync(store) > 0
     hits = index.search("介面", k=2)
     assert any("要不要支援英文介面" in h["text"] for h in hits)
+
+
+def test_summary_card_handles_missing_summary(tmp_path):
+    """summary 功能沒被使用（None）時，索引仍要能建立，且不能把 Python 的
+    None 字面值當成摘要文字存進去。"""
+    payload = make_valid_payload()
+    payload["meeting"]["summary"] = None
+    store = LocalJsonStore(tmp_path / "db.json")
+    store.save_meeting(MeetingAnalysis.model_validate(payload))
+    index = RagIndex(tmp_path / "rag.json", embedder=FakeEmbedder())
+    assert index.sync(store) > 0
+    hits = index.search("介面", k=5)
+    assert all("None" not in h["text"] for h in hits)
 
 
 # ---- AskAgent ----

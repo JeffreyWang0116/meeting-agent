@@ -13,7 +13,8 @@ from pydantic import BaseModel, Field
 class MeetingInfo(BaseModel):
     title: str = "未命名會議"
     date: date
-    summary: str
+    # 「會議摘要」功能沒被使用時（非會議種類、或使用者取消勾選）沒有摘要
+    summary: Optional[str] = None
     attendees: list[str] = Field(default_factory=list)
 
 

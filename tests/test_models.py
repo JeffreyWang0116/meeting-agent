@@ -89,6 +89,14 @@ def test_lists_default_to_empty():
     assert analysis.tags == []  # 舊版 LLM 輸出沒有 tags 也要能解析
 
 
+def test_summary_optional_when_feature_disabled():
+    """kind 非會議或使用者取消勾選「會議摘要」時，summary 可以不存在。"""
+    payload = make_valid_payload()
+    del payload["meeting"]["summary"]
+    analysis = MeetingAnalysis.model_validate(payload)
+    assert analysis.meeting.summary is None
+
+
 def test_todo_priority_defaults_to_medium():
     item = TodoItem(task="測試任務")
     assert item.priority == "medium"

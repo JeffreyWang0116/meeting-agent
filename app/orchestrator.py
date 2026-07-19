@@ -30,9 +30,12 @@ class Orchestrator:
         raw_text: str,
         meeting_date: date | None = None,
         kind: str | None = None,
+        features: set[str] | None = None,
     ) -> dict:
         text = self.parser.parse(raw_text)
-        analysis = self.decision.analyze(text, meeting_date=meeting_date, kind=kind)
+        analysis = self.decision.analyze(
+            text, meeting_date=meeting_date, kind=kind, features=features
+        )
         meeting_id = self.executor.execute(analysis, transcript=text, kind=kind)
         notifications = self.notifier.notify(meeting_id, analysis)
         return {

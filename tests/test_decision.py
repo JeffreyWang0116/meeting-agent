@@ -138,6 +138,54 @@ def test_analyze_uses_injected_glossary_provider():
     assert "TaskHub（產品名）" in captured["prompt"]
 
 
+def test_schema_excludes_disabled_features():
+    from app.agents.decision_agent import build_prompt
+
+    prompt = build_prompt("測試", MEETING_DATE, features={"summary"})
+    assert '"summary"' in prompt
+    assert '"decisions"' not in prompt
+    assert '"todos"' not in prompt
+    # 基本欄位（title/date/attendees/pending_items/tags）不受 features 控制，永遠存在
+    assert '"attendees"' in prompt
+    assert '"pending_items"' in prompt
+    assert '"tags"' in prompt
+
+
+def test_schema_includes_everything_when_features_not_specified():
+    """向後相容：不傳 features（None）＝跟改動前一樣全部欄位都出現。"""
+    from app.agents.decision_agent import build_prompt
+
+    prompt = build_prompt("測試", MEETING_DATE)
+    assert '"summary"' in prompt
+    assert '"decisions"' in prompt
+    assert '"todos"' in prompt
+
+
+def test_analyze_forces_disabled_fields_empty_even_if_llm_ignores_instruction():
+    """防禦性保護：就算 LLM 沒聽話還是生成了 summary/decisions/todos，
+    features 沒開的欄位還是要被清空，不能讓停用的功能悄悄「復活」。"""
+    agent = DecisionAgent(generate=lambda prompt: valid_json())
+    analysis = agent.analyze(
+        "測試", meeting_date=MEETING_DATE, features=set()
+    )
+    assert analysis.meeting.summary is None
+    assert analysis.decisions == []
+    assert analysis.todos == []
+    # 不受控制的欄位不受影響
+    assert analysis.meeting.title == "專題進度會議"
+    assert analysis.pending_items
+
+
+def test_analyze_keeps_enabled_fields():
+    agent = DecisionAgent(generate=lambda prompt: valid_json())
+    analysis = agent.analyze(
+        "測試", meeting_date=MEETING_DATE, features={"summary", "decisions", "todos"}
+    )
+    assert analysis.meeting.summary == "討論 7 月里程碑進度與分工。"
+    assert analysis.decisions
+    assert analysis.todos
+
+
 def test_meeting_date_defaults_to_today():
     captured = {}
 

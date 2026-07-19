@@ -45,7 +45,7 @@ def cosine(a: list[float], b: list[float]) -> float:
 
 def _summary_card(meeting: dict, tasks: list[dict]) -> str:
     info = meeting.get("meeting", {})
-    lines = [f"會議「{info.get('title', '')}」（{info.get('date', '')}）摘要：{info.get('summary', '')}"]
+    lines = [f"會議「{info.get('title', '')}」（{info.get('date', '')}）摘要：{info.get('summary') or ''}"]
     for d in meeting.get("decisions", []):
         lines.append(f"決議：{d.get('description', '')}")
     for t in tasks:
