@@ -13,6 +13,7 @@ from typing import Optional
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from app.agents.decision_agent import FEATURE_KEYS, DecisionAgent, DecisionAgentError
@@ -254,7 +255,10 @@ def create_app(
     def index():
         return FileResponse(STATIC_DIR / "index.html")
 
-    # ---- PWA：manifest / service worker / 圖示 ----
+    # 前端靜態檔（style.css / app.js / icon.svg）統一由 /static 供應
+    app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
+    # ---- PWA：manifest / service worker ----
     # sw.js 必須從根路徑供應，service worker 的 scope 才涵蓋整個站
 
     @app.get("/manifest.webmanifest", include_in_schema=False)
@@ -266,10 +270,6 @@ def create_app(
     @app.get("/sw.js", include_in_schema=False)
     def pwa_sw():
         return FileResponse(STATIC_DIR / "sw.js", media_type="text/javascript")
-
-    @app.get("/static/icon.svg", include_in_schema=False)
-    def pwa_icon():
-        return FileResponse(STATIC_DIR / "icon.svg", media_type="image/svg+xml")
 
     @app.get("/api/health")
     def health():
