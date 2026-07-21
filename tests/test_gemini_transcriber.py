@@ -31,6 +31,26 @@ def test_transcribe_prompt_asks_for_speaker_labels():
     assert "講者" in _TRANSCRIBE_PROMPT
 
 
+def test_prompt_forbids_using_names_as_speaker_labels():
+    """標籤一律用代號。模型沒有跨段記憶，允許它「聽得出名字就用名字」的話，
+    同一個人在聽得到稱謂的段落標「王委員」、聽不到的段落標「講者A」，
+    使用者看到的就是同一場會議裡混雜姓名與代號。"""
+    from app.transcription.gemini_transcriber import _TRANSCRIBE_PROMPT
+
+    assert "不要用名字" in _TRANSCRIBE_PROMPT
+    assert "講者A" in _TRANSCRIBE_PROMPT
+
+
+def test_prompt_has_no_opt_out_from_labelling():
+    """舊 prompt 說「整段同一人可以不標註」，chunk_hint 又說「務必標註」，
+    同一份 prompt 裡兩句話打架。而且不分段的路徑沒有 chunk_hint 抵銷，
+    模型就整份不標講者——使用者看到的「全部都沒標示」由此而來。"""
+    from app.transcription.gemini_transcriber import _TRANSCRIBE_PROMPT
+
+    assert "才可以不標註" not in _TRANSCRIBE_PROMPT
+    assert "不可省略" in _TRANSCRIBE_PROMPT
+
+
 def test_prompt_includes_glossary_terms():
     """自訂詞彙要進轉錄 prompt，人名/專有名詞才不會被聽錯。"""
     t = GeminiTranscriber(
@@ -307,7 +327,7 @@ def test_chunk_files_cleaned_up(monkeypatch, tmp_path):
 class RetryingSetup(FakeChunkedSetup):
     """讓同一段的每次呼叫依序回傳不同結果，模擬模型的執行間變異。"""
 
-    def transcriber_with_sequence(self, sequence, label_retries=1):
+    def transcriber_with_sequence(self, sequence, label_retries=1, **kwargs):
         setup = self
         calls = {"n": 0}
 
@@ -318,7 +338,9 @@ class RetryingSetup(FakeChunkedSetup):
                 return text
 
         setup.calls = calls
-        return Sequenced(api_key="k", chunk_seconds=240, label_retries=label_retries)
+        return Sequenced(
+            api_key="k", chunk_seconds=240, label_retries=label_retries, **kwargs
+        )
 
 
 def test_chunk_with_poor_labels_is_retried(monkeypatch, tmp_path):
@@ -355,6 +377,53 @@ def test_best_attempt_kept_when_all_retries_are_poor(monkeypatch, tmp_path):
         "[0:00] 沒標\n[0:05] 沒標",            # 0%
     ], label_retries=1)
     assert "講者A" in t.transcribe(src)
+
+
+def test_half_labelled_chunk_is_retried(monkeypatch, tmp_path):
+    """門檻 0.8：prompt 要求每一行都標講者，一半沒標就是模型沒照做。
+
+    舊門檻 0.5 是配合會灌水的標註率計算訂的——句中冒號被誤判成講者，
+    真實標註率再低都能衝過 0.5。計算修正後，門檻要跟著回到真正的標準。
+    """
+    src = tmp_path / "long.wav"
+    src.write_bytes(b"RIFF-fake")
+    setup = RetryingSetup(monkeypatch, tmp_path, duration=600, chunk_texts=["", ""])
+    t = setup.transcriber_with_sequence([
+        "[0:00] 講者A：有標\n[0:05] 沒標",          # 50% → 舊門檻會放行
+        "[0:00] 講者A：有標\n[0:05] 講者B：也有標",  # 100%
+    ])
+    assert "講者B" in t.transcribe(src)
+    assert setup.calls["n"] >= 3  # 第一段重跑過（否則兩段只會有 2 次）
+
+
+# ---- 每檔重試次數上限 ----
+# 重試是「每段」獨立判斷的，只設每段上限的話，總量會隨影片長度線性膨脹：
+# 一支 60 分鐘的質詢影片切成 15 段，每段重試 2 次就是 30 次額外請求，
+# 佔掉 Flash Lite 每日 500 次額度的 6%。設每檔上限才能讓成本與長度脫鉤。
+
+def test_retry_calls_are_capped_per_file(monkeypatch, tmp_path):
+    src = tmp_path / "long.wav"
+    src.write_bytes(b"RIFF-fake")
+    setup = RetryingSetup(monkeypatch, tmp_path, duration=1200, chunk_texts=[""] * 5)
+    t = setup.transcriber_with_sequence(
+        ["[0:00] 沒標\n[0:05] 也沒標"], label_retries=2, max_retry_calls=2
+    )
+    t.transcribe(src)
+    # 5 段基礎 + 上限 2 次重試 = 7，而不是 5 + 5×2 = 15
+    assert setup.calls["n"] == 7
+
+
+def test_retry_budget_is_spent_on_earliest_failing_chunks(monkeypatch, tmp_path):
+    """預算用完後，後面的段落只跑基礎那次，不會整個檔案失敗。"""
+    src = tmp_path / "long.wav"
+    src.write_bytes(b"RIFF-fake")
+    setup = RetryingSetup(monkeypatch, tmp_path, duration=1200, chunk_texts=[""] * 5)
+    t = setup.transcriber_with_sequence(
+        ["[0:00] 沒標\n[0:05] 也沒標"], label_retries=2, max_retry_calls=0
+    )
+    text = t.transcribe(src)
+    assert setup.calls["n"] == 5   # 完全不重試
+    assert text                     # 但仍然產出逐字稿
 
 
 def test_retry_disabled_when_label_retries_zero(monkeypatch, tmp_path):
@@ -424,9 +493,17 @@ def test_fallback_result_discarded_if_worse(monkeypatch, tmp_path):
                 return "[0:00] 完全沒標\n[0:05] 也沒標"
             return "[0:00] 講者A：至少有一行\n[0:05] 沒標"
 
+    # 備援預設關閉，這裡明確開啟才測得到「降級結果較差」的行為
     text = Tracking(api_key="k", chunk_seconds=240, label_retries=0,
-                    fallback_model="gemini-flash-latest").transcribe(src)
+                    fallback_model="gemini-flash-latest",
+                    max_fallback_chunks=1).transcribe(src)
     assert "講者A" in text
+
+
+def test_fallback_is_disabled_by_default():
+    """備援模型每跑一次就佔 Flash 每日 20 次額度的 5%，預設不啟用：
+    重試預算花在額度充裕的 lite 上，Flash 留給分析與名字對應。"""
+    assert GeminiTranscriber(api_key="k").max_fallback_chunks == 0
 
 
 def test_no_fallback_when_not_configured(monkeypatch, tmp_path):

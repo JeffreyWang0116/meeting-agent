@@ -36,9 +36,14 @@ class Settings:
     # 只在失敗的段落動用，免費額度較低的模型才不會被整場錄音吃光
     transcribe_fallback_model: str | None = "gemini-flash-latest"
     # 單一檔案最多幾段可以動用備援模型。免費層實測額度：Flash Lite 每日 500 次、
-    # Flash 每日只有 20 次——備援跑一次就吃掉每日 Flash 額度的 5%，所以壓到 1 次，
-    # 改把預算花在便宜的 lite 重試（見 transcribe_label_retries）
-    transcribe_max_fallback_chunks: int = 1
+    # Flash 每日只有 20 次——備援跑一次就吃掉每日 Flash 額度的 5%，遠高於重試
+    # 的成本上限，所以預設 0（不啟用），把預算全花在便宜的 lite 重試，
+    # 稀有的 Flash 額度留給分析。需要極致品質再設成 1
+    transcribe_max_fallback_chunks: int = 0
+    # 單一檔案總共最多幾次重試。只設每段上限的話總量會隨影片長度線性膨脹
+    # （60 分鐘＝15 段 × 2 次＝30 次，佔每日 500 次額度的 6%）；設每檔上限
+    # 讓重試成本與長度脫鉤，10 次＝額度的 2%
+    transcribe_max_retry_calls: int = 10
     # 標註率不足時，用同一個 lite 模型重跑幾次。失敗是執行間的變異（同一輸入
     # 標註率可能 20% 也可能 100%），多試幾次的累積成功率遠比換模型划算：
     # lite 一次只佔每日額度 0.2%，Flash 一次佔 5%
@@ -78,7 +83,10 @@ def get_settings() -> Settings:
             os.environ.get("TRANSCRIBE_FALLBACK_MODEL", "gemini-flash-latest") or None
         ),
         transcribe_max_fallback_chunks=int(
-            os.environ.get("TRANSCRIBE_MAX_FALLBACK_CHUNKS", "1")
+            os.environ.get("TRANSCRIBE_MAX_FALLBACK_CHUNKS", "0")
+        ),
+        transcribe_max_retry_calls=int(
+            os.environ.get("TRANSCRIBE_MAX_RETRY_CALLS", "10")
         ),
         transcribe_label_retries=int(os.environ.get("TRANSCRIBE_LABEL_RETRIES", "2")),
         transcribe_overlap_seconds=int(

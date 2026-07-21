@@ -58,3 +58,56 @@ def test_analysis_is_json_serializable(orchestrator):
     pipeline, _ = orchestrator
     result = pipeline.process_transcript("測試會議內容")
     json.dumps(result, ensure_ascii=False)  # 不應丟例外（date 需序列化為字串）
+
+
+# ---- 講者代號換成姓名 ----
+# 轉錄一律輸出「講者A/B/C」，姓名在 pipeline 最後一步統一填回。
+# 順序在校正之後：先修掉同音錯字，姓名判讀才不會被誤植的稱謂誤導。
+
+def _namer(mapping):
+    import json
+
+    from app.agents.speaker_namer_agent import SpeakerNamerAgent
+
+    reply = json.dumps(
+        {"speakers": [{"label": k, "name": v} for k, v in mapping.items()]},
+        ensure_ascii=False,
+    )
+    return SpeakerNamerAgent(api_key="k", generate=lambda p: reply)
+
+
+def test_speaker_codes_are_replaced_with_names(tmp_path):
+    store = LocalJsonStore(tmp_path / "db.json")
+    pipeline = Orchestrator(
+        parser=ParserAgent(),
+        decision=DecisionAgent(generate=lambda prompt: valid_json()),
+        executor=ExecutorAgent(store),
+        notifier=NotifierAgent(tmp_path / "notifications"),
+        namer=_namer({"講者A": "吳宗憲"}),
+    )
+    result = pipeline.process_transcript("[0:05] 講者A：我下週一前把 prompt 寫好")
+    assert "吳宗憲：" in result["transcript"]
+    assert result["speaker_names"][0]["name"] == "吳宗憲"
+
+
+def test_stored_transcript_uses_the_named_version(tmp_path):
+    """存進資料庫的必須是換上姓名的版本，否則畫面與匯出會看到代號。"""
+    store = LocalJsonStore(tmp_path / "db.json")
+    pipeline = Orchestrator(
+        parser=ParserAgent(),
+        decision=DecisionAgent(generate=lambda prompt: valid_json()),
+        executor=ExecutorAgent(store),
+        notifier=NotifierAgent(tmp_path / "notifications"),
+        namer=_namer({"講者A": "吳宗憲"}),
+    )
+    result = pipeline.process_transcript("[0:05] 講者A：我下週一前把 prompt 寫好")
+    stored = store.get_meeting(result["meeting_id"])
+    assert "吳宗憲：" in stored["transcript"]
+
+
+def test_pipeline_works_without_a_namer(orchestrator):
+    """沒有注入 namer 時維持原行為，代號原樣保留。"""
+    pipeline, _ = orchestrator
+    result = pipeline.process_transcript("[0:05] 講者A：我下週一前把 prompt 寫好")
+    assert "講者A：" in result["transcript"]
+    assert result["speaker_names"] == []

@@ -26,9 +26,20 @@ TIME_PREFIX_RE = re.compile(r"^\s*\[(\d{1,2}(?::\d{1,2}){0,2})\]\s*")
 # 出現在任何位置的時間標記（計數用，驗證結構沒被改動）
 TIME_MARKER_RE = re.compile(r"\[\d{1,2}(?::\d{1,2}){1,2}\]")
 
-# 行首「講者A：」「Kevin:」等講者標註。務必先用 strip_time_prefix 去掉時間戳
-# 再比對——時間戳裡的冒號會讓這個樣式誤抓成「[0」
-SPEAKER_RE = re.compile(r"^\s*([^：:\n]{1,12})[：:]")
+# 行首的講者標註，例如「講者A：」。務必先用 strip_time_prefix 去掉時間戳再比對
+# ——時間戳裡的冒號會讓行首比對誤抓成「[0」。
+#
+# 只認代號、不認名字，是刻意的：模型沒有跨段記憶，允許它「聽得出名字就用名字」
+# 的話，同一個人在聽得到稱謂的段落標「王委員」、聽不到的段落標「講者A」，逐字稿
+# 就會出現同一人兩種標籤。轉錄階段統一輸出代號，真實姓名交由事後對應處理。
+#
+# 這也修掉一個更隱蔽的問題：舊樣式是「開頭 12 字內有冒號就算講者」，而中文逐字稿
+# 裡「我想請問部長：…」「重點：…」俯拾皆是。它們會把 speaker_label_ratio 灌水到
+# 遠高於重試門檻（模型整段沒標也判定成功），並把句子碎片存進跨段講者清單汙染提示。
+SPEAKER_RE = re.compile(
+    r"^\s*(?P<prefix>講者|說話者|發言人|speaker)\s*(?P<code>[A-Za-z]|\d{1,2})\s*[：:]",
+    re.IGNORECASE,
+)
 
 
 def format_time(seconds: float) -> str:
@@ -52,16 +63,34 @@ def strip_time_prefix(line: str) -> str:
 
 
 def speaker_of(line: str) -> str | None:
-    """取出一行的講者標籤（沒有就回 None）。會自動略過行首時間戳。"""
+    """取出一行的講者代號（沒有就回 None）。會自動略過行首時間戳。
+
+    回傳值一律正規化成無空白、代號大寫的形式，因此「講者 a」與「講者A」會被
+    當成同一個人，不會在跨段講者清單裡佔兩格。
+    """
     m = SPEAKER_RE.match(strip_time_prefix(line))
     if not m:
         return None
-    name = m.group(1).strip()
-    # 防呆：真正的講者名不會含方括號。萬一又出現沒被 TIME_PREFIX_RE 認出的
-    # 時間戳寫法，這裡擋掉「[0」之類的殘骸，避免污染跨段講者清單
-    if not name or "[" in name or "]" in name:
-        return None
-    return name
+    prefix = m.group("prefix")
+    # 中文前綴沒有大小寫問題；英文的 speaker/SPEAKER 統一成 Speaker，免得同一個人
+    # 因為模型每段大小寫不同而在跨段清單裡佔好幾格
+    if prefix.isascii():
+        prefix = prefix.capitalize()
+    return f"{prefix}{m.group('code').upper()}"
+
+
+def replace_speaker(line: str, name: str) -> str:
+    """把一行的講者代號換成真實姓名（沒有標籤就原樣回傳）。
+
+    只動行首那個標籤：內文裡提到的代號（有人說「剛剛講者A講的」）必須保留，
+    否則整份取代會把說話內容一起改掉。
+    """
+    m_time = TIME_PREFIX_RE.match(line)
+    prefix, rest = (line[: m_time.end()], line[m_time.end():]) if m_time else ("", line)
+    m = SPEAKER_RE.match(rest)
+    if not m:
+        return line
+    return f"{prefix}{name}：{rest[m.end():].lstrip()}"
 
 
 def speaker_label_ratio(text: str) -> float:
@@ -122,10 +151,9 @@ def drop_lines_before(text: str, seconds: float) -> str:
 def chunk_hint(speakers: list[str], previous_tail: str = "") -> str:
     """長音檔分段轉錄時，每一段都要帶的提示。
 
-    主 prompt 允許「整段確定同一位講者時可以不標註」——這個例外在分段轉錄
-    下會出事：開場那段常是主席單人宣讀，模型就整段不標講者，於是第一段沒有
-    任何標籤，後續段也拿不到可沿用的講者清單，跨段一致性整條失效。
-    所以分段模式要明確把這個例外關掉。
+    「即使只有一位講者也要標註」在主 prompt 已經要求過，這裡再講一次是因為
+    分段模式下的代價特別高：開場那段常是主席單人宣讀，模型一旦省略標註，
+    第一段就沒有任何標籤，後續段也拿不到可沿用的講者清單，跨段一致性整條失效。
 
     previous_tail：前一段結尾的逐字稿（本段開頭的重疊音訊就是這些內容）。
     只給講者名單沒有用——模型沒聽過前一段，無從知道「講者C」是哪個嗓音，

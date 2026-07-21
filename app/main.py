@@ -18,6 +18,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from app.agents.corrector_agent import CorrectorAgent
+from app.agents.speaker_namer_agent import SpeakerNamerAgent
 from app.agents.decision_agent import FEATURE_KEYS, DecisionAgent, DecisionAgentError
 from app.agents.executor_agent import ExecutorAgent
 from app.agents.notifier_agent import NotifierAgent
@@ -175,6 +176,12 @@ def create_app(
             model=settings.correct_model,
             glossary=glossary.terms,
         ),
+        namer=SpeakerNamerAgent(
+            api_key=settings.gemini_api_key,
+            api_keys=settings.gemini_api_keys,
+            # 依上下文判讀「誰是誰」，與校正同屬機械性工作，用便宜模型即可
+            model=settings.correct_model,
+        ),
     )
     if transcriber is None:
         if settings.transcribe_engine == "gemini":
@@ -189,6 +196,7 @@ def create_app(
                 max_fallback_chunks=settings.transcribe_max_fallback_chunks,
                 label_retries=settings.transcribe_label_retries,
                 overlap_seconds=settings.transcribe_overlap_seconds,
+                max_retry_calls=settings.transcribe_max_retry_calls,
             )
         else:
             transcriber = Transcriber(
@@ -264,6 +272,8 @@ def create_app(
         usage.record("analysis")
         if correct_typos:
             usage.record("correct")  # 校正是額外一次請求，用量面板要分開看得到
+        if orchestrator.namer:
+            usage.record("speaker_names")  # 講者代號換姓名也是獨立一次請求
         try:
             return orchestrator.process_transcript(
                 text,

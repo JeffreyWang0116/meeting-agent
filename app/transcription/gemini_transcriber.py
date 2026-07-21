@@ -40,18 +40,31 @@ DEFAULT_CHUNK_THRESHOLD_SECONDS = 360  # 6 分鐘
 # 一段裡有講者標籤的行數低於這個比例，就當作「模型這輪放棄標講者」而重試。
 # 實測同一段快速交鋒的質詢音訊、同一個模型、temperature=0，標註率可能是 26%
 # 也可能是 95%——是執行間的變異，不是音訊太難，所以重跑一次通常就正常了。
-MIN_SPEAKER_LABEL_RATIO = 0.5
+#
+# 訂在 0.8 而非 0.5：prompt 要求每一行都標講者，一半沒標就是模型沒照做。
+# 舊值 0.5 是配合當時會灌水的標註率計算訂的——句中冒號（「重點：…」）被誤判
+# 成講者，真實標註率再低都能衝過 0.5，重試等於從來沒有真正生效過。
+MIN_SPEAKER_LABEL_RATIO = 0.8
 
 # 轉錄 prompt：務必強力要求分辨講者。實測 gemini-flash-lite 在「弱提示」下
 # 幾乎不標講者（多人對話被併成一段，使用者只看到講者A/B 甚至沒標），把要求
 # 講清楚後，連 lite 模型也能穩定標出講者A/B/C。
+#
+# 標籤一律用代號，不准用名字：模型沒有跨段記憶，「聽得出名字就用名字」這種
+# 條件式指示會讓同一個人在聽得到稱謂的段落標「王委員」、聽不到的段落標
+# 「講者A」，整份逐字稿混雜兩種標籤。姓名改由事後對應階段統一填回。
+#
+# 也不留「可以不標註」的例外：那個例外與分段模式的 chunk_hint 直接矛盾，
+# 而不分段的路徑沒有 chunk_hint 抵銷，模型就整份放棄標註。
 _TRANSCRIBE_PROMPT = (
     "這是一段可能有多位講者的會議錄音，請完整逐字轉錄成繁體中文。"
     "中英夾雜的地方保留原文（英文單字、技術名詞不要翻譯）。"
     "務必分辨不同說話者：即使聲音、口音或語速相近，只要是不同人輪流發言，"
-    "就在每一句話開頭標註講者——聽得出名字就用名字（如「小明：」），聽不出名字"
-    "就用「講者A：」「講者B：」「講者C：」依序區分，不要把不同人的話併成同一段；"
-    "只有在整段自始至終確定是同一位講者時，才可以不標註。"
+    "就要分開標註，不要把不同人的話併成同一段。"
+    "講者一律用代號「講者A：」「講者B：」「講者C：」依出場順序標註；"
+    "即使你從對話中聽得出某人的姓名或職稱，標籤也一律用代號，不要用名字"
+    "（姓名會在後續步驟另行對應）。"
+    "每一句話（每一行）開頭都必須標註講者，即使整段從頭到尾只有一位講者也不可省略。"
     "每一句話（每一行）開頭標註它在音檔中出現的時間，格式是方括號的分:秒，"
     "例如「[1:02] 講者A：我們開始吧」；超過一小時用 [時:分:秒]。"
     "只輸出逐字稿本身，不要加任何標題或說明。"
@@ -74,8 +87,9 @@ class GeminiTranscriber:
         chunk_seconds: int = 0,
         label_retries: int = 2,
         fallback_model: str | None = None,
-        max_fallback_chunks: int = 1,
+        max_fallback_chunks: int = 0,
         overlap_seconds: int = 20,
+        max_retry_calls: int = 10,
     ):
         # 多把 key 輪替（429 換下一把）；單把 api_key 為向後相容寫法
         self._pool = KeyPool(api_keys if api_keys else [api_key])
@@ -97,8 +111,13 @@ class GeminiTranscriber:
         self.fallback_model = fallback_model
         # 單一檔案最多幾段可以動用強模型。免費層實測：Flash Lite 每日 500 次，
         # Flash 只有 20 次——備援跑一次就佔掉每日 Flash 額度的 5%，而 lite 重試
-        # 一次只佔 0.2%。所以預設把預算花在 label_retries，備援只留 1 次保底
+        # 一次只佔 0.2%。預設 0（不啟用）：把預算全花在額度充裕的 lite 重試，
+        # 稀有的 Flash 額度留給分析與名字對應
         self.max_fallback_chunks = max_fallback_chunks
+        # 單一檔案總共最多幾次重試。只設每段上限的話，總量會隨影片長度線性
+        # 膨脹（60 分鐘＝15 段 × 2 次＝30 次額外請求，佔每日額度 6%）；
+        # 設每檔上限才能讓重試成本與影片長度脫鉤，維持在額度的 2% 以內
+        self.max_retry_calls = max_retry_calls
         # 每段往前多抓幾秒當重疊。模型沒聽過前一段，光給講者名單它無從對應
         # 嗓音，只能從自己這段重新編號——同一個人跨段就會換標籤。重疊讓它
         # 聽得到前一段結尾，配合提示裡的對照樣本才能接得起來
@@ -108,8 +127,10 @@ class GeminiTranscriber:
         prompt = _TRANSCRIBE_PROMPT
         terms = glossary_prompt_line(self._glossary() if self._glossary else [])
         if terms:
+            # 詞彙表含人名，要明講它只管內文用字，否則模型會拿它當講者標籤用
             prompt += (
                 f"已知詞彙表（聽到相近發音時，人名與專有名詞一律採用以下寫法）：{terms}。"
+                "詞彙表只影響內文用字，講者標籤仍一律使用代號。"
             )
         if hint:  # 跨段講者一致性提示（即時聆聽逐段轉錄時帶入）
             prompt += hint
@@ -154,6 +175,7 @@ class GeminiTranscriber:
         parts: list[str] = []
         speakers: list[str] = []
         fallback_used = 0  # 這個檔案已經用掉幾次強模型（受 max_fallback_chunks 限制）
+        retries_left = self.max_retry_calls  # 整個檔案共用的重試預算
         chunk_dir = chunks[0].parent
         previous_tail = ""
         try:
@@ -171,11 +193,15 @@ class GeminiTranscriber:
                 this_hint = chunk_hint(speakers, previous_tail)
                 if hint:  # 呼叫端另外給的提示（即時聆聽跨 session 用）附在後面
                     this_hint += hint
-                text, used_fallback = self._transcribe_labelled(
-                    chunk, this_hint, allow_fallback=fallback_used < self.max_fallback_chunks
+                text, used_fallback, retries_used = self._transcribe_labelled(
+                    chunk,
+                    this_hint,
+                    allow_fallback=fallback_used < self.max_fallback_chunks,
+                    retry_budget=retries_left,
                 )
                 if used_fallback:
                     fallback_used += 1
+                retries_left -= retries_used
                 if not text:
                     continue
                 text = shift_timestamps(text, audio_start)
@@ -197,24 +223,38 @@ class GeminiTranscriber:
         return "\n".join(parts).strip()
 
     def _transcribe_labelled(
-        self, chunk: Path, hint: str | None, allow_fallback: bool = True
-    ) -> tuple[str, bool]:
+        self,
+        chunk: Path,
+        hint: str | None,
+        allow_fallback: bool = True,
+        retry_budget: int | None = None,
+    ) -> tuple[str, bool, int]:
         """轉錄一段，講者標註率太低就重跑，取標得最好的那次。
 
-        回傳 (逐字稿, 有沒有動用強模型)——呼叫端據此控管整個檔案的強模型用量。
+        retry_budget 是整個檔案剩餘的重試次數（None＝不限）；本段最多只能用掉
+        這麼多次，長影片才不會因為段數多而讓重試成本線性膨脹。
+
+        回傳 (逐字稿, 有沒有動用強模型, 用掉幾次重試)——呼叫端據此控管整個
+        檔案的強模型與重試用量。
 
         模型偶爾會整段放棄標講者（同一輸入重跑一次就正常），沒有重試的話
         那一段在畫面上就整片沒有講者，前端的續行沿用也會把話歸錯人。
         """
+        allowed_retries = self.label_retries
+        if retry_budget is not None:
+            allowed_retries = min(allowed_retries, max(0, retry_budget))
         best, best_ratio = "", -1.0
-        for attempt in range(self.label_retries + 1):
+        retries_used = 0
+        for attempt in range(allowed_retries + 1):
             text = self._transcribe_one(chunk, hint)
+            if attempt:
+                retries_used += 1
             ratio = speaker_label_ratio(text)
             if ratio > best_ratio:
                 best, best_ratio = text, ratio
             if ratio >= MIN_SPEAKER_LABEL_RATIO:
-                return best, False
-            if attempt < self.label_retries:
+                return best, False, retries_used
+            if attempt < allowed_retries:
                 logger.info(
                     "%s 講者標註率只有 %.0f%%，重跑一次", chunk.name, ratio * 100
                 )
@@ -226,8 +266,8 @@ class GeminiTranscriber:
             text = self._transcribe_one(chunk, hint, model=self.fallback_model)
             if speaker_label_ratio(text) > best_ratio:
                 best = text
-            return best, True
-        return best, False
+            return best, True, retries_used
+        return best, False, retries_used
 
     def _transcribe_one(
         self, audio_path: Path, hint: str | None, model: str | None = None

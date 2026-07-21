@@ -10,6 +10,7 @@ from app.transcription.segments import (
     format_time,
     normalize_timestamps,
     parse_time_label,
+    replace_speaker,
     shift_timestamps,
     speaker_label_ratio,
     speaker_of,
@@ -45,7 +46,7 @@ def test_parse_time_label_round_trip():
 def test_speaker_of_skips_time_prefix():
     """時間戳裡的冒號不能被誤認成講者標籤的分隔符。"""
     assert speaker_of("[0:05] 講者A：你好") == "講者A"
-    assert speaker_of("[1:02:03] Kevin: hello") == "Kevin"
+    assert speaker_of("[1:02:03] 講者B: hello") == "講者B"
 
 
 def test_speaker_of_without_time_prefix():
@@ -55,6 +56,80 @@ def test_speaker_of_without_time_prefix():
 def test_speaker_of_returns_none_when_unlabelled():
     assert speaker_of("[0:05] 這句沒有講者標籤") is None
     assert speaker_of("") is None
+
+
+# ---- 只認代號、不認名字 ----
+# 轉錄階段一律用「講者A/B/C」代號，真實姓名交由事後對應處理。理由是模型沒有
+# 跨段記憶：同一個人在聽得到名字的段落標「王委員」、聽不到的段落標「講者A」，
+# 逐字稿就會出現同一人兩種標籤。把名字排除在標籤之外，來源就只剩一種。
+
+def test_speaker_of_accepts_canonical_labels_only():
+    assert speaker_of("講者A：內容") == "講者A"
+    assert speaker_of("說話者B：內容") == "說話者B"
+    assert speaker_of("Speaker C: content") == "SpeakerC"
+    assert speaker_of("講者1：內容") == "講者1"
+
+
+def test_speaker_of_normalises_spacing_and_case():
+    """「講者 a」與「講者A」是同一個人，不能在跨段清單裡佔兩格。"""
+    assert speaker_of("講者 a：內容") == "講者A"
+    assert speaker_of("講者A：內容") == "講者A"
+
+
+def test_personal_name_is_not_a_speaker_label():
+    """名字不算標籤——它是事後對應的產物，不是轉錄階段的輸出。"""
+    assert speaker_of("[0:05] Kevin: hello") is None
+    assert speaker_of("[0:31] 王委員：請問部長") is None
+
+
+# ---- 句中冒號不得被誤判成講者（回歸測試）----
+# 舊的樣式只要開頭 12 字內有冒號就當作講者，中文逐字稿裡到處都是這種句子。
+# 後果是連鎖的：標註率被灌水到 0.83 而高於重試門檻，模型明明整段沒標講者，
+# 系統卻判定「標得很好」不再重試；同時這些句子碎片被存進跨段講者清單，
+# 下一段的提示就變成「先前已出現的講者：我想請問部長、重點」而越滾越髒。
+
+def test_sentence_with_internal_colon_is_not_a_speaker():
+    assert speaker_of("[0:12] 我想請問部長：這個預算是怎麼編的") is None
+    assert speaker_of("[0:20] 好，那我這樣講：第一點是這樣") is None
+    assert speaker_of("[0:45] 重點：三個月內完成") is None
+
+
+def test_label_ratio_is_not_inflated_by_sentence_colons():
+    text = (
+        "[0:12] 我想請問部長：這個預算是怎麼編的\n"
+        "[0:20] 好，那我這樣講：第一點是這樣\n"
+        "[0:45] 重點：三個月內完成\n"
+        "[1:20] 講者A：我同意"
+    )
+    # 修正前是 1.0（四行全被當成有講者）→ 高於門檻，重試永遠不會觸發
+    assert speaker_label_ratio(text) == 0.25
+
+
+def test_collect_speakers_ignores_sentence_fragments():
+    known = []
+    collect_speakers("[0:12] 我想請問部長：這個預算\n[0:20] 講者A：我回答", known)
+    assert known == ["講者A"]
+
+
+# ---- 把代號換成真實姓名 ----
+# 轉錄階段一律輸出代號，姓名在最後一步統一填回。改寫必須只動行首標籤：
+# 內文裡提到的「講者A」（例如有人說「剛剛講者A講的」）不能被一起換掉。
+
+def test_replace_speaker_keeps_time_prefix():
+    assert replace_speaker("[0:05] 講者A：你好", "王委員") == "[0:05] 王委員：你好"
+
+
+def test_replace_speaker_without_time_prefix():
+    assert replace_speaker("講者B：換我說", "卓榮泰") == "卓榮泰：換我說"
+
+
+def test_replace_speaker_leaves_unlabelled_lines_alone():
+    assert replace_speaker("[0:05] 這行沒有講者標籤", "王委員") == "[0:05] 這行沒有講者標籤"
+
+
+def test_replace_speaker_only_touches_the_label_not_the_content():
+    line = "[0:05] 講者A：剛剛講者A說的那件事"
+    assert replace_speaker(line, "王委員") == "[0:05] 王委員：剛剛講者A說的那件事"
 
 
 def test_collect_speakers_preserves_first_appearance_order():
