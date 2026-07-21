@@ -22,6 +22,7 @@ from app.transcription.segments import (
     collect_speakers,
     normalize_timestamps,
     shift_timestamps,
+    speaker_label_ratio,
 )
 
 logger = logging.getLogger(__name__)
@@ -33,6 +34,11 @@ _SAFE_AUDIO_EXTS = {".wav", ".mp3", ".flac", ".ogg", ".aiff"}
 # 講者標註會整份消失、時間戳也會漂到比實際長度多 3 分鐘；同一支影片只取前 3
 # 分鐘則講者分得又快又準。模型在長音訊上顯然會放棄逐句標註，只能靠分段迴避。
 DEFAULT_CHUNK_THRESHOLD_SECONDS = 360  # 6 分鐘
+
+# 一段裡有講者標籤的行數低於這個比例，就當作「模型這輪放棄標講者」而重試。
+# 實測同一段快速交鋒的質詢音訊、同一個模型、temperature=0，標註率可能是 26%
+# 也可能是 95%——是執行間的變異，不是音訊太難，所以重跑一次通常就正常了。
+MIN_SPEAKER_LABEL_RATIO = 0.5
 
 # 轉錄 prompt：務必強力要求分辨講者。實測 gemini-flash-lite 在「弱提示」下
 # 幾乎不標講者（多人對話被併成一段，使用者只看到講者A/B 甚至沒標），把要求
@@ -64,6 +70,9 @@ class GeminiTranscriber:
         api_keys=None,
         glossary=None,
         chunk_seconds: int = 0,
+        label_retries: int = 2,
+        fallback_model: str | None = None,
+        max_fallback_chunks: int = 1,
     ):
         # 多把 key 輪替（429 換下一把）；單把 api_key 為向後相容寫法
         self._pool = KeyPool(api_keys if api_keys else [api_key])
@@ -78,6 +87,15 @@ class GeminiTranscriber:
         self._glossary = glossary
         # 每段幾秒；<=0 代表不分段（維持整份送出的舊行為）
         self.chunk_seconds = chunk_seconds
+        # 一段的講者標註率過低時，最多再重跑幾次（0＝不重試）
+        self.label_retries = label_retries
+        # 重試用盡仍標不好時，改用這個較強的模型跑最後一次（None＝不啟用）。
+        # 只在真的失敗的那一段動用，免費額度較低的模型才不會被整場吃光
+        self.fallback_model = fallback_model
+        # 單一檔案最多幾段可以動用強模型。免費層實測：Flash Lite 每日 500 次，
+        # Flash 只有 20 次——備援跑一次就佔掉每日 Flash 額度的 5%，而 lite 重試
+        # 一次只佔 0.2%。所以預設把預算花在 label_retries，備援只留 1 次保底
+        self.max_fallback_chunks = max_fallback_chunks
 
     def build_prompt(self, hint: str | None = None) -> str:
         prompt = _TRANSCRIBE_PROMPT
@@ -126,6 +144,7 @@ class GeminiTranscriber:
         """逐段轉錄再縫合：時間戳平移回整場時間，講者標籤跨段沿用同一組。"""
         parts: list[str] = []
         speakers: list[str] = []
+        fallback_used = 0  # 這個檔案已經用掉幾次強模型（受 max_fallback_chunks 限制）
         chunk_dir = chunks[0].parent
         try:
             for index, chunk in enumerate(chunks):
@@ -136,7 +155,11 @@ class GeminiTranscriber:
                 this_hint = chunk_hint(speakers)
                 if hint:  # 呼叫端另外給的提示（即時聆聽跨 session 用）附在後面
                     this_hint += hint
-                text = self._transcribe_one(chunk, this_hint)
+                text, used_fallback = self._transcribe_labelled(
+                    chunk, this_hint, allow_fallback=fallback_used < self.max_fallback_chunks
+                )
+                if used_fallback:
+                    fallback_used += 1
                 if not text:
                     continue
                 text = shift_timestamps(text, offset)
@@ -152,7 +175,42 @@ class GeminiTranscriber:
             shutil.rmtree(chunk_dir, ignore_errors=True)
         return "\n".join(parts).strip()
 
-    def _transcribe_one(self, audio_path: Path, hint: str | None) -> str:
+    def _transcribe_labelled(
+        self, chunk: Path, hint: str | None, allow_fallback: bool = True
+    ) -> tuple[str, bool]:
+        """轉錄一段，講者標註率太低就重跑，取標得最好的那次。
+
+        回傳 (逐字稿, 有沒有動用強模型)——呼叫端據此控管整個檔案的強模型用量。
+
+        模型偶爾會整段放棄標講者（同一輸入重跑一次就正常），沒有重試的話
+        那一段在畫面上就整片沒有講者，前端的續行沿用也會把話歸錯人。
+        """
+        best, best_ratio = "", -1.0
+        for attempt in range(self.label_retries + 1):
+            text = self._transcribe_one(chunk, hint)
+            ratio = speaker_label_ratio(text)
+            if ratio > best_ratio:
+                best, best_ratio = text, ratio
+            if ratio >= MIN_SPEAKER_LABEL_RATIO:
+                return best, False
+            if attempt < self.label_retries:
+                logger.info(
+                    "%s 講者標註率只有 %.0f%%，重跑一次", chunk.name, ratio * 100
+                )
+
+        # 同一個模型重試用盡還是標不好（實測會連兩次都失敗），換較強的模型再試
+        # 一次。allow_fallback 由呼叫端控管，避免一個難搞的檔案把強模型額度用光
+        if allow_fallback and self.fallback_model and self.fallback_model != self.model:
+            logger.info("%s 改用 %s 重跑", chunk.name, self.fallback_model)
+            text = self._transcribe_one(chunk, hint, model=self.fallback_model)
+            if speaker_label_ratio(text) > best_ratio:
+                best = text
+            return best, True
+        return best, False
+
+    def _transcribe_one(
+        self, audio_path: Path, hint: str | None, model: str | None = None
+    ) -> str:
         if self._upload or self._generate:  # 測試注入假物件，不經金鑰輪替
             uploaded = self._upload(audio_path)
             return (self._generate(uploaded) or "").strip()
@@ -160,7 +218,7 @@ class GeminiTranscriber:
         return (
             call_with_rotation(
                 self._pool,
-                lambda key: self._transcribe_with_key(key, audio_path, hint),
+                lambda key: self._transcribe_with_key(key, audio_path, hint, model),
             )
             or ""
         ).strip()
@@ -183,7 +241,13 @@ class GeminiTranscriber:
 
         return genai.Client(api_key=key)
 
-    def _transcribe_with_key(self, key: str | None, path: Path, hint: str | None = None) -> str:
+    def _transcribe_with_key(
+        self,
+        key: str | None,
+        path: Path,
+        hint: str | None = None,
+        model: str | None = None,
+    ) -> str:
         client = self._client(key)
         uploaded = client.files.upload(file=str(path))
         try:
@@ -198,7 +262,7 @@ class GeminiTranscriber:
                 time.sleep(1)
                 uploaded = client.files.get(name=uploaded.name)
             response = client.models.generate_content(
-                model=self.model,
+                model=model or self.model,
                 contents=[self.build_prompt(hint), uploaded],
                 config={"temperature": 0.0},
             )

@@ -170,6 +170,7 @@ function timeLabelToSeconds(label) {
 
 function parseChatMessages(text) {
   const msgs = [];
+  let lastSpeaker = null;
   for (const rawLine of String(text || "").split("\n")) {
     let line = rawLine.trim();
     if (!line) continue;
@@ -178,7 +179,11 @@ function parseChatMessages(text) {
     if (tm) line = line.slice(tm[0].length).trim();
     if (!line) continue;
     const m = line.match(SPEAKER_RE);
-    const speaker = m ? m[1].trim() : null;
+    // 轉錄模型只在「換人講」時標註講者，同一人連續發言的後續行不再重複標籤
+    // （逐字稿的標準慣例）。沒有標籤就沿用上一行的講者，否則那些續行會失去
+    // 顏色分組、還會讓下一行重複顯示已經出現過的名字
+    const speaker = m ? m[1].trim() : lastSpeaker;
+    if (speaker) lastSpeaker = speaker;
     const content = m ? line.slice(m[0].length) : line;
     const last = msgs[msgs.length - 1];
     if (!time && last && last.speaker === speaker) {

@@ -10,6 +10,7 @@ from app.transcription.segments import (
     normalize_timestamps,
     parse_time_label,
     shift_timestamps,
+    speaker_label_ratio,
     speaker_of,
     speaker_hint,
 )
@@ -175,3 +176,25 @@ def test_bracket_residue_never_becomes_a_speaker_name():
     known = []
     collect_speakers("[9:9:9:9] 講者A：內容", known)
     assert known == []
+
+
+# ---- 講者標註率（重試判斷依據）----
+
+def test_label_ratio_counts_labelled_lines():
+    text = "[0:00] 講者A：一\n[0:05] 沒有標籤\n[0:10] 講者B：三\n[0:15] 也沒有"
+    assert speaker_label_ratio(text) == 0.5
+
+
+def test_label_ratio_all_or_nothing():
+    assert speaker_label_ratio("[0:00] 講者A：一\n[0:05] 講者A：二") == 1.0
+    assert speaker_label_ratio("[0:00] 沒標\n[0:05] 也沒標") == 0.0
+
+
+def test_label_ratio_ignores_blank_lines():
+    assert speaker_label_ratio("[0:00] 講者A：一\n\n\n[0:05] 講者B：二") == 1.0
+
+
+def test_label_ratio_of_empty_text_is_not_a_failure():
+    """空白段（靜音）不該被當成標註失敗而觸發重試。"""
+    assert speaker_label_ratio("") == 1.0
+    assert speaker_label_ratio("   ") == 1.0

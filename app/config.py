@@ -32,6 +32,17 @@ class Settings:
     # 上傳的長音檔分段轉錄的每段秒數（0＝不分段，整份送出）。
     # 實測整份送出 17 分鐘錄音時，Gemini 會整份放棄講者標註、時間戳也會漂掉
     transcribe_chunk_seconds: int = 240
+    # 某一段的講者標註率過低時，改用這個較強的模型重跑那一段（空字串＝不啟用）。
+    # 只在失敗的段落動用，免費額度較低的模型才不會被整場錄音吃光
+    transcribe_fallback_model: str | None = "gemini-flash-latest"
+    # 單一檔案最多幾段可以動用備援模型。免費層實測額度：Flash Lite 每日 500 次、
+    # Flash 每日只有 20 次——備援跑一次就吃掉每日 Flash 額度的 5%，所以壓到 1 次，
+    # 改把預算花在便宜的 lite 重試（見 transcribe_label_retries）
+    transcribe_max_fallback_chunks: int = 1
+    # 標註率不足時，用同一個 lite 模型重跑幾次。失敗是執行間的變異（同一輸入
+    # 標註率可能 20% 也可能 100%），多試幾次的累積成功率遠比換模型划算：
+    # lite 一次只佔每日額度 0.2%，Flash 一次佔 5%
+    transcribe_label_retries: int = 2
     data_dir: Path = field(default_factory=lambda: BASE_DIR / "data")
     # Firebase 金鑰：任一有值就用 Firestore 雲端儲存，否則用本地 JSON
     firebase_credentials_json: str | None = None  # service account JSON 字串（Render 用）
@@ -60,6 +71,13 @@ def get_settings() -> Settings:
         whisper_device=os.environ.get("WHISPER_DEVICE") or None,
         live_chunk_seconds=int(os.environ.get("LIVE_CHUNK_SECONDS", "45")),
         transcribe_chunk_seconds=int(os.environ.get("TRANSCRIBE_CHUNK_SECONDS", "240")),
+        transcribe_fallback_model=(
+            os.environ.get("TRANSCRIBE_FALLBACK_MODEL", "gemini-flash-latest") or None
+        ),
+        transcribe_max_fallback_chunks=int(
+            os.environ.get("TRANSCRIBE_MAX_FALLBACK_CHUNKS", "1")
+        ),
+        transcribe_label_retries=int(os.environ.get("TRANSCRIBE_LABEL_RETRIES", "2")),
         data_dir=Path(os.environ.get("DATA_DIR", BASE_DIR / "data")),
         firebase_credentials_json=os.environ.get("FIREBASE_CREDENTIALS_JSON") or None,
         firebase_credentials_file=(

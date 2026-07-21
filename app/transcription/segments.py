@@ -64,6 +64,18 @@ def speaker_of(line: str) -> str | None:
     return name
 
 
+def speaker_label_ratio(text: str) -> float:
+    """有講者標籤的行數佔比（0~1）。空字串回傳 1.0（沒東西可標，不算失敗）。
+
+    用來偵測「模型這一輪放棄標講者」——實測同一段音訊、同一個模型、
+    temperature=0，標註率可能是 26% 也可能是 95%，重跑一次就好了。
+    """
+    lines = [ln for ln in text.split("\n") if ln.strip()]
+    if not lines:
+        return 1.0
+    return sum(1 for ln in lines if speaker_of(ln)) / len(lines)
+
+
 def collect_speakers(text: str, known: list[str]) -> None:
     """把 text 裡新出現的講者依出場序追加進 known（就地修改）。"""
     for line in text.split("\n"):

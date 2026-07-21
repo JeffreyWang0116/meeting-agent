@@ -48,10 +48,22 @@
 
 轉錄與分析是**兩個獨立的 Gemini 模型設定**，可各自用環境變數覆蓋：
 
+免費層實測額度（2026/07 於 [AI Studio 儀表板](https://aistudio.google.com/rate-limit)確認，Google 可能調整，以你自己的儀表板為準）：
+
+| 模型系列 | RPM | TPM | **RPD（每日）** |
+|---|---|---|---|
+| **Flash Lite**（本專案主力） | 15 | 250K | **500** |
+| **Flash**（僅作備援） | 5 | 250K | **20** |
+
+> 兩者差 25 倍——這是所有預設值的取捨依據：能用 Lite 解決的就不動用 Flash。
+
 | 用途 | 環境變數 | 預設模型 | 免費額度（每專案每日）|
 |------|----------|----------|----------------------|
-| 音訊轉錄 | `TRANSCRIBE_MODEL` | `gemini-flash-lite-latest` | 高（Flash Lite 約 500 次/日、15 次/分）|
+| 音訊轉錄 | `TRANSCRIBE_MODEL` | `gemini-flash-lite-latest` | 500 次/日、15 次/分 |
 | 長音檔分段秒數 | `TRANSCRIBE_CHUNK_SECONDS` | `240`（0＝不分段） | 每段各算一次轉錄請求 |
+| 標註率不足時的 Lite 重試次數 | `TRANSCRIBE_LABEL_RETRIES` | `2` | 每次僅佔每日額度 0.2% |
+| 講者標註失敗時的備援模型 | `TRANSCRIBE_FALLBACK_MODEL` | `gemini-flash-latest`（空＝關閉） | 每次佔每日額度 **5%** |
+| 每個檔案最多幾段可用備援模型 | `TRANSCRIBE_MAX_FALLBACK_CHUNKS` | `1`（0＝不用備援） | 框住單一檔案的 Flash 花費 |
 | 會議分析、跨會議問答 | `GEMINI_MODEL` | `gemini-flash-lite-latest` | 同上 |
 | 錯字校正（選用） | `CORRECT_MODEL` | `gemini-flash-lite-latest` | 同上 |
 
@@ -62,6 +74,10 @@
 > **品質 vs 額度**：想要更好的分析品質，可把 `GEMINI_MODEL` 設為 `gemini-3.5-flash`（推理較強，但免費層每日僅 20 次，適合少量分析）。
 >
 > **多人會議的講者分辨**：轉錄的 prompt 已強力要求標註講者，但實測 `gemini-flash-lite` 對「誰在講話」的辨識仍不穩定，3 人以上時常被併成一兩位。需要準確標出多位講者時，把 `TRANSCRIBE_MODEL` 設為 `gemini-flash-latest`（可正確分出多位講者，代價是免費每日額度較低）。
+>
+> **講者標註失敗會自動重試**：實測同一段音訊、同一個模型、`temperature=0`，講者標註率可能是 20% 也可能是 100%——這是**執行間的變異**，不是音訊太難，也不是分段太長（縮短分段沒有改善）。所以某一段的標註率低於 50% 時會自動重跑；重跑仍失敗才改用 `TRANSCRIBE_FALLBACK_MODEL`（預設 `gemini-flash-latest`）跑那一段，且**單一檔案最多 `TRANSCRIBE_MAX_FALLBACK_CHUNKS` 段**（預設 1）。
+>
+> **為什麼重試次數多、降級次數少**：Flash Lite 每日 500 次、Flash 只有 20 次（差 25 倍）。既然失敗是執行間的變異，多試幾次的累積成功率就很划算——實測單次成功率約 6 成，試 3 次約 94%，只花掉 Lite 額度的 0.6%；而降級一次就吃掉 Flash 額度的 5%。所以預設是「Lite 重試 2 次，Flash 只留 1 次保底」。
 >
 > **長音檔會自動分段轉錄**：實測把整份 17 分鐘的質詢錄音丟給 `gemini-flash-lite`，講者標註會**整份消失**、時間戳還會漂到比實際長度多 3 分鐘；同一支影片只取前 3 分鐘卻能正確分出講者A/B/C。模型在長音訊上顯然會放棄逐句標註，所以超過 6 分鐘的音檔會先用 ffmpeg 切成每段 `TRANSCRIBE_CHUNK_SECONDS`（預設 240 秒）再逐段轉錄，最後把時間戳平移回整場時間、講者標籤跨段沿用同一組。代價是每段各算一次 API 請求（17 分鐘的檔約 5 次）。設成 `0` 可關閉分段、回到整份送出的舊行為。
 

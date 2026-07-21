@@ -151,7 +151,7 @@ class FakeChunkedSetup:
         setup = self
 
         class Recording(GeminiTranscriber):
-            def _transcribe_one(self, audio_path, hint):
+            def _transcribe_one(self, audio_path, hint, model=None):
                 setup.hints.append(hint)
                 return setup.texts[str(audio_path)]
 
@@ -291,3 +291,212 @@ def test_chunk_files_cleaned_up(monkeypatch, tmp_path):
     ])
     setup.transcriber().transcribe(src)
     assert not setup.chunk_dir.exists()
+
+
+# ---- 講者標註率過低時重試 ----
+# 實測同一段音訊、同一個模型、temperature=0，標註率可能是 26% 也可能是 95%：
+# 是執行間的變異，不是音訊太難，所以重跑一次通常就正常了。
+
+class RetryingSetup(FakeChunkedSetup):
+    """讓同一段的每次呼叫依序回傳不同結果，模擬模型的執行間變異。"""
+
+    def transcriber_with_sequence(self, sequence, label_retries=1):
+        setup = self
+        calls = {"n": 0}
+
+        class Sequenced(GeminiTranscriber):
+            def _transcribe_one(self, audio_path, hint, model=None):
+                text = sequence[min(calls["n"], len(sequence) - 1)]
+                calls["n"] += 1
+                return text
+
+        setup.calls = calls
+        return Sequenced(api_key="k", chunk_seconds=240, label_retries=label_retries)
+
+
+def test_chunk_with_poor_labels_is_retried(monkeypatch, tmp_path):
+    src = tmp_path / "long.wav"
+    src.write_bytes(b"RIFF-fake")
+    setup = RetryingSetup(monkeypatch, tmp_path, duration=600, chunk_texts=["", ""])
+    # 第一次幾乎沒標籤，第二次正常 → 應採用第二次的結果
+    t = setup.transcriber_with_sequence([
+        "[0:00] 講者A：有標\n[0:05] 沒標\n[0:10] 沒標\n[0:15] 沒標",
+        "[0:00] 講者A：有標\n[0:05] 講者B：也有標",
+    ])
+    text = t.transcribe(src)
+    assert "講者B" in text
+    assert setup.calls["n"] >= 2  # 確實重跑了
+
+
+def test_well_labelled_chunk_is_not_retried(monkeypatch, tmp_path):
+    """標得好就不該多花一次 API 請求。"""
+    src = tmp_path / "long.wav"
+    src.write_bytes(b"RIFF-fake")
+    setup = RetryingSetup(monkeypatch, tmp_path, duration=600, chunk_texts=["", ""])
+    t = setup.transcriber_with_sequence(["[0:00] 講者A：一\n[0:05] 講者B：二"])
+    t.transcribe(src)
+    assert setup.calls["n"] == 2  # 兩段各一次，沒有重試
+
+
+def test_best_attempt_kept_when_all_retries_are_poor(monkeypatch, tmp_path):
+    """重試後仍然不理想時，至少保留標得最好的那一次，而不是最後一次。"""
+    src = tmp_path / "long.wav"
+    src.write_bytes(b"RIFF-fake")
+    setup = RetryingSetup(monkeypatch, tmp_path, duration=300, chunk_texts=[""])
+    t = setup.transcriber_with_sequence([
+        "[0:00] 講者A：好一點\n[0:05] 沒標",   # 50%
+        "[0:00] 沒標\n[0:05] 沒標",            # 0%
+    ], label_retries=1)
+    assert "講者A" in t.transcribe(src)
+
+
+def test_retry_disabled_when_label_retries_zero(monkeypatch, tmp_path):
+    src = tmp_path / "long.wav"
+    src.write_bytes(b"RIFF-fake")
+    setup = RetryingSetup(monkeypatch, tmp_path, duration=300, chunk_texts=[""])
+    t = setup.transcriber_with_sequence(["[0:00] 全部沒標\n[0:05] 也沒標"], label_retries=0)
+    t.transcribe(src)
+    assert setup.calls["n"] == 1
+
+
+# ---- 重試用盡後改用較強模型 ----
+# 實測同一段連跑兩次都只有 20% 標註率，但換 gemini-flash-latest 就 100%。
+# 只在失敗的段落動用，額度較低的模型才不會被整場錄音吃光。
+
+def test_falls_back_to_stronger_model_when_retries_all_fail(monkeypatch, tmp_path):
+    src = tmp_path / "long.wav"
+    src.write_bytes(b"RIFF-fake")
+    # 分段路徑要 2 段以上才會啟動
+    FakeChunkedSetup(monkeypatch, tmp_path, duration=600, chunk_texts=["", ""])
+    used_models = []
+
+    class Tracking(GeminiTranscriber):
+        def _transcribe_one(self, audio_path, hint, model=None):
+            used_models.append(model or self.model)
+            if model == "gemini-flash-latest":
+                return "[0:00] 講者A：強模型標得好\n[0:05] 講者B：也標了"
+            return "[0:00] 沒標\n[0:05] 也沒標"
+
+    # 明確指定參數，不受預設值調整影響（預設的取捨見 config.py）
+    t = Tracking(api_key="k", chunk_seconds=240, label_retries=1,
+                 model="gemini-flash-lite-latest", fallback_model="gemini-flash-latest",
+                 max_fallback_chunks=2)
+    text = t.transcribe(src)
+    assert "講者A" in text and "講者B" in text
+    # 每段：先用便宜模型試 2 次（初次＋重試），失敗才動用強模型 1 次
+    per_chunk = ["gemini-flash-lite-latest"] * 2 + ["gemini-flash-latest"]
+    assert used_models == per_chunk * 2
+
+
+def test_stronger_model_not_used_when_labels_are_fine(monkeypatch, tmp_path):
+    """標得好就不該動用額度較低的模型。"""
+    src = tmp_path / "long.wav"
+    src.write_bytes(b"RIFF-fake")
+    FakeChunkedSetup(monkeypatch, tmp_path, duration=600, chunk_texts=["", ""])
+    used_models = []
+
+    class Tracking(GeminiTranscriber):
+        def _transcribe_one(self, audio_path, hint, model=None):
+            used_models.append(model or self.model)
+            return "[0:00] 講者A：標得很好\n[0:05] 講者B：也是"
+
+    Tracking(api_key="k", chunk_seconds=240, model="gemini-flash-lite-latest",
+             fallback_model="gemini-flash-latest").transcribe(src)
+    assert used_models == ["gemini-flash-lite-latest"] * 2  # 兩段各一次，沒動用強模型
+
+
+def test_fallback_result_discarded_if_worse(monkeypatch, tmp_path):
+    """強模型那次反而更差時，保留原本最好的結果。"""
+    src = tmp_path / "long.wav"
+    src.write_bytes(b"RIFF-fake")
+    FakeChunkedSetup(monkeypatch, tmp_path, duration=600, chunk_texts=["", ""])
+
+    class Tracking(GeminiTranscriber):
+        def _transcribe_one(self, audio_path, hint, model=None):
+            if model:
+                return "[0:00] 完全沒標\n[0:05] 也沒標"
+            return "[0:00] 講者A：至少有一行\n[0:05] 沒標"
+
+    text = Tracking(api_key="k", chunk_seconds=240, label_retries=0,
+                    fallback_model="gemini-flash-latest").transcribe(src)
+    assert "講者A" in text
+
+
+def test_no_fallback_when_not_configured(monkeypatch, tmp_path):
+    src = tmp_path / "long.wav"
+    src.write_bytes(b"RIFF-fake")
+    FakeChunkedSetup(monkeypatch, tmp_path, duration=600, chunk_texts=["", ""])
+    calls = []
+
+    class Tracking(GeminiTranscriber):
+        def _transcribe_one(self, audio_path, hint, model=None):
+            calls.append(model)
+            return "[0:00] 沒標\n[0:05] 也沒標"
+
+    Tracking(api_key="k", chunk_seconds=240, label_retries=1,
+             fallback_model=None).transcribe(src)
+    # 每段只有初次＋重試，沒有第三次（兩段共 4 次）
+    assert calls == [None] * 4
+
+
+# ---- 強模型用量上限 ----
+# 降級是「每段」獨立判斷的，不設上限的話一個 5 段的難搞檔案就會吃掉 5 次
+# 強模型額度（它的每日額度比 lite 低得多）。
+
+def _all_failing(monkeypatch, tmp_path, chunks, **kw):
+    """建一個每段都標不好的情境，回傳 (transcriber, 用到的模型清單)。"""
+    src = tmp_path / "long.wav"
+    src.write_bytes(b"RIFF-fake")
+    FakeChunkedSetup(monkeypatch, tmp_path, duration=chunks * 240, chunk_texts=[""] * chunks)
+    used = []
+
+    class Tracking(GeminiTranscriber):
+        def _transcribe_one(self, audio_path, hint, model=None):
+            used.append(model or self.model)
+            return "[0:00] 沒標\n[0:05] 也沒標"
+
+    t = Tracking(api_key="k", chunk_seconds=240, label_retries=1,
+                 model="lite", fallback_model="strong", **kw)
+    return src, t, used
+
+
+def test_fallback_capped_per_file(monkeypatch, tmp_path):
+    """4 段全部標不好，但最多只有 2 段能動用強模型。"""
+    src, t, used = _all_failing(monkeypatch, tmp_path, chunks=4, max_fallback_chunks=2)
+    t.transcribe(src)
+    assert used.count("strong") == 2
+    assert used.count("lite") == 8  # 4 段 × (初次 + 重試)
+
+
+def test_fallback_cap_can_be_disabled(monkeypatch, tmp_path):
+    src, t, used = _all_failing(monkeypatch, tmp_path, chunks=3, max_fallback_chunks=0)
+    t.transcribe(src)
+    assert used.count("strong") == 0  # 完全不動用強模型
+
+
+def test_fallback_cap_allows_all_when_high(monkeypatch, tmp_path):
+    src, t, used = _all_failing(monkeypatch, tmp_path, chunks=3, max_fallback_chunks=99)
+    t.transcribe(src)
+    assert used.count("strong") == 3
+
+
+def test_successful_chunks_do_not_consume_fallback_budget(monkeypatch, tmp_path):
+    """標得好的段落不該佔用強模型的配額。"""
+    src = tmp_path / "long.wav"
+    src.write_bytes(b"RIFF-fake")
+    FakeChunkedSetup(monkeypatch, tmp_path, duration=720, chunk_texts=["", "", ""])
+    used = []
+    seen = {"n": 0}
+
+    class Tracking(GeminiTranscriber):
+        def _transcribe_one(self, audio_path, hint, model=None):
+            used.append(model or self.model)
+            seen["n"] += 1
+            # 第一段標得好，之後兩段都失敗
+            if seen["n"] == 1:
+                return "[0:00] 講者A：好的\n[0:05] 講者B：也好"
+            return "[0:00] 沒標\n[0:05] 也沒標"
+
+    Tracking(api_key="k", chunk_seconds=240, label_retries=1, model="lite",
+             fallback_model="strong", max_fallback_chunks=2).transcribe(src)
+    assert used.count("strong") == 2  # 兩段失敗的都用得到，額度沒被成功的那段吃掉

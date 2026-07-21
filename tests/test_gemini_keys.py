@@ -217,7 +217,7 @@ def test_gemini_transcriber_rotates_key_on_quota_error(tmp_path, monkeypatch):
     t = GeminiTranscriber(api_keys=["k1", "k2"])
     used = []
 
-    def fake_run(key, path, hint=None):
+    def fake_run(key, path, hint=None, model=None):
         used.append(key)
         if key == "k1":
             raise _quota_exc()
@@ -269,3 +269,13 @@ def test_settings_transcribe_model_overridable(monkeypatch):
     monkeypatch.setenv("TRANSCRIBE_MODEL", "gemini-3.5-flash")
     s = config.get_settings()
     assert s.transcribe_model == "gemini-3.5-flash"
+
+
+def test_transcribe_defaults_favour_cheap_retries_over_fallback():
+    """免費層實測：Flash Lite 每日 500 次、Flash 只有 20 次。
+    所以預設要多花便宜的 lite 重試，稀有的 Flash 只留一次保底。"""
+    from app.config import Settings
+
+    s = Settings()
+    assert s.transcribe_label_retries >= 2      # lite 重試（每次佔額度 0.2%）
+    assert s.transcribe_max_fallback_chunks <= 1  # Flash 降級（每次佔額度 5%）
