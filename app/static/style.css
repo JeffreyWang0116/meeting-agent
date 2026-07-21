@@ -198,12 +198,17 @@
   .glos-note { color: var(--faint); font-size: .8rem; }
   .glos-item .del-btn { margin-left: auto; }
 
-  /* ---- 錯誤橫幅 ---- */
+  /* ---- 訊息橫幅（錯誤／一般提示） ---- */
   .banner {
     display: none; align-items: center; gap: 10px; padding: 13px 16px; border-radius: var(--radius-md);
     background: var(--high-soft); border: 1px solid var(--high); color: var(--high); font-size: .9rem;
   }
   .banner .i { color: var(--high); }
+  /* 非錯誤的提示（如「校正了 3 處錯字」）改用強調色，不要嚇到使用者 */
+  .banner.notice {
+    background: var(--accent-soft); border-color: var(--accent-border); color: var(--accent);
+  }
+  .banner.notice .i { color: var(--accent); }
 
   /* ---- 面板通用（扁平材質：靠明度分層，零陰影） ---- */
   .panel {
@@ -232,6 +237,10 @@
   label.chk { display: flex; gap: 7px; align-items: center; font-size: .86rem; color: var(--muted); cursor: pointer; }
   label.chk:hover { color: var(--ink); }
   label.chk input[type="checkbox"] { accent-color: var(--accent); }
+  .chk-note {
+    font-family: var(--label); font-size: .7rem; color: var(--faint);
+    border: 1px solid var(--border); border-radius: 999px; padding: 1px 8px;
+  }
   label.lbl { font-size: .82rem; font-weight: 500; color: var(--muted); }
   textarea, input[type="date"], input[type="file"] {
     font-family: var(--sans); font-size: .93rem; color: var(--ink);
@@ -362,6 +371,19 @@
     background: var(--accent-soft); color: var(--ink); border-radius: 3px;
     padding: 1px 3px; box-shadow: 0 0 0 1px var(--accent-border);
   }
+  /* AI 校正的錯字清單（原字 → 新字 ＋ 判斷依據） */
+  .corr-list { display: flex; flex-direction: column; gap: 6px; padding: 4px 14px 14px; }
+  .corr-item {
+    display: flex; align-items: baseline; gap: 9px; flex-wrap: wrap;
+    font-size: .86rem; padding: 8px 12px;
+    border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--card-2);
+  }
+  .corr-from { color: var(--high); text-decoration: line-through; font-family: var(--mono); }
+  .corr-arrow { color: var(--faint); }
+  .corr-to { color: var(--accent); font-weight: 600; font-family: var(--mono); }
+  .corr-why { color: var(--faint); font-size: .8rem; flex: 1 1 200px; }
+  .corr-count { color: var(--faint); font-family: var(--mono); font-size: .74rem; }
+
   .quote.clickable { cursor: pointer; transition: color .15s, border-color .15s; }
   .quote.clickable:hover { color: var(--accent); border-left-color: var(--accent); }
 

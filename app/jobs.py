@@ -31,6 +31,7 @@ class MediaJobManager:
         meeting_date: date | None = None,
         kind: str | None = None,
         features: set[str] | None = None,
+        correct_typos: bool = False,
     ) -> str:
         job_id = uuid.uuid4().hex[:12]
         with self._lock:
@@ -46,7 +47,7 @@ class MediaJobManager:
             }
         thread = threading.Thread(
             target=self._run,
-            args=(job_id, Path(file_path), meeting_date, kind, features),
+            args=(job_id, Path(file_path), meeting_date, kind, features, correct_typos),
             daemon=True,
         )
         self._threads[job_id] = thread
@@ -86,6 +87,7 @@ class MediaJobManager:
         meeting_date: date | None,
         kind: str | None = None,
         features: set[str] | None = None,
+        correct_typos: bool = False,
     ) -> None:
         path = file_path
         try:
@@ -113,9 +115,19 @@ class MediaJobManager:
             self._update(job_id, transcript=transcript, progress=1.0, status="analyzing")
 
             result = self._orchestrator.process_transcript(
-                transcript, meeting_date=meeting_date, kind=kind, features=features
+                transcript,
+                meeting_date=meeting_date,
+                kind=kind,
+                features=features,
+                correct_typos=correct_typos,
             )
-            self._update(job_id, status="done", result=result)
+            # 校正過的話逐字稿會變，job 要換成校正後的版本（前端顯示的就是這份）
+            self._update(
+                job_id,
+                status="done",
+                result=result,
+                transcript=result.get("transcript") or transcript,
+            )
         except Exception as exc:  # 背景執行緒的例外必須被記錄，否則前端永遠在等
             self._update(job_id, status="error", error=str(exc))
         finally:

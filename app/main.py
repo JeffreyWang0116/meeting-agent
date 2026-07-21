@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import shutil
 import uuid
 from datetime import date
@@ -16,6 +17,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from app.agents.corrector_agent import CorrectorAgent
 from app.agents.decision_agent import FEATURE_KEYS, DecisionAgent, DecisionAgentError
 from app.agents.executor_agent import ExecutorAgent
 from app.agents.notifier_agent import NotifierAgent
@@ -35,6 +37,8 @@ from app.transcription.gemini_transcriber import GeminiTranscriber
 from app.transcription.live_session import LiveSessionManager, SessionNotFound
 from app.transcription.transcriber import Transcriber
 from app.usage import UsageTracker
+
+logger = logging.getLogger(__name__)
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
@@ -98,16 +102,20 @@ class MeetingRequest(BaseModel):
     kind: Optional[str] = None
     # 會議摘要／決議事項／代辦事項可各自開關；None＝依 kind 決定預設值
     features: Optional[list[str]] = None
+    # 分析前先用 AI 修掉語音辨識的同音錯字（多一次 API 請求）
+    correct_typos: bool = False
 
 
 class FinishRequest(BaseModel):
     meeting_date: Optional[date] = None
     kind: Optional[str] = None
     features: Optional[list[str]] = None
+    correct_typos: bool = False
 
 
 class ReanalyzeRequest(BaseModel):
     features: Optional[list[str]] = None
+    correct_typos: bool = False
 
 
 class AskRequest(BaseModel):
@@ -161,6 +169,12 @@ def create_app(
         ),
         executor=ExecutorAgent(store),
         notifier=NotifierAgent(settings.data_dir / "output" / "notifications"),
+        corrector=CorrectorAgent(
+            api_key=settings.gemini_api_key,
+            api_keys=settings.gemini_api_keys,
+            model=settings.correct_model,
+            glossary=glossary.terms,
+        ),
     )
     if transcriber is None:
         if settings.transcribe_engine == "gemini":
@@ -240,16 +254,32 @@ def create_app(
         meeting_date: date | None,
         kind: str | None = None,
         features: set[str] | None = None,
+        correct_typos: bool = False,
     ) -> dict:
         usage.record("analysis")
+        if correct_typos:
+            usage.record("correct")  # 校正是額外一次請求，用量面板要分開看得到
         try:
             return orchestrator.process_transcript(
-                text, meeting_date=meeting_date, kind=kind, features=features
+                text,
+                meeting_date=meeting_date,
+                kind=kind,
+                features=features,
+                correct_typos=correct_typos,
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc))
         except DecisionAgentError as exc:
             raise HTTPException(status_code=502, detail=str(exc))
+        except HTTPException:
+            raise
+        except Exception as exc:
+            # 預期外的故障（缺套件、網路斷、SDK 改版…）也要回看得懂的訊息，
+            # 而不是讓 stack trace 變成前端的 500 Internal Server Error
+            logger.exception("分析失敗")
+            raise HTTPException(
+                status_code=502, detail=f"分析失敗（{type(exc).__name__}）：{exc}"
+            )
 
     @app.get("/", include_in_schema=False)
     def index():
@@ -292,7 +322,13 @@ def create_app(
     @app.post("/api/meetings")
     def analyze_meeting(req: MeetingRequest):
         kind = validate_kind(req.kind)
-        return run_analysis(req.text, req.meeting_date, kind, resolve_features(req.features, kind))
+        return run_analysis(
+            req.text,
+            req.meeting_date,
+            kind,
+            resolve_features(req.features, kind),
+            correct_typos=req.correct_typos,
+        )
 
     @app.get("/api/meetings")
     def list_meetings():
@@ -356,21 +392,35 @@ def create_app(
         features = resolve_features(req.features if req else None, kind)
         meeting_date = _parse_iso_date_or_none(record.get("meeting", {}).get("date"))
         usage.record("analysis")
+
+        corrections: list[dict] = []
+        if req and req.correct_typos and orchestrator.corrector:
+            usage.record("correct")
+            transcript, corrections = orchestrator.corrector.correct(transcript)
+
         try:
             analysis = orchestrator.decision.analyze(
                 transcript, meeting_date=meeting_date, kind=kind, features=features
             )
         except DecisionAgentError as exc:
             raise HTTPException(status_code=502, detail=str(exc))
+        except Exception as exc:  # 同 run_analysis：預期外故障也要回看得懂的訊息
+            logger.exception("重新分析失敗")
+            raise HTTPException(
+                status_code=502, detail=f"重新分析失敗（{type(exc).__name__}）：{exc}"
+            )
 
         dumped = analysis.model_dump(mode="json")
-        store.update_meeting(meeting_id, {
+        updates = {
             "meeting": dumped["meeting"],
             "decisions": dumped["decisions"],
             "pending_items": dumped["pending_items"],
             "highlights": dumped.get("highlights", []),
             "tags": dumped.get("tags", []),
-        })
+        }
+        if corrections:  # 校正過才回寫逐字稿，沒改就不動原紀錄
+            updates["transcript"] = transcript
+        store.update_meeting(meeting_id, updates)
         tasks = store.replace_tasks(meeting_id, dumped["todos"])
         notifications = orchestrator.notifier.notify(meeting_id, analysis)
         drop_from_rag(meeting_id)
@@ -379,6 +429,8 @@ def create_app(
             "analysis": dumped,
             "notifications": notifications,
             "tasks": tasks,
+            "transcript": transcript,
+            "corrections": corrections,
         }
 
     @app.get("/api/tasks")
@@ -593,6 +645,7 @@ def create_app(
         meeting_date: Optional[str] = Form(None),
         kind: Optional[str] = Form(None),
         features: Optional[str] = Form(None),
+        correct_typos: Optional[str] = Form(None),
     ):
         try:
             parsed_date = date.fromisoformat(meeting_date) if meeting_date else None
@@ -600,6 +653,8 @@ def create_app(
             raise HTTPException(status_code=400, detail="meeting_date 必須是 YYYY-MM-DD 格式")
         validate_kind(kind)
         resolved_features = resolve_features(features, kind)
+        # multipart 表單只有字串，"true"/"1" 都當開啟
+        correct = str(correct_typos or "").lower() in ("1", "true", "on", "yes")
 
         suffix = Path(file.filename or "upload.bin").suffix or ".bin"
         uploads_dir.mkdir(parents=True, exist_ok=True)
@@ -608,9 +663,15 @@ def create_app(
             shutil.copyfileobj(file.file, out)
 
         usage.record("media_upload")
+        if correct:
+            usage.record("correct")
         return {
             "job_id": job_manager.submit(
-                dest, meeting_date=parsed_date, kind=kind, features=resolved_features
+                dest,
+                meeting_date=parsed_date,
+                kind=kind,
+                features=resolved_features,
+                correct_typos=correct,
             )
         }
 
@@ -664,7 +725,14 @@ def create_app(
             )
         kind = validate_kind(req.kind if req else None)
         features = resolve_features(req.features if req else None, kind)
-        result = run_analysis(transcript, req.meeting_date if req else None, kind, features)
+        result = run_analysis(
+            transcript,
+            req.meeting_date if req else None,
+            kind,
+            features,
+            correct_typos=bool(req and req.correct_typos),
+        )
+        # result 帶著校正後的 transcript，放在後面覆蓋原始版本
         return {"transcript": transcript, **result}
 
     return app

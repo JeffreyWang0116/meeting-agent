@@ -60,9 +60,17 @@ function esc(s) {
 }
 function showError(msg) {
   const b = $("errorBanner");
+  b.classList.remove("notice");
   b.innerHTML = icon("alert") + `<span>${esc(msg)}</span>`;
   b.style.display = "flex";
   b.scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+// 一般提示（成功、附帶說明），用同一條橫幅但不是紅色警示
+function showNotice(msg) {
+  const b = $("errorBanner");
+  b.classList.add("notice");
+  b.innerHTML = icon("check") + `<span>${esc(msg)}</span>`;
+  b.style.display = "flex";
 }
 function clearError() { $("errorBanner").style.display = "none"; }
 async function jsonOrThrow(resp) {
@@ -106,6 +114,15 @@ function selectedFeatures() {
   if ($("featTodos").checked) features.push("todos");
   return features;
 }
+
+// AI 校正錯字：與錄音種類無關（任何逐字稿都可能有同音錯字），
+// 所以不跟著 selectedFeatures 的「非會議就回 null」規則走。預設關閉，記住選擇。
+(function () {
+  if (localStorage.getItem("correctTypos") === "1") $("featCorrect").checked = true;
+  $("featCorrect").addEventListener("change", () =>
+    localStorage.setItem("correctTypos", $("featCorrect").checked ? "1" : "0"));
+})();
+function correctTypos() { return $("featCorrect").checked; }
 
 // 即時翻譯目標：記住上次的選擇
 (function () {
@@ -248,15 +265,33 @@ function jumpToTranscript(container, timeLabel, quote) {
 /* ==================================================================
    4. 分析結果：摘要、會議重點、決議、代辦、行事曆、確認信
    ================================================================== */
+// ---- AI 校正的錯字清單：讓使用者看得到到底改了哪些字，不是黑箱 ----
+function renderCorrections(corrections) {
+  const sec = $("rCorrSec");
+  sec.style.display = corrections.length ? "block" : "none";
+  sec.open = false;
+  $("corrCount").textContent = corrections.length || "";
+  $("rCorrections").innerHTML = corrections.map(c => `
+    <div class="corr-item">
+      <span class="corr-from">${esc(c.wrong)}</span>
+      <span class="corr-arrow">→</span>
+      <span class="corr-to">${esc(c.right)}</span>
+      ${c.count > 1 ? `<span class="corr-count">×${c.count}</span>` : ""}
+      ${c.reason ? `<span class="corr-why">${esc(c.reason)}</span>` : ""}
+    </div>`).join("");
+}
+
 // ---- 結果渲染 ----
 let currentTranscript = "";
 let analysisStartTime = null;
 
 function renderResult(result, transcript) {
-  currentTranscript = (transcript || "").trim();
+  // 後端校正過的話，result.transcript 才是最終版本（傳進來的可能是校正前的）
+  currentTranscript = (result.transcript || transcript || "").trim();
   $("rTransSec").style.display = currentTranscript ? "block" : "none";
   $("rTransSec").open = false;
   renderChat($("rTranscript"), currentTranscript);
+  renderCorrections(result.corrections || []);
   const a = result.analysis, m = a.meeting;
   // 成效指標：這場會議 AI 幫你做了多少事、花了多久
   const elapsed = analysisStartTime ? ((Date.now() - analysisStartTime) / 1000).toFixed(1) : null;
@@ -768,15 +803,28 @@ $("meetingRows").addEventListener("click", async e => {
 
   const rean = e.target.closest(".reanalyze-detail");
   if (rean) {
-    if (!confirm("重新分析會用目前的逐字稿重跑 AI，這場會議的任務會整批換新。繼續？")) return;
+    const correct = correctTypos();
+    const note = correct ? "（含 AI 校正錯字，會改寫逐字稿）" : "";
+    if (!confirm(`重新分析會用目前的逐字稿重跑 AI${note}，這場會議的任務會整批換新。繼續？`)) return;
     rean.disabled = true; rean.textContent = "分析中…";
     try {
-      const r = await jsonOrThrow(await fetch(`/api/meetings/${rean.dataset.id}/reanalyze`, { method: "POST" }));
+      const r = await jsonOrThrow(await fetch(`/api/meetings/${rean.dataset.id}/reanalyze`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ correct_typos: correct }),
+      }));
       const cached = meetingDetailCache[rean.dataset.id];
       if (cached) {
         cached.meeting = r.analysis.meeting;
         cached.decisions = r.analysis.decisions;
         cached.pending_items = r.analysis.pending_items;
+        cached.highlights = r.analysis.highlights || [];
+        cached.tags = r.analysis.tags || [];
+        if (r.corrections && r.corrections.length) cached.transcript = r.transcript;
+      }
+      if (r.corrections && r.corrections.length) {
+        showNotice(`AI 校正了 ${r.corrections.length} 處錯字：` +
+          r.corrections.slice(0, 5).map(c => `${c.wrong}→${c.right}`).join("、"));
       }
       refreshMeetings(); refreshTasks(); refreshReminders();
     } catch (err) { showError("重新分析失敗：" + err.message); refreshMeetings(); }
@@ -1118,6 +1166,7 @@ $("btnAnalyzeText").addEventListener("click", async () => {
         meeting_date: $("meetingDate").value || null,
         kind: $("meetingKind").value,
         features: selectedFeatures(),
+        correct_typos: correctTypos(),
       }),
     }));
     renderResult(result, $("textInput").value);
@@ -1150,6 +1199,7 @@ $("btnUpload").addEventListener("click", async () => {
     form.append("kind", $("meetingKind").value);
     const features = selectedFeatures();
     if (features !== null) form.append("features", features.join(","));
+    if (correctTypos()) form.append("correct_typos", "true");
     const { job_id } = await jsonOrThrow(await fetch("/api/media", { method: "POST", body: form }));
 
     while (true) {
@@ -1348,6 +1398,7 @@ async function finishLiveSession() {
         meeting_date: $("meetingDate").value || null,
         kind: $("meetingKind").value,
         features: selectedFeatures(),
+        correct_typos: correctTypos(),
       }),
     }));
     $("liveStatus").textContent = "完成";

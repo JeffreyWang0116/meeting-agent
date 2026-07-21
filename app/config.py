@@ -22,6 +22,9 @@ class Settings:
     # Gemini 轉錄專用模型：轉錄吃掉絕大多數請求（即時聆聽每段一次）但不需要
     # 聰明模型，預設用免費額度高的輕量版，與分析模型（gemini_model）脫鉤
     transcribe_model: str = "gemini-flash-lite-latest"
+    # 錯字校正專用模型：機械性工作（找同音錯字），不需要聰明模型，
+    # 與分析模型脫鉤才不會在 GEMINI_MODEL 換成高階模型時一起吃掉稀有額度
+    correct_model: str = "gemini-flash-lite-latest"
     # None 代表自動：有 CUDA 用 GPU（依 VRAM 選 medium），否則 CPU + small
     whisper_model: str | None = None
     whisper_device: str | None = None
@@ -49,6 +52,7 @@ def get_settings() -> Settings:
         gemini_model=os.environ.get("GEMINI_MODEL", "gemini-flash-latest"),
         transcribe_engine=os.environ.get("TRANSCRIBE_ENGINE", "local").lower(),
         transcribe_model=os.environ.get("TRANSCRIBE_MODEL", "gemini-flash-lite-latest"),
+        correct_model=os.environ.get("CORRECT_MODEL", "gemini-flash-lite-latest"),
         whisper_model=os.environ.get("WHISPER_MODEL") or None,
         whisper_device=os.environ.get("WHISPER_DEVICE") or None,
         live_chunk_seconds=int(os.environ.get("LIVE_CHUNK_SECONDS", "45")),

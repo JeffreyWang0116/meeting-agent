@@ -19,12 +19,21 @@ class FakeTranscriber:
 
 
 class FakeOrchestrator:
-    def __init__(self):
+    def __init__(self, corrected=None):
         self.received = []
+        # 模擬校正後的逐字稿（None＝不改動）
+        self._corrected = corrected
 
-    def process_transcript(self, text, meeting_date=None, kind=None, features=None):
-        self.received.append((text, meeting_date, kind, features))
-        return {"meeting_id": "m123", "analysis": {}, "notifications": {}}
+    def process_transcript(
+        self, text, meeting_date=None, kind=None, features=None, correct_typos=False
+    ):
+        self.received.append((text, meeting_date, kind, features, correct_typos))
+        return {
+            "meeting_id": "m123",
+            "analysis": {},
+            "notifications": {},
+            "transcript": self._corrected if correct_typos and self._corrected else text,
+        }
 
 
 @pytest.fixture
@@ -153,3 +162,27 @@ def test_features_passed_through(tmp_path, audio_file):
     job_id = mgr.submit(audio_file, features={"summary"})
     mgr.wait(job_id, timeout=5)
     assert orch.received[0][3] == {"summary"}
+
+
+def test_correct_typos_flag_passed_through(tmp_path, audio_file):
+    orch = FakeOrchestrator()
+    mgr = MediaJobManager(FakeTranscriber(), orch, tmp_path)
+    mgr.wait(mgr.submit(audio_file, correct_typos=True), timeout=5)
+    assert orch.received[0][4] is True
+
+
+def test_job_transcript_replaced_by_corrected_version(tmp_path, audio_file):
+    """校正過的話，前端看到的逐字稿要是校正後的版本。"""
+    orch = FakeOrchestrator(corrected="校正後的逐字稿")
+    mgr = MediaJobManager(FakeTranscriber(), orch, tmp_path)
+    job_id = mgr.submit(audio_file, correct_typos=True)
+    mgr.wait(job_id, timeout=5)
+    assert mgr.get(job_id)["transcript"] == "校正後的逐字稿"
+
+
+def test_job_transcript_untouched_when_correction_off(tmp_path, audio_file):
+    orch = FakeOrchestrator(corrected="不該出現")
+    mgr = MediaJobManager(FakeTranscriber(), orch, tmp_path)
+    job_id = mgr.submit(audio_file)
+    mgr.wait(job_id, timeout=5)
+    assert mgr.get(job_id)["transcript"] == "轉錄結果"

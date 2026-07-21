@@ -129,6 +129,14 @@
       <label class="chk"><input type="checkbox" id="featTodos" checked> 代辦事項</label>
     </div>
 
+    <!-- 錯字校正不分錄音種類都適用，所以獨立一列、永遠顯示 -->
+    <div class="field-row feature-row">
+      <label class="chk" title="轉錄後多花一次 AI 請求，用上下文修掉同音錯字（如「涵式」→「函式」）">
+        <input type="checkbox" id="featCorrect"> AI 校正錯字
+        <span class="chk-note">多一次請求</span>
+      </label>
+    </div>
+
     <!-- 文字貼上 -->
     <div class="pane active" id="paneText">
       <div class="field">
@@ -307,6 +315,15 @@
         </button>
       </summary>
       <div class="transcript-full" id="rTranscript"></div>
+    </details>
+
+    <details class="transcript-details" id="rCorrSec" style="display:none">
+      <summary>
+        <svg class="i-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
+        AI 校正的錯字
+        <span class="head-count has" id="corrCount"></span>
+      </summary>
+      <div class="corr-list" id="rCorrections"></div>
     </details>
   </div>
 

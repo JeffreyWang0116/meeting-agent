@@ -597,3 +597,33 @@ def test_pwa_manifest_sw_and_icon_served(client):
     assert "javascript" in resp.headers["content-type"]
 
     assert client.get("/static/icon.svg").status_code == 200
+
+
+# ---- 預期外故障（缺套件、SDK 改版…）要回看得懂的 502，不是 500 stack trace ----
+
+def test_unexpected_analysis_failure_returns_clean_502(tmp_path):
+    from app.agents.decision_agent import DecisionAgent
+    from app.agents.executor_agent import ExecutorAgent
+    from app.agents.notifier_agent import NotifierAgent
+    from app.agents.parser_agent import ParserAgent
+    from app.config import Settings
+    from app.orchestrator import Orchestrator
+    from app.stores.local_store import LocalJsonStore
+
+    def boom(prompt):
+        raise ModuleNotFoundError("No module named 'google'")
+
+    store = LocalJsonStore(tmp_path / "db.json")
+    app = create_app(
+        Settings(gemini_api_key=None, data_dir=tmp_path),
+        store=store,
+        orchestrator=Orchestrator(
+            parser=ParserAgent(),
+            decision=DecisionAgent(generate=boom),
+            executor=ExecutorAgent(store),
+            notifier=NotifierAgent(tmp_path / "n"),
+        ),
+    )
+    resp = TestClient(app).post("/api/meetings", json={"text": "測試"})
+    assert resp.status_code == 502
+    assert "ModuleNotFoundError" in resp.json()["detail"]
