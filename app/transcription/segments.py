@@ -13,11 +13,18 @@ from __future__ import annotations
 
 import re
 
-# 行首「[1:02]」「[1:02:03]」時間標記
-TIME_PREFIX_RE = re.compile(r"^\s*\[(\d{1,2}(?::\d{2}){1,2})\]\s*")
+# 行首時間標記。模型不會乖乖照 [分:秒] 兩位數格式輸出，實測 gemini-flash-lite
+# 會吐出「[00]」（漏掉「0:」）和「[0:1]」（秒數只有一位），所以各段一律放寬成
+# 1~2 位、冒號段數 0~2。
+#
+# 認不得的代價是連鎖的：該行被當成「沒有時間標記」，分段平移時又補一個標記
+# 變成「[4:00] [0:1] 內容」；講者擷取也會被時間戳裡的冒號截斷，把「[0」當成
+# 講者名存進跨段清單，污染後續段的提示。
+# 輸出一律經過 format_time 正規化成 [分:秒]，所以下游只會看到標準格式。
+TIME_PREFIX_RE = re.compile(r"^\s*\[(\d{1,2}(?::\d{1,2}){0,2})\]\s*")
 
 # 出現在任何位置的時間標記（計數用，驗證結構沒被改動）
-TIME_MARKER_RE = re.compile(r"\[\d{1,2}(?::\d{2}){1,2}\]")
+TIME_MARKER_RE = re.compile(r"\[\d{1,2}(?::\d{1,2}){1,2}\]")
 
 # 行首「講者A：」「Kevin:」等講者標註。務必先用 strip_time_prefix 去掉時間戳
 # 再比對——時間戳裡的冒號會讓這個樣式誤抓成「[0」
@@ -47,7 +54,14 @@ def strip_time_prefix(line: str) -> str:
 def speaker_of(line: str) -> str | None:
     """取出一行的講者標籤（沒有就回 None）。會自動略過行首時間戳。"""
     m = SPEAKER_RE.match(strip_time_prefix(line))
-    return m.group(1).strip() if m else None
+    if not m:
+        return None
+    name = m.group(1).strip()
+    # 防呆：真正的講者名不會含方括號。萬一又出現沒被 TIME_PREFIX_RE 認出的
+    # 時間戳寫法，這裡擋掉「[0」之類的殘骸，避免污染跨段講者清單
+    if not name or "[" in name or "]" in name:
+        return None
+    return name
 
 
 def collect_speakers(text: str, known: list[str]) -> None:
@@ -68,6 +82,37 @@ def speaker_hint(speakers: list[str]) -> str | None:
         "請沿用相同標籤指稱同一個人的聲音，只有出現全新的聲音時才用下一個新標籤"
         "（例如已用到講者B，新的人就用講者C）。"
     )
+
+
+def chunk_hint(speakers: list[str]) -> str:
+    """長音檔分段轉錄時，每一段都要帶的提示。
+
+    主 prompt 允許「整段確定同一位講者時可以不標註」——這個例外在分段轉錄
+    下會出事：開場那段常是主席單人宣讀，模型就整段不標講者，於是第一段沒有
+    任何標籤，後續段也拿不到可沿用的講者清單，跨段一致性整條失效。
+    所以分段模式要明確把這個例外關掉。
+    """
+    text = (
+        "這是一段較長錄音切出來的片段，前後還有其他片段。"
+        "即使本片段從頭到尾只有一位講者，也務必在每一句開頭標註講者，不可省略。"
+    )
+    known = speaker_hint(speakers)
+    return text + known if known else text
+
+
+def normalize_timestamps(text: str) -> str:
+    """把行首時間標記統一成 [分:秒] 格式，不改動時間值。
+
+    整份轉錄（不分段）不會經過 shift_timestamps，模型吐出的「[00]」就會原封
+    不動送到前端，而前端只認得含冒號的格式 → 那行看起來就沒有時間。
+    """
+    lines = []
+    for line in text.split("\n"):
+        m = TIME_PREFIX_RE.match(line)
+        if m:
+            line = f"[{format_time(parse_time_label(m.group(1)))}] {line[m.end():]}"
+        lines.append(line)
+    return "\n".join(lines)
 
 
 def shift_timestamps(text: str, offset_seconds: float | None) -> str:

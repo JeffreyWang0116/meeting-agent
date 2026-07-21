@@ -179,7 +179,11 @@ def test_known_speakers_passed_as_hint_to_later_chunks(monkeypatch, tmp_path):
         "[0:10] 講者A：再來",
     ])
     setup.transcriber().transcribe(src)
-    assert setup.hints[0] is None          # 第一段沒有先前的講者可帶
+    # 第一段沒有先前的講者可沿用，但仍要收到「務必標註講者」的提示——
+    # 開場常是單人發言，模型會依主 prompt 的例外整段不標，導致後續段
+    # 拿不到可沿用的講者清單
+    assert "不可省略" in setup.hints[0]
+    assert "講者A" not in setup.hints[0]
     assert "講者A、講者B" in setup.hints[1]  # 第二段要沿用前面的標籤
 
 

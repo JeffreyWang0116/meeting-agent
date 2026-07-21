@@ -316,6 +316,9 @@ def create_app(
             or settings.whisper_model
             or "auto（首次轉錄時載入）",
             "live_chunk_seconds": settings.live_chunk_seconds,
+            # 長音檔分段轉錄的每段秒數（0＝不分段）。放在 health 是為了能從
+            # 外部確認部署版到底有沒有帶上這個功能
+            "transcribe_chunk_seconds": settings.transcribe_chunk_seconds,
         }
 
     # ---- 輸入路徑 1：純文字 ----

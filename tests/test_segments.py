@@ -4,8 +4,10 @@
 連續的逐字稿——時間戳要平移回整場時間，講者標籤要跨段沿用同一組。
 """
 from app.transcription.segments import (
+    chunk_hint,
     collect_speakers,
     format_time,
+    normalize_timestamps,
     parse_time_label,
     shift_timestamps,
     speaker_of,
@@ -100,3 +102,76 @@ def test_shift_timestamps_marks_segment_start_when_model_gave_none():
 def test_shift_timestamps_leaves_unmarked_lines_alone():
     text = "[0:05] 講者A：有標時間\n這行沒有時間標記"
     assert shift_timestamps(text, 60) == "[1:05] 講者A：有標時間\n這行沒有時間標記"
+
+
+# ---- 畸形時間戳容錯 ----
+# 實測 gemini-flash-lite 開場第一行常吐出「[00]」而不是「[0:00]」。
+# 不認得的話會被當成「沒有時間標記」，分段平移時又補一個上去 → 兩個時間戳疊在一起。
+
+def test_bare_number_timestamp_is_recognised():
+    assert speaker_of("[00] 講者A：開場") == "講者A"
+    assert parse_time_label("00") == 0
+    assert parse_time_label("15") == 15
+
+
+def test_bare_number_timestamp_shifts_without_duplicating():
+    assert shift_timestamps("[00] 開頭那一大段", 240) == "[4:00] 開頭那一大段"
+    # 回歸測試：修正前會變成 "[4:00] [00] 開頭那一大段"
+    assert "[00]" not in shift_timestamps("[00] 開頭那一大段", 240)
+
+
+def test_normalize_rewrites_malformed_marker_without_changing_time():
+    """整份轉錄不會經過平移，也要把 [00] 正規化成前端認得的格式。"""
+    assert normalize_timestamps("[00] 第一句") == "[0:00] 第一句"
+    assert normalize_timestamps("[75] 第一句") == "[1:15] 第一句"
+
+
+def test_normalize_leaves_well_formed_and_unmarked_lines_alone():
+    assert normalize_timestamps("[1:02] 好的") == "[1:02] 好的"
+    assert normalize_timestamps("沒有時間標記") == "沒有時間標記"
+
+
+def test_normalize_never_prepends_a_marker():
+    """normalize 只改寫既有標記，不像 shift 會在段首補標記。"""
+    assert normalize_timestamps("第一行\n第二行") == "第一行\n第二行"
+
+
+# ---- 分段提示 ----
+
+def test_chunk_hint_always_demands_speaker_labels():
+    """主 prompt 允許「整段同一人可不標註」，分段模式要關掉這個例外。"""
+    hint = chunk_hint([])
+    assert "只有一位講者" in hint and "不可省略" in hint
+
+
+def test_chunk_hint_appends_known_speakers_when_available():
+    hint = chunk_hint(["講者A", "講者B"])
+    assert "不可省略" in hint          # 仍然要求標註
+    assert "講者A、講者B" in hint      # 且沿用既有標籤
+
+
+# ---- 單位數時間戳（模型實際會吐 [0:1]）----
+# 認不得的話會連鎖出三個問題：時間解析不到、平移時疊上第二個時間戳、
+# 講者擷取被時間戳的冒號截斷成「[0」而污染跨段講者清單。
+
+def test_single_digit_second_is_recognised():
+    assert normalize_timestamps("[0:1] 第一句") == "[0:01] 第一句"
+    assert normalize_timestamps("[14:4] 尾聲") == "[14:04] 尾聲"
+
+
+def test_single_digit_second_does_not_break_speaker_extraction():
+    assert speaker_of("[0:1] 講者A：內容") == "講者A"
+    assert speaker_of("[14:4] 講者B：內容") == "講者B"
+
+
+def test_single_digit_second_shifts_without_duplicating():
+    assert shift_timestamps("[0:1] 開場", 240) == "[4:01] 開場"
+    assert "[0:1]" not in shift_timestamps("[0:1] 開場", 240)
+
+
+def test_bracket_residue_never_becomes_a_speaker_name():
+    """萬一又冒出沒被認出的時間戳寫法，也不能把「[0」當成講者存進清單。"""
+    assert speaker_of("[0:1:2:3] 講者A：內容") is None
+    known = []
+    collect_speakers("[9:9:9:9] 講者A：內容", known)
+    assert known == []

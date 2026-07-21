@@ -18,9 +18,10 @@ from app.gemini_keys import KeyPool, call_with_rotation
 from app.glossary import glossary_prompt_line
 from app.transcription import media
 from app.transcription.segments import (
+    chunk_hint,
     collect_speakers,
+    normalize_timestamps,
     shift_timestamps,
-    speaker_hint,
 )
 
 logger = logging.getLogger(__name__)
@@ -99,7 +100,7 @@ class GeminiTranscriber:
 
         if on_progress:
             on_progress(0.1, "")
-        text = self._transcribe_one(audio_path, hint)
+        text = normalize_timestamps(self._transcribe_one(audio_path, hint))
         if on_progress:
             on_progress(1.0, text)
         return text
@@ -129,10 +130,13 @@ class GeminiTranscriber:
         try:
             for index, chunk in enumerate(chunks):
                 offset = index * self.chunk_seconds
-                # 第一段用呼叫端給的 hint；後續段改帶「已出現的講者」提示，
-                # 否則模型每段都會把講者重新從 A 編號
-                chunk_hint = speaker_hint(speakers) if index else hint
-                text = self._transcribe_one(chunk, chunk_hint)
+                # 每一段都要帶分段提示（含「即使只有一位講者也要標註」），
+                # 並附上已出現的講者清單讓後續段沿用同一組標籤。
+                # 第一段若沒標講者，後面就沒有清單可沿用，整條一致性會失效
+                this_hint = chunk_hint(speakers)
+                if hint:  # 呼叫端另外給的提示（即時聆聽跨 session 用）附在後面
+                    this_hint += hint
+                text = self._transcribe_one(chunk, this_hint)
                 if not text:
                     continue
                 text = shift_timestamps(text, offset)
