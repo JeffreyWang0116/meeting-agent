@@ -29,6 +29,9 @@ class Settings:
     whisper_model: str | None = None
     whisper_device: str | None = None
     live_chunk_seconds: int = 45
+    # 上傳的長音檔分段轉錄的每段秒數（0＝不分段，整份送出）。
+    # 實測整份送出 17 分鐘錄音時，Gemini 會整份放棄講者標註、時間戳也會漂掉
+    transcribe_chunk_seconds: int = 240
     data_dir: Path = field(default_factory=lambda: BASE_DIR / "data")
     # Firebase 金鑰：任一有值就用 Firestore 雲端儲存，否則用本地 JSON
     firebase_credentials_json: str | None = None  # service account JSON 字串（Render 用）
@@ -56,6 +59,7 @@ def get_settings() -> Settings:
         whisper_model=os.environ.get("WHISPER_MODEL") or None,
         whisper_device=os.environ.get("WHISPER_DEVICE") or None,
         live_chunk_seconds=int(os.environ.get("LIVE_CHUNK_SECONDS", "45")),
+        transcribe_chunk_seconds=int(os.environ.get("TRANSCRIBE_CHUNK_SECONDS", "240")),
         data_dir=Path(os.environ.get("DATA_DIR", BASE_DIR / "data")),
         firebase_credentials_json=os.environ.get("FIREBASE_CREDENTIALS_JSON") or None,
         firebase_credentials_file=(

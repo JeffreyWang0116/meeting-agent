@@ -51,6 +51,7 @@
 | 用途 | 環境變數 | 預設模型 | 免費額度（每專案每日）|
 |------|----------|----------|----------------------|
 | 音訊轉錄 | `TRANSCRIBE_MODEL` | `gemini-flash-lite-latest` | 高（Flash Lite 約 500 次/日、15 次/分）|
+| 長音檔分段秒數 | `TRANSCRIBE_CHUNK_SECONDS` | `240`（0＝不分段） | 每段各算一次轉錄請求 |
 | 會議分析、跨會議問答 | `GEMINI_MODEL` | `gemini-flash-lite-latest` | 同上 |
 | 錯字校正（選用） | `CORRECT_MODEL` | `gemini-flash-lite-latest` | 同上 |
 
@@ -61,6 +62,8 @@
 > **品質 vs 額度**：想要更好的分析品質，可把 `GEMINI_MODEL` 設為 `gemini-3.5-flash`（推理較強，但免費層每日僅 20 次，適合少量分析）。
 >
 > **多人會議的講者分辨**：轉錄的 prompt 已強力要求標註講者，但實測 `gemini-flash-lite` 對「誰在講話」的辨識仍不穩定，3 人以上時常被併成一兩位。需要準確標出多位講者時，把 `TRANSCRIBE_MODEL` 設為 `gemini-flash-latest`（可正確分出多位講者，代價是免費每日額度較低）。
+>
+> **長音檔會自動分段轉錄**：實測把整份 17 分鐘的質詢錄音丟給 `gemini-flash-lite`，講者標註會**整份消失**、時間戳還會漂到比實際長度多 3 分鐘；同一支影片只取前 3 分鐘卻能正確分出講者A/B/C。模型在長音訊上顯然會放棄逐句標註，所以超過 6 分鐘的音檔會先用 ffmpeg 切成每段 `TRANSCRIBE_CHUNK_SECONDS`（預設 240 秒）再逐段轉錄，最後把時間戳平移回整場時間、講者標籤跨段沿用同一組。代價是每段各算一次 API 請求（17 分鐘的檔約 5 次）。設成 `0` 可關閉分段、回到整份送出的舊行為。
 
 ### 可靠性
 
@@ -176,9 +179,10 @@ app/
 │   └── reminder_agent.py     # 主動提醒（逾期/將到期/未指派掃描）
 ├── transcription/
 │   ├── transcriber.py        # 本地 faster-whisper 轉錄
-│   ├── gemini_transcriber.py # 雲端 Gemini 轉錄（含 [分:秒] 時間戳 prompt）
-│   ├── live_session.py       # 即時聆聽 session：並發配位、講者一致性、時間戳平移
-│   └── media.py              # ffmpeg 抽音軌
+│   ├── gemini_transcriber.py # 雲端 Gemini 轉錄（時間戳 prompt、長音檔自動分段）
+│   ├── live_session.py       # 即時聆聽 session：並發配位、逐段累積
+│   ├── segments.py           # 分段結果縫合：時間戳平移、跨段講者一致性
+│   └── media.py              # ffmpeg 抽音軌、取長度、切段
 ├── stores/               # TaskStore 介面 + 本地 JSON / Firestore 兩種實作
 ├── jobs.py               # 音檔/影片背景轉錄工作佇列
 ├── rag.py                # 跨會議問答（向量嵌入 + 語意檢索 + AskAgent）

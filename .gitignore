@@ -2,6 +2,10 @@
 __pycache__/
 *.pyc
 .env
+# .env 的任何衍生檔（.env.bak、.env.local…）都含金鑰，一律排除；
+# .env.example 是不含金鑰的範本，用 ! 保留追蹤
+.env.*
+!.env.example
 firebase-service-account.json
 *serviceaccount*.json
 data/output/

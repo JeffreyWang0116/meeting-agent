@@ -184,6 +184,7 @@ def create_app(
                 api_keys=settings.gemini_api_keys,
                 model=settings.transcribe_model,
                 glossary=glossary.terms,
+                chunk_seconds=settings.transcribe_chunk_seconds,
             )
         else:
             transcriber = Transcriber(

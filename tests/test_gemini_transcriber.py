@@ -120,3 +120,170 @@ def test_transcribe_prompt_asks_for_timestamps():
 
     assert "[1:02]" in _TRANSCRIBE_PROMPT
     assert "時間" in _TRANSCRIBE_PROMPT
+
+
+# ---- 長音檔分段轉錄 ----
+# 實測整份送出 17 分鐘錄音時，Gemini 會整份放棄講者標註、時間戳也會漂掉；
+# 同一支影片只取前 3 分鐘則講者分得又快又準。以下驗證分段機制的縫合行為。
+
+class FakeChunkedSetup:
+    """把 media 的長度偵測與切段換成假的，不需要真的 ffmpeg 與音檔。"""
+
+    def __init__(self, monkeypatch, tmp_path, duration, chunk_texts):
+        from app.transcription import media
+
+        self.chunk_dir = tmp_path / "src_chunks"
+        self.chunk_dir.mkdir()
+        self.chunks = []
+        for i in range(len(chunk_texts)):
+            c = self.chunk_dir / f"chunk_{i:03d}.wav"
+            c.write_bytes(b"RIFF-fake")
+            self.chunks.append(c)
+        self.hints = []
+
+        monkeypatch.setattr(media, "ffmpeg_available", lambda: True)
+        monkeypatch.setattr(media, "audio_duration", lambda p: duration)
+        monkeypatch.setattr(media, "split_audio", lambda p, secs, output_dir=None: list(self.chunks))
+
+        self.texts = dict(zip((str(c) for c in self.chunks), chunk_texts))
+
+    def transcriber(self, chunk_seconds=240):
+        setup = self
+
+        class Recording(GeminiTranscriber):
+            def _transcribe_one(self, audio_path, hint):
+                setup.hints.append(hint)
+                return setup.texts[str(audio_path)]
+
+        return Recording(api_key="k", chunk_seconds=chunk_seconds)
+
+
+def test_long_audio_is_chunked_and_timestamps_shifted(monkeypatch, tmp_path):
+    """第二段的 [0:05] 是它自己的第 5 秒，接回整場後應該變成 [4:05]。"""
+    src = tmp_path / "long.wav"
+    src.write_bytes(b"RIFF-fake")
+    setup = FakeChunkedSetup(monkeypatch, tmp_path, duration=600, chunk_texts=[
+        "[0:05] 講者A：第一段開頭",
+        "[0:05] 講者A：第二段開頭",
+    ])
+    text = setup.transcriber(chunk_seconds=240).transcribe(src)
+    assert text == "[0:05] 講者A：第一段開頭\n[4:05] 講者A：第二段開頭"
+
+
+def test_known_speakers_passed_as_hint_to_later_chunks(monkeypatch, tmp_path):
+    """後續段要帶「已出現的講者」提示，否則模型每段都從講者A重新編號。"""
+    src = tmp_path / "long.wav"
+    src.write_bytes(b"RIFF-fake")
+    setup = FakeChunkedSetup(monkeypatch, tmp_path, duration=600, chunk_texts=[
+        "[0:00] 講者A：先講\n[0:30] 講者B：我補充",
+        "[0:10] 講者A：再來",
+    ])
+    setup.transcriber().transcribe(src)
+    assert setup.hints[0] is None          # 第一段沒有先前的講者可帶
+    assert "講者A、講者B" in setup.hints[1]  # 第二段要沿用前面的標籤
+
+
+def test_short_audio_is_not_chunked(monkeypatch, tmp_path):
+    """短音檔整份送出品質就很好，不必多花好幾次 API 請求。"""
+    src = tmp_path / "short.wav"
+    src.write_bytes(b"RIFF-fake")
+    from app.transcription import media
+
+    monkeypatch.setattr(media, "ffmpeg_available", lambda: True)
+    monkeypatch.setattr(media, "audio_duration", lambda p: 120)
+    called = []
+    monkeypatch.setattr(media, "split_audio", lambda *a, **k: called.append(1) or [])
+
+    t = GeminiTranscriber(
+        api_key="k", chunk_seconds=240,
+        upload=lambda p: {"h": str(p)}, generate=lambda h: "[0:01] 講者A：很短",
+    )
+    assert t.transcribe(src) == "[0:01] 講者A：很短"
+    assert called == []  # 完全沒有動用分段
+
+
+def test_chunking_disabled_when_chunk_seconds_zero(monkeypatch, tmp_path):
+    src = tmp_path / "long.wav"
+    src.write_bytes(b"RIFF-fake")
+    from app.transcription import media
+
+    monkeypatch.setattr(media, "ffmpeg_available", lambda: True)
+    monkeypatch.setattr(media, "audio_duration", lambda p: 6000)
+    called = []
+    monkeypatch.setattr(media, "split_audio", lambda *a, **k: called.append(1) or [])
+
+    t = GeminiTranscriber(
+        api_key="k", chunk_seconds=0,
+        upload=lambda p: {"h": str(p)}, generate=lambda h: "整份轉錄",
+    )
+    assert t.transcribe(src) == "整份轉錄"
+    assert called == []
+
+
+def test_falls_back_to_whole_file_without_ffmpeg(monkeypatch, tmp_path):
+    """沒有 ffmpeg 就切不了段，退回整份轉錄——品質較差但不該整個失敗。"""
+    src = tmp_path / "long.wav"
+    src.write_bytes(b"RIFF-fake")
+    from app.transcription import media
+
+    monkeypatch.setattr(media, "ffmpeg_available", lambda: False)
+    t = GeminiTranscriber(
+        api_key="k", chunk_seconds=240,
+        upload=lambda p: {"h": str(p)}, generate=lambda h: "整份轉錄",
+    )
+    assert t.transcribe(src) == "整份轉錄"
+
+
+def test_split_failure_falls_back_to_whole_file(monkeypatch, tmp_path):
+    src = tmp_path / "long.wav"
+    src.write_bytes(b"RIFF-fake")
+    from app.transcription import media
+
+    def boom(*a, **k):
+        raise media.MediaError("ffmpeg 掛了")
+
+    monkeypatch.setattr(media, "ffmpeg_available", lambda: True)
+    monkeypatch.setattr(media, "audio_duration", lambda p: 6000)
+    monkeypatch.setattr(media, "split_audio", boom)
+    t = GeminiTranscriber(
+        api_key="k", chunk_seconds=240,
+        upload=lambda p: {"h": str(p)}, generate=lambda h: "整份轉錄",
+    )
+    assert t.transcribe(src) == "整份轉錄"
+
+
+def test_empty_chunks_are_skipped(monkeypatch, tmp_path):
+    """中間有靜音段轉不出字時，不該在逐字稿留下空行。"""
+    src = tmp_path / "long.wav"
+    src.write_bytes(b"RIFF-fake")
+    setup = FakeChunkedSetup(monkeypatch, tmp_path, duration=900, chunk_texts=[
+        "[0:05] 講者A：有內容", "", "[0:05] 講者A：後面也有",
+    ])
+    text = setup.transcriber().transcribe(src)
+    assert text == "[0:05] 講者A：有內容\n[8:05] 講者A：後面也有"
+
+
+def test_progress_reported_per_chunk(monkeypatch, tmp_path):
+    """長檔要能看到進度與逐段累積的預覽，不是等十幾分鐘才一次跳完。"""
+    src = tmp_path / "long.wav"
+    src.write_bytes(b"RIFF-fake")
+    setup = FakeChunkedSetup(monkeypatch, tmp_path, duration=900, chunk_texts=[
+        "[0:00] 講者A：一", "[0:00] 講者A：二", "[0:00] 講者A：三",
+    ])
+    calls = []
+    setup.transcriber().transcribe(src, on_progress=lambda f, t: calls.append((f, t)))
+    assert [round(f, 2) for f, _ in calls] == [0.33, 0.67, 1.0]
+    # 第一段之外都要自帶換行，jobs.py 串接預覽時才不會黏成一行
+    assert calls[0][1] == "[0:00] 講者A：一"
+    assert calls[1][1].startswith("\n")
+
+
+def test_chunk_files_cleaned_up(monkeypatch, tmp_path):
+    """切出來的暫存片段用完要刪掉，長檔會佔不少磁碟。"""
+    src = tmp_path / "long.wav"
+    src.write_bytes(b"RIFF-fake")
+    setup = FakeChunkedSetup(monkeypatch, tmp_path, duration=600, chunk_texts=[
+        "[0:00] 講者A：一", "[0:00] 講者A：二",
+    ])
+    setup.transcriber().transcribe(src)
+    assert not setup.chunk_dir.exists()
