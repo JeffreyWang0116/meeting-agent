@@ -20,9 +20,11 @@ from app.transcription import media
 from app.transcription.segments import (
     chunk_hint,
     collect_speakers,
+    drop_lines_before,
     normalize_timestamps,
     shift_timestamps,
     speaker_label_ratio,
+    transcript_tail,
 )
 
 logger = logging.getLogger(__name__)
@@ -73,6 +75,7 @@ class GeminiTranscriber:
         label_retries: int = 2,
         fallback_model: str | None = None,
         max_fallback_chunks: int = 1,
+        overlap_seconds: int = 20,
     ):
         # 多把 key 輪替（429 換下一把）；單把 api_key 為向後相容寫法
         self._pool = KeyPool(api_keys if api_keys else [api_key])
@@ -96,6 +99,10 @@ class GeminiTranscriber:
         # Flash 只有 20 次——備援跑一次就佔掉每日 Flash 額度的 5%，而 lite 重試
         # 一次只佔 0.2%。所以預設把預算花在 label_retries，備援只留 1 次保底
         self.max_fallback_chunks = max_fallback_chunks
+        # 每段往前多抓幾秒當重疊。模型沒聽過前一段，光給講者名單它無從對應
+        # 嗓音，只能從自己這段重新編號——同一個人跨段就會換標籤。重疊讓它
+        # 聽得到前一段結尾，配合提示裡的對照樣本才能接得起來
+        self.overlap_seconds = overlap_seconds
 
     def build_prompt(self, hint: str | None = None) -> str:
         prompt = _TRANSCRIBE_PROMPT
@@ -133,7 +140,9 @@ class GeminiTranscriber:
         if duration is None or duration <= DEFAULT_CHUNK_THRESHOLD_SECONDS:
             return []
         try:
-            chunks = media.split_audio(audio_path, self.chunk_seconds)
+            chunks = media.split_audio(
+                audio_path, self.chunk_seconds, overlap_seconds=self.overlap_seconds
+            )
         except media.MediaError as exc:
             # 切不動就照舊整份送出：品質可能較差，但不該讓整個轉錄失敗
             logger.warning("音檔分段失敗（%s），改為整份轉錄", exc)
@@ -146,13 +155,20 @@ class GeminiTranscriber:
         speakers: list[str] = []
         fallback_used = 0  # 這個檔案已經用掉幾次強模型（受 max_fallback_chunks 限制）
         chunk_dir = chunks[0].parent
+        previous_tail = ""
         try:
             for index, chunk in enumerate(chunks):
-                offset = index * self.chunk_seconds
+                # own_start：本段「負責」的內容從整場的第幾秒開始
+                # audio_start：本段音訊實際的起點（第二段起會往前多抓重疊）
+                own_start = index * self.chunk_seconds
+                audio_start = (
+                    own_start if index == 0
+                    else max(0, own_start - self.overlap_seconds)
+                )
                 # 每一段都要帶分段提示（含「即使只有一位講者也要標註」），
-                # 並附上已出現的講者清單讓後續段沿用同一組標籤。
+                # 並附上已出現的講者清單與重疊處的對照樣本讓標籤接得起來。
                 # 第一段若沒標講者，後面就沒有清單可沿用，整條一致性會失效
-                this_hint = chunk_hint(speakers)
+                this_hint = chunk_hint(speakers, previous_tail)
                 if hint:  # 呼叫端另外給的提示（即時聆聽跨 session 用）附在後面
                     this_hint += hint
                 text, used_fallback = self._transcribe_labelled(
@@ -162,8 +178,13 @@ class GeminiTranscriber:
                     fallback_used += 1
                 if not text:
                     continue
-                text = shift_timestamps(text, offset)
+                text = shift_timestamps(text, audio_start)
+                if index:  # 重疊那段前一輪已經轉過了，依絕對時間濾掉避免重複
+                    text = drop_lines_before(text, own_start)
+                if not text.strip():
+                    continue
                 collect_speakers(text, speakers)
+                previous_tail = transcript_tail(text)
                 parts.append(text)
                 if on_progress:
                     # jobs.py 會把每次回報的文字接起來當即時預覽，

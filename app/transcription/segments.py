@@ -96,18 +96,52 @@ def speaker_hint(speakers: list[str]) -> str | None:
     )
 
 
-def chunk_hint(speakers: list[str]) -> str:
+def transcript_tail(text: str, max_lines: int = 6) -> str:
+    """取逐字稿結尾的幾行，當作下一段的對照樣本。"""
+    lines = [ln for ln in text.split("\n") if ln.strip()]
+    return "\n".join(lines[-max_lines:])
+
+
+def drop_lines_before(text: str, seconds: float) -> str:
+    """丟掉時間戳早於 seconds 的行（時間戳須已平移成整場時間）。
+
+    分段時每段會往前多抓一小段音訊當重疊，好讓模型聽得到前一段的聲音來對應
+    講者。那段重疊會被轉錄兩次，這裡依絕對時間濾掉——比模糊比對文字可靠，
+    因為兩次轉錄的用字不會完全一樣，但時間軸是同一條。
+    沒有時間戳的行一律保留（無從判斷，寧可留著）。
+    """
+    kept = []
+    for line in text.split("\n"):
+        m = TIME_PREFIX_RE.match(line)
+        if m and parse_time_label(m.group(1)) < seconds:
+            continue
+        kept.append(line)
+    return "\n".join(kept)
+
+
+def chunk_hint(speakers: list[str], previous_tail: str = "") -> str:
     """長音檔分段轉錄時，每一段都要帶的提示。
 
     主 prompt 允許「整段確定同一位講者時可以不標註」——這個例外在分段轉錄
     下會出事：開場那段常是主席單人宣讀，模型就整段不標講者，於是第一段沒有
     任何標籤，後續段也拿不到可沿用的講者清單，跨段一致性整條失效。
     所以分段模式要明確把這個例外關掉。
+
+    previous_tail：前一段結尾的逐字稿（本段開頭的重疊音訊就是這些內容）。
+    只給講者名單沒有用——模型沒聽過前一段，無從知道「講者C」是哪個嗓音，
+    只能從自己這段重新編號，同一個人就會換標籤。附上重疊處的對照樣本，
+    模型才有辦法把聲音對回既有標籤。
     """
     text = (
         "這是一段較長錄音切出來的片段，前後還有其他片段。"
         "即使本片段從頭到尾只有一位講者，也務必在每一句開頭標註講者，不可省略。"
     )
+    if previous_tail:
+        text += (
+            "本片段的開頭與前一段重疊，那段重疊的內容在前一段被轉錄成："
+            f"\n{previous_tail}\n"
+            "請比對聲音，把同一個人對應回上面用過的講者標籤，不要重新編號。"
+        )
     known = speaker_hint(speakers)
     return text + known if known else text
 

@@ -6,12 +6,14 @@
 from app.transcription.segments import (
     chunk_hint,
     collect_speakers,
+    drop_lines_before,
     format_time,
     normalize_timestamps,
     parse_time_label,
     shift_timestamps,
     speaker_label_ratio,
     speaker_of,
+    transcript_tail,
     speaker_hint,
 )
 
@@ -198,3 +200,48 @@ def test_label_ratio_of_empty_text_is_not_a_failure():
     """空白段（靜音）不該被當成標註失敗而觸發重試。"""
     assert speaker_label_ratio("") == 1.0
     assert speaker_label_ratio("   ") == 1.0
+
+
+# ---- 重疊區去重與跨段對照樣本 ----
+# 模型沒聽過前一段，光給講者名單無從對應嗓音，同一個人跨段就會換標籤。
+# 解法是每段往前多抓一小段音訊，並把前一段結尾的逐字稿當對照樣本給它。
+
+def test_drop_lines_before_removes_overlap_region():
+    """重疊那段前一輪已經轉過了，依絕對時間濾掉避免內容重複。"""
+    text = "[3:45] 講者C：重疊區的話\n[3:58] 講者C：還是重疊區\n[4:02] 講者A：這才是本段的內容"
+    assert drop_lines_before(text, 240) == "[4:02] 講者A：這才是本段的內容"
+
+
+def test_drop_lines_before_keeps_boundary_line():
+    assert drop_lines_before("[4:00] 剛好在界線上", 240) == "[4:00] 剛好在界線上"
+
+
+def test_drop_lines_before_keeps_untimed_lines():
+    """沒有時間戳就無從判斷，寧可留著也不要誤刪內容。"""
+    text = "沒有時間戳\n[3:50] 重疊區\n[4:10] 本段"
+    assert drop_lines_before(text, 240) == "沒有時間戳\n[4:10] 本段"
+
+
+def test_transcript_tail_returns_last_lines():
+    text = "\n".join(f"[0:{i:02d}] 講者A：第{i}句" for i in range(10))
+    tail = transcript_tail(text, max_lines=3)
+    assert tail.count("\n") == 2
+    assert "第9句" in tail and "第7句" in tail and "第6句" not in tail
+
+
+def test_transcript_tail_ignores_blank_lines():
+    assert transcript_tail("[0:00] 一\n\n\n[0:05] 二", max_lines=2) == "[0:00] 一\n[0:05] 二"
+
+
+def test_chunk_hint_includes_previous_tail_for_voice_matching():
+    """提示要附上重疊處的對照樣本，模型才能把聲音對回既有標籤。"""
+    hint = chunk_hint(["講者A", "講者C"], previous_tail="[3:55] 講者C：前一段的結尾")
+    assert "[3:55] 講者C：前一段的結尾" in hint
+    assert "重疊" in hint and "不要重新編號" in hint
+
+
+def test_chunk_hint_without_tail_is_unchanged():
+    """第一段沒有前文可對照，不該憑空提到重疊。"""
+    hint = chunk_hint([])
+    assert "重疊" not in hint
+    assert "不可省略" in hint  # 但仍要求標註講者

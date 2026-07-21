@@ -143,11 +143,16 @@ class FakeChunkedSetup:
 
         monkeypatch.setattr(media, "ffmpeg_available", lambda: True)
         monkeypatch.setattr(media, "audio_duration", lambda p: duration)
-        monkeypatch.setattr(media, "split_audio", lambda p, secs, output_dir=None: list(self.chunks))
+        monkeypatch.setattr(
+            media, "split_audio",
+            lambda p, secs, output_dir=None, overlap_seconds=0: list(self.chunks),
+        )
 
         self.texts = dict(zip((str(c) for c in self.chunks), chunk_texts))
 
-    def transcriber(self, chunk_seconds=240):
+    def transcriber(self, chunk_seconds=240, overlap_seconds=0):
+        """overlap_seconds 預設 0：多數測試要隔離的是縫合邏輯本身，
+        重疊行為另有專屬測試。"""
         setup = self
 
         class Recording(GeminiTranscriber):
@@ -155,7 +160,9 @@ class FakeChunkedSetup:
                 setup.hints.append(hint)
                 return setup.texts[str(audio_path)]
 
-        return Recording(api_key="k", chunk_seconds=chunk_seconds)
+        return Recording(
+            api_key="k", chunk_seconds=chunk_seconds, overlap_seconds=overlap_seconds
+        )
 
 
 def test_long_audio_is_chunked_and_timestamps_shifted(monkeypatch, tmp_path):
@@ -500,3 +507,61 @@ def test_successful_chunks_do_not_consume_fallback_budget(monkeypatch, tmp_path)
     Tracking(api_key="k", chunk_seconds=240, label_retries=1, model="lite",
              fallback_model="strong", max_fallback_chunks=2).transcribe(src)
     assert used.count("strong") == 2  # 兩段失敗的都用得到，額度沒被成功的那段吃掉
+
+
+# ---- 重疊分段（跨段講者一致性）----
+# 模型沒聽過前一段，光給講者名單無從對應嗓音，同一個人跨段就會換標籤。
+# 每段往前多抓一小段音訊，並把前一段結尾的逐字稿當對照樣本給它。
+
+def test_overlap_region_is_deduplicated(monkeypatch, tmp_path):
+    """第二段往前多抓 20 秒，那段內容前一輪已經轉過，不該重複出現。"""
+    src = tmp_path / "long.wav"
+    src.write_bytes(b"RIFF-fake")
+    setup = FakeChunkedSetup(monkeypatch, tmp_path, duration=600, chunk_texts=[
+        "[0:05] 講者A：第一段內容",
+        # 這段音訊從 3:40 開始（240-20），所以 [0:10] = 3:50 落在重疊區，
+        # [0:30] = 4:10 才是本段真正負責的內容
+        "[0:10] 講者A：重疊區重複的話\n[0:30] 講者B：本段真正的內容",
+    ])
+    text = setup.transcriber(chunk_seconds=240, overlap_seconds=20).transcribe(src)
+    assert "重疊區重複的話" not in text
+    assert "[4:10] 講者B：本段真正的內容" in text
+    assert "[0:05] 講者A：第一段內容" in text
+
+
+def test_previous_tail_passed_to_next_chunk_hint(monkeypatch, tmp_path):
+    """後續段的提示要帶前一段結尾的逐字稿，模型才能把聲音對回既有標籤。"""
+    src = tmp_path / "long.wav"
+    src.write_bytes(b"RIFF-fake")
+    setup = FakeChunkedSetup(monkeypatch, tmp_path, duration=600, chunk_texts=[
+        "[0:05] 講者A：開頭\n[3:55] 講者C：第一段的最後一句",
+        "[0:30] 講者C：接下去講",
+    ])
+    setup.transcriber(chunk_seconds=240, overlap_seconds=20).transcribe(src)
+    assert "第一段的最後一句" in setup.hints[1]
+    assert "不要重新編號" in setup.hints[1]
+    assert "重疊" not in setup.hints[0]  # 第一段沒有前文可對照
+
+
+def test_overlap_disabled_keeps_plain_offsets(monkeypatch, tmp_path):
+    """overlap=0 時回到單純的分段位移，不做去重。"""
+    src = tmp_path / "long.wav"
+    src.write_bytes(b"RIFF-fake")
+    setup = FakeChunkedSetup(monkeypatch, tmp_path, duration=600, chunk_texts=[
+        "[0:05] 講者A：一", "[0:05] 講者A：二",
+    ])
+    text = setup.transcriber(chunk_seconds=240, overlap_seconds=0).transcribe(src)
+    assert text == "[0:05] 講者A：一\n[4:05] 講者A：二"
+
+
+def test_chunk_fully_inside_overlap_is_skipped(monkeypatch, tmp_path):
+    """整段內容都落在重疊區時（模型只轉出重複的部分），跳過而不是留空行。"""
+    src = tmp_path / "long.wav"
+    src.write_bytes(b"RIFF-fake")
+    setup = FakeChunkedSetup(monkeypatch, tmp_path, duration=600, chunk_texts=[
+        "[0:05] 講者A：第一段",
+        "[0:05] 講者A：全都在重疊區",  # 3:45，早於 4:00
+    ])
+    text = setup.transcriber(chunk_seconds=240, overlap_seconds=20).transcribe(src)
+    assert text == "[0:05] 講者A：第一段"
+    assert not text.endswith("\n")

@@ -188,6 +188,7 @@ def create_app(
                 fallback_model=settings.transcribe_fallback_model,
                 max_fallback_chunks=settings.transcribe_max_fallback_chunks,
                 label_retries=settings.transcribe_label_retries,
+                overlap_seconds=settings.transcribe_overlap_seconds,
             )
         else:
             transcriber = Transcriber(

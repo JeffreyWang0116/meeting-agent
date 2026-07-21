@@ -43,6 +43,9 @@ class Settings:
     # 標註率可能 20% 也可能 100%），多試幾次的累積成功率遠比換模型划算：
     # lite 一次只佔每日額度 0.2%，Flash 一次佔 5%
     transcribe_label_retries: int = 2
+    # 每段往前多抓幾秒當重疊：模型沒聽過前一段，光給講者名單無從對應嗓音，
+    # 同一個人跨段就會換標籤。重疊＋提示裡的對照樣本才接得起來（0＝不重疊）
+    transcribe_overlap_seconds: int = 20
     data_dir: Path = field(default_factory=lambda: BASE_DIR / "data")
     # Firebase 金鑰：任一有值就用 Firestore 雲端儲存，否則用本地 JSON
     firebase_credentials_json: str | None = None  # service account JSON 字串（Render 用）
@@ -78,6 +81,9 @@ def get_settings() -> Settings:
             os.environ.get("TRANSCRIBE_MAX_FALLBACK_CHUNKS", "1")
         ),
         transcribe_label_retries=int(os.environ.get("TRANSCRIBE_LABEL_RETRIES", "2")),
+        transcribe_overlap_seconds=int(
+            os.environ.get("TRANSCRIBE_OVERLAP_SECONDS", "20")
+        ),
         data_dir=Path(os.environ.get("DATA_DIR", BASE_DIR / "data")),
         firebase_credentials_json=os.environ.get("FIREBASE_CREDENTIALS_JSON") or None,
         firebase_credentials_file=(

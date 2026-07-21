@@ -90,25 +90,45 @@ def audio_duration(path: str | Path) -> float | None:
 
 
 def split_audio(
-    input_path: str | Path, chunk_seconds: int, output_dir: str | Path | None = None
+    input_path: str | Path,
+    chunk_seconds: int,
+    output_dir: str | Path | None = None,
+    overlap_seconds: int = 0,
 ) -> list[Path]:
     """把音檔切成每段 chunk_seconds 秒，回傳依序排好的片段路徑。
 
-    用 ffmpeg 的 segment muxer 一次切完（比逐段 seek 快得多）。輸出統一是
-    單聲道 16kHz WAV，與 extract_audio 一致。
+    overlap_seconds > 0 時，第二段起會往前多抓這麼多秒——讓轉錄模型聽得到
+    前一段的結尾，才有辦法把同一個嗓音對應回既有的講者標籤（只給名單沒用，
+    模型沒聽過前一段）。重疊的內容由呼叫端依時間戳濾掉。
+
+    輸出統一是單聲道 16kHz WAV，與 extract_audio 一致。
     """
     input_path = Path(input_path)
     out_dir = Path(output_dir) if output_dir else input_path.parent / f"{input_path.stem}_chunks"
     out_dir.mkdir(parents=True, exist_ok=True)
-    pattern = out_dir / "chunk_%03d.wav"
-    cmd = [
-        _ffmpeg_cmd() or "ffmpeg", "-y",
-        "-i", str(input_path),
-        "-vn", "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le",
-        "-f", "segment", "-segment_time", str(chunk_seconds),
-        str(pattern),
-    ]
-    proc = subprocess.run(cmd, capture_output=True, text=True, errors="replace")
-    if proc.returncode != 0:
-        raise MediaError(f"ffmpeg 分段失敗：{(proc.stderr or '').strip()[-500:]}")
-    return sorted(out_dir.glob("chunk_*.wav"))
+    duration = audio_duration(input_path)
+    if duration is None:
+        raise MediaError("取不到音檔長度，無法分段")
+
+    ffmpeg = _ffmpeg_cmd() or "ffmpeg"
+    paths: list[Path] = []
+    index, own_start = 0, 0.0
+    while own_start < duration:
+        # 第一段不需要重疊（前面沒有東西可對照）
+        seek = own_start if index == 0 else max(0.0, own_start - overlap_seconds)
+        length = own_start + chunk_seconds - seek
+        dest = out_dir / f"chunk_{index:03d}.wav"
+        cmd = [
+            ffmpeg, "-y",
+            "-ss", f"{seek:.3f}", "-t", f"{length:.3f}",
+            "-i", str(input_path),
+            "-vn", "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le",
+            str(dest),
+        ]
+        proc = subprocess.run(cmd, capture_output=True, text=True, errors="replace")
+        if proc.returncode != 0:
+            raise MediaError(f"ffmpeg 分段失敗：{(proc.stderr or '').strip()[-500:]}")
+        paths.append(dest)
+        own_start += chunk_seconds
+        index += 1
+    return paths
