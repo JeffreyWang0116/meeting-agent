@@ -3,8 +3,6 @@
 把歷史會議（逐字稿＋摘要卡）切塊向量化，問問題時檢索最相關片段，
 交給 Gemini 依片段回答並附上來源會議。
 """
-from pathlib import Path
-
 import pytest
 
 from app.models import MeetingAnalysis
