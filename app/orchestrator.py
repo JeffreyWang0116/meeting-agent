@@ -6,9 +6,10 @@
 Corrector 是選用的：開啟時先修掉語音辨識的同音錯字，後面的分析與存檔
 都吃校正後的版本（存進資料庫的逐字稿也是校正後的）。
 
-SpeakerNamer 把轉錄產生的「講者A/B/C」代號換成真實姓名。排在 Corrector
-之後：先修掉同音錯字，「請王委員發言」這類判斷依據才不會因為稱謂被聽錯
-（「王委員」→「黃委員」）而對應到錯的人。
+SpeakerNamer 是選用的（預設關閉）：把轉錄產生的「講者A/B/C」代號換成真實
+姓名。排在 Corrector 之後：先修掉同音錯字，「請王委員發言」這類判斷依據
+才不會因為稱謂被聽錯（「王委員」→「黃委員」）而對應到錯的人。台語等語者
+辨識不穩的錄音容易對錯，所以預設維持代號，由呼叫端明確開啟才對應姓名。
 """
 from __future__ import annotations
 
@@ -44,13 +45,16 @@ class Orchestrator:
         kind: str | None = None,
         features: set[str] | None = None,
         correct_typos: bool = False,
+        name_speakers: bool = False,
     ) -> dict:
         text = self.parser.parse(raw_text)
         corrections: list[dict] = []
         if correct_typos and self.corrector:
             text, corrections = self.corrector.correct(text)
         speaker_names: list[dict] = []
-        if self.namer:
+        # 預設不對應姓名：轉錄輸出的講者A/B/C 已可用，補真名是選用的加分項。
+        # 台語等語者辨識不穩的錄音，猜錯的名字比代號更糟，所以由呼叫端明確開啟
+        if name_speakers and self.namer:
             text, speaker_names = self.namer.name_speakers(text)
         analysis = self.decision.analyze(
             text, meeting_date=meeting_date, kind=kind, features=features

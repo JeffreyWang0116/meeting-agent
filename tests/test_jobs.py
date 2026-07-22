@@ -25,9 +25,12 @@ class FakeOrchestrator:
         self._corrected = corrected
 
     def process_transcript(
-        self, text, meeting_date=None, kind=None, features=None, correct_typos=False
+        self, text, meeting_date=None, kind=None, features=None,
+        correct_typos=False, name_speakers=False,
     ):
-        self.received.append((text, meeting_date, kind, features, correct_typos))
+        self.received.append(
+            (text, meeting_date, kind, features, correct_typos, name_speakers)
+        )
         return {
             "meeting_id": "m123",
             "analysis": {},
@@ -169,6 +172,20 @@ def test_correct_typos_flag_passed_through(tmp_path, audio_file):
     mgr = MediaJobManager(FakeTranscriber(), orch, tmp_path)
     mgr.wait(mgr.submit(audio_file, correct_typos=True), timeout=5)
     assert orch.received[0][4] is True
+
+
+def test_name_speakers_flag_passed_through(tmp_path, audio_file):
+    orch = FakeOrchestrator()
+    mgr = MediaJobManager(FakeTranscriber(), orch, tmp_path)
+    mgr.wait(mgr.submit(audio_file, name_speakers=True), timeout=5)
+    assert orch.received[0][5] is True
+
+
+def test_name_speakers_defaults_off(tmp_path, audio_file):
+    orch = FakeOrchestrator()
+    mgr = MediaJobManager(FakeTranscriber(), orch, tmp_path)
+    mgr.wait(mgr.submit(audio_file), timeout=5)
+    assert orch.received[0][5] is False
 
 
 def test_job_transcript_replaced_by_corrected_version(tmp_path, audio_file):

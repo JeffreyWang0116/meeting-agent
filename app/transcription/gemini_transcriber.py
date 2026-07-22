@@ -20,6 +20,7 @@ from app.transcription import media
 from app.transcription.segments import (
     chunk_hint,
     collect_speakers,
+    drop_empty_lines,
     drop_lines_before,
     normalize_timestamps,
     shift_timestamps,
@@ -90,6 +91,8 @@ class GeminiTranscriber:
         max_fallback_chunks: int = 0,
         overlap_seconds: int = 20,
         max_retry_calls: int = 10,
+        strong_model: str | None = None,
+        strong_whole_threshold: int = 0,
     ):
         # 多把 key 輪替（429 換下一把）；單把 api_key 為向後相容寫法
         self._pool = KeyPool(api_keys if api_keys else [api_key])
@@ -122,6 +125,12 @@ class GeminiTranscriber:
         # 嗓音，只能從自己這段重新編號——同一個人跨段就會換標籤。重疊讓它
         # 聽得到前一段結尾，配合提示裡的對照樣本才能接得起來
         self.overlap_seconds = overlap_seconds
+        # 長檔（duration > strong_whole_threshold 秒）改用這顆強模型整份單次
+        # 轉錄、不分段。實測台語質詢：強模型一次聽完整場的語者分辨遠優於 lite
+        # 分段，而分段會破壞它賴以分辨講者的全局脈絡。strong_whole_threshold
+        # 設 0，或 strong_model 為 None，就停用這條路徑（一律照舊 lite 分段）
+        self.strong_model = strong_model
+        self.strong_whole_threshold = strong_whole_threshold
 
     def build_prompt(self, hint: str | None = None) -> str:
         prompt = _TRANSCRIBE_PROMPT
@@ -140,24 +149,47 @@ class GeminiTranscriber:
 
     def transcribe(self, path, on_progress=None, hint: str | None = None) -> str:
         audio_path = self._ensure_audio(Path(path))
-        chunks = self._plan_chunks(audio_path)
+        duration = media.audio_duration(audio_path) if media.ffmpeg_available() else None
+
+        # 長檔：強模型整份單次轉錄（見 strong_model 的說明）
+        if self._use_strong_whole(duration):
+            return self._transcribe_whole(audio_path, on_progress, hint, self.strong_model)
+
+        chunks = self._plan_chunks(audio_path, duration)
         if chunks:
             return self._transcribe_chunked(chunks, on_progress, hint)
+        return self._transcribe_whole(audio_path, on_progress, hint, None)
 
+    # ---- 內部 ----
+
+    def _use_strong_whole(self, duration: float | None) -> bool:
+        return bool(
+            self.strong_whole_threshold > 0
+            and self.strong_model
+            and duration is not None
+            and duration > self.strong_whole_threshold
+        )
+
+    def _transcribe_whole(
+        self, audio_path: Path, on_progress, hint: str | None, model: str | None
+    ) -> str:
+        """整份單次轉錄（不分段）。model=None 用預設模型（短檔走 lite），
+        指定 model 則用該模型（長檔走強模型）。"""
         if on_progress:
             on_progress(0.1, "")
-        text = normalize_timestamps(self._transcribe_one(audio_path, hint))
+        text = drop_empty_lines(
+            normalize_timestamps(self._transcribe_one(audio_path, hint, model=model))
+        )
         if on_progress:
             on_progress(1.0, text)
         return text
 
-    # ---- 內部 ----
-
-    def _plan_chunks(self, audio_path: Path) -> list[Path]:
+    def _plan_chunks(self, audio_path: Path, duration: float | None = None) -> list[Path]:
         """長音檔就切段，回傳片段清單；不需要或做不到分段時回傳空 list。"""
         if self.chunk_seconds <= 0 or not media.ffmpeg_available():
             return []
-        duration = media.audio_duration(audio_path)
+        if duration is None:
+            duration = media.audio_duration(audio_path)
         if duration is None or duration <= DEFAULT_CHUNK_THRESHOLD_SECONDS:
             return []
         try:
@@ -203,6 +235,11 @@ class GeminiTranscriber:
                     fallback_used += 1
                 retries_left -= retries_used
                 if not text:
+                    continue
+                # 移除模型放棄轉錄留下的空標籤行（標註率修正已讓這種 chunk
+                # 先重試過，這裡清掉重試後仍殘留的空行）
+                text = drop_empty_lines(text)
+                if not text.strip():
                     continue
                 text = shift_timestamps(text, audio_start)
                 if index:  # 重疊那段前一輪已經轉過了，依絕對時間濾掉避免重複

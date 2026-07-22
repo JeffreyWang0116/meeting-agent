@@ -51,6 +51,12 @@ class Settings:
     # 每段往前多抓幾秒當重疊：模型沒聽過前一段，光給講者名單無從對應嗓音，
     # 同一個人跨段就會換標籤。重疊＋提示裡的對照樣本才接得起來（0＝不重疊）
     transcribe_overlap_seconds: int = 20
+    # 超過這個長度（秒）的檔案改用強模型（transcribe_fallback_model=flash）整份
+    # 單次轉錄、不分段。實測 14 分鐘台語質詢：強模型一次聽完整場的語者分辨遠優
+    # 於 lite 分段（分段會破壞它賴以分辨講者的全局脈絡）。代價是每場吃 1 次 flash
+    # （每日僅 20 次）。預設 600（10 分鐘）：長檔重品質、短檔用便宜 lite 省額度。
+    # 設 0＝停用，一律 lite 分段
+    transcribe_long_file_threshold_seconds: int = 600
     data_dir: Path = field(default_factory=lambda: BASE_DIR / "data")
     # Firebase 金鑰：任一有值就用 Firestore 雲端儲存，否則用本地 JSON
     firebase_credentials_json: str | None = None  # service account JSON 字串（Render 用）
@@ -91,6 +97,9 @@ def get_settings() -> Settings:
         transcribe_label_retries=int(os.environ.get("TRANSCRIBE_LABEL_RETRIES", "2")),
         transcribe_overlap_seconds=int(
             os.environ.get("TRANSCRIBE_OVERLAP_SECONDS", "20")
+        ),
+        transcribe_long_file_threshold_seconds=int(
+            os.environ.get("TRANSCRIBE_LONG_FILE_THRESHOLD_SECONDS", "600")
         ),
         data_dir=Path(os.environ.get("DATA_DIR", BASE_DIR / "data")),
         firebase_credentials_json=os.environ.get("FIREBASE_CREDENTIALS_JSON") or None,

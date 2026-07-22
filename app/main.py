@@ -105,6 +105,9 @@ class MeetingRequest(BaseModel):
     features: Optional[list[str]] = None
     # 分析前先用 AI 修掉語音辨識的同音錯字（多一次 API 請求）
     correct_typos: bool = False
+    # 把講者A/B/C 代號換成真實姓名（多一次 API 請求）。預設關閉：台語等
+    # 語者辨識不穩的錄音容易對錯，猜錯的名字比代號更糟
+    name_speakers: bool = False
 
 
 class FinishRequest(BaseModel):
@@ -112,11 +115,13 @@ class FinishRequest(BaseModel):
     kind: Optional[str] = None
     features: Optional[list[str]] = None
     correct_typos: bool = False
+    name_speakers: bool = False
 
 
 class ReanalyzeRequest(BaseModel):
     features: Optional[list[str]] = None
     correct_typos: bool = False
+    name_speakers: bool = False
 
 
 class AskRequest(BaseModel):
@@ -197,6 +202,9 @@ def create_app(
                 label_retries=settings.transcribe_label_retries,
                 overlap_seconds=settings.transcribe_overlap_seconds,
                 max_retry_calls=settings.transcribe_max_retry_calls,
+                # 長檔改用強模型整份單次轉錄：語者分辨遠優於 lite 分段
+                strong_model=settings.transcribe_fallback_model,
+                strong_whole_threshold=settings.transcribe_long_file_threshold_seconds,
             )
         else:
             transcriber = Transcriber(
@@ -268,11 +276,12 @@ def create_app(
         kind: str | None = None,
         features: set[str] | None = None,
         correct_typos: bool = False,
+        name_speakers: bool = False,
     ) -> dict:
         usage.record("analysis")
         if correct_typos:
             usage.record("correct")  # 校正是額外一次請求，用量面板要分開看得到
-        if orchestrator.namer:
+        if name_speakers and orchestrator.namer:
             usage.record("speaker_names")  # 講者代號換姓名也是獨立一次請求
         try:
             return orchestrator.process_transcript(
@@ -281,6 +290,7 @@ def create_app(
                 kind=kind,
                 features=features,
                 correct_typos=correct_typos,
+                name_speakers=name_speakers,
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc))
@@ -346,6 +356,7 @@ def create_app(
             kind,
             resolve_features(req.features, kind),
             correct_typos=req.correct_typos,
+            name_speakers=req.name_speakers,
         )
 
     @app.get("/api/meetings")
@@ -416,6 +427,11 @@ def create_app(
             usage.record("correct")
             transcript, corrections = orchestrator.corrector.correct(transcript)
 
+        speaker_names: list[dict] = []
+        if req and req.name_speakers and orchestrator.namer:
+            usage.record("speaker_names")
+            transcript, speaker_names = orchestrator.namer.name_speakers(transcript)
+
         try:
             analysis = orchestrator.decision.analyze(
                 transcript, meeting_date=meeting_date, kind=kind, features=features
@@ -436,7 +452,7 @@ def create_app(
             "highlights": dumped.get("highlights", []),
             "tags": dumped.get("tags", []),
         }
-        if corrections:  # 校正過才回寫逐字稿，沒改就不動原紀錄
+        if corrections or speaker_names:  # 逐字稿被改過才回寫，沒改就不動原紀錄
             updates["transcript"] = transcript
         store.update_meeting(meeting_id, updates)
         tasks = store.replace_tasks(meeting_id, dumped["todos"])
@@ -449,6 +465,7 @@ def create_app(
             "tasks": tasks,
             "transcript": transcript,
             "corrections": corrections,
+            "speaker_names": speaker_names,
         }
 
     @app.get("/api/tasks")
@@ -664,6 +681,7 @@ def create_app(
         kind: Optional[str] = Form(None),
         features: Optional[str] = Form(None),
         correct_typos: Optional[str] = Form(None),
+        name_speakers: Optional[str] = Form(None),
     ):
         try:
             parsed_date = date.fromisoformat(meeting_date) if meeting_date else None
@@ -672,7 +690,9 @@ def create_app(
         validate_kind(kind)
         resolved_features = resolve_features(features, kind)
         # multipart 表單只有字串，"true"/"1" 都當開啟
-        correct = str(correct_typos or "").lower() in ("1", "true", "on", "yes")
+        _truthy = ("1", "true", "on", "yes")
+        correct = str(correct_typos or "").lower() in _truthy
+        name_speakers_on = str(name_speakers or "").lower() in _truthy
 
         suffix = Path(file.filename or "upload.bin").suffix or ".bin"
         uploads_dir.mkdir(parents=True, exist_ok=True)
@@ -683,6 +703,8 @@ def create_app(
         usage.record("media_upload")
         if correct:
             usage.record("correct")
+        if name_speakers_on and orchestrator.namer:
+            usage.record("speaker_names")
         return {
             "job_id": job_manager.submit(
                 dest,
@@ -690,6 +712,7 @@ def create_app(
                 kind=kind,
                 features=resolved_features,
                 correct_typos=correct,
+                name_speakers=name_speakers_on,
             )
         }
 
@@ -749,6 +772,7 @@ def create_app(
             kind,
             features,
             correct_typos=bool(req and req.correct_typos),
+            name_speakers=bool(req and req.name_speakers),
         )
         # result 帶著校正後的 transcript，放在後面覆蓋原始版本
         return {"transcript": transcript, **result}

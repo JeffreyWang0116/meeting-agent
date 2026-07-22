@@ -76,7 +76,7 @@ def _namer(mapping):
     return SpeakerNamerAgent(api_key="k", generate=lambda p: reply)
 
 
-def test_speaker_codes_are_replaced_with_names(tmp_path):
+def test_speaker_codes_are_replaced_with_names_when_enabled(tmp_path):
     store = LocalJsonStore(tmp_path / "db.json")
     pipeline = Orchestrator(
         parser=ParserAgent(),
@@ -85,13 +85,16 @@ def test_speaker_codes_are_replaced_with_names(tmp_path):
         notifier=NotifierAgent(tmp_path / "notifications"),
         namer=_namer({"講者A": "吳宗憲"}),
     )
-    result = pipeline.process_transcript("[0:05] 講者A：我下週一前把 prompt 寫好")
+    result = pipeline.process_transcript(
+        "[0:05] 講者A：我下週一前把 prompt 寫好", name_speakers=True
+    )
     assert "吳宗憲：" in result["transcript"]
     assert result["speaker_names"][0]["name"] == "吳宗憲"
 
 
-def test_stored_transcript_uses_the_named_version(tmp_path):
-    """存進資料庫的必須是換上姓名的版本，否則畫面與匯出會看到代號。"""
+def test_names_are_not_inferred_by_default(tmp_path):
+    """預設不對應姓名：台語等辨識不穩的場合，猜錯的名字比代號更糟。
+    即使注入了 namer，沒開旗標就維持講者A/B/C。"""
     store = LocalJsonStore(tmp_path / "db.json")
     pipeline = Orchestrator(
         parser=ParserAgent(),
@@ -101,6 +104,24 @@ def test_stored_transcript_uses_the_named_version(tmp_path):
         namer=_namer({"講者A": "吳宗憲"}),
     )
     result = pipeline.process_transcript("[0:05] 講者A：我下週一前把 prompt 寫好")
+    assert "講者A：" in result["transcript"]
+    assert "吳宗憲" not in result["transcript"]
+    assert result["speaker_names"] == []
+
+
+def test_stored_transcript_uses_the_named_version_when_enabled(tmp_path):
+    """開啟姓名對應時，存進資料庫的必須是換上姓名的版本。"""
+    store = LocalJsonStore(tmp_path / "db.json")
+    pipeline = Orchestrator(
+        parser=ParserAgent(),
+        decision=DecisionAgent(generate=lambda prompt: valid_json()),
+        executor=ExecutorAgent(store),
+        notifier=NotifierAgent(tmp_path / "notifications"),
+        namer=_namer({"講者A": "吳宗憲"}),
+    )
+    result = pipeline.process_transcript(
+        "[0:05] 講者A：我下週一前把 prompt 寫好", name_speakers=True
+    )
     stored = store.get_meeting(result["meeting_id"])
     assert "吳宗憲：" in stored["transcript"]
 
@@ -108,6 +129,8 @@ def test_stored_transcript_uses_the_named_version(tmp_path):
 def test_pipeline_works_without_a_namer(orchestrator):
     """沒有注入 namer 時維持原行為，代號原樣保留。"""
     pipeline, _ = orchestrator
-    result = pipeline.process_transcript("[0:05] 講者A：我下週一前把 prompt 寫好")
+    result = pipeline.process_transcript(
+        "[0:05] 講者A：我下週一前把 prompt 寫好", name_speakers=True
+    )
     assert "講者A：" in result["transcript"]
     assert result["speaker_names"] == []

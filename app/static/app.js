@@ -124,6 +124,15 @@ function selectedFeatures() {
 })();
 function correctTypos() { return $("featCorrect").checked; }
 
+// AI 辨識講者姓名：把講者A/B/C 換成真實姓名。預設關閉——台語等語者辨識不穩的
+// 錄音容易對錯，猜錯的名字比代號更糟；想要姓名時再手動勾。記住選擇。
+(function () {
+  if (localStorage.getItem("nameSpeakers") === "1") $("featNameSpeakers").checked = true;
+  $("featNameSpeakers").addEventListener("change", () =>
+    localStorage.setItem("nameSpeakers", $("featNameSpeakers").checked ? "1" : "0"));
+})();
+function nameSpeakers() { return $("featNameSpeakers").checked; }
+
 // 即時翻譯目標：記住上次的選擇
 (function () {
   const saved = localStorage.getItem("liveTranslate");
@@ -818,7 +827,7 @@ $("meetingRows").addEventListener("click", async e => {
       const r = await jsonOrThrow(await fetch(`/api/meetings/${rean.dataset.id}/reanalyze`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ correct_typos: correct }),
+        body: JSON.stringify({ correct_typos: correct, name_speakers: nameSpeakers() }),
       }));
       const cached = meetingDetailCache[rean.dataset.id];
       if (cached) {
@@ -1174,6 +1183,7 @@ $("btnAnalyzeText").addEventListener("click", async () => {
         kind: $("meetingKind").value,
         features: selectedFeatures(),
         correct_typos: correctTypos(),
+        name_speakers: nameSpeakers(),
       }),
     }));
     renderResult(result, $("textInput").value);
@@ -1207,6 +1217,7 @@ $("btnUpload").addEventListener("click", async () => {
     const features = selectedFeatures();
     if (features !== null) form.append("features", features.join(","));
     if (correctTypos()) form.append("correct_typos", "true");
+    if (nameSpeakers()) form.append("name_speakers", "true");
     const { job_id } = await jsonOrThrow(await fetch("/api/media", { method: "POST", body: form }));
 
     while (true) {
@@ -1406,6 +1417,7 @@ async function finishLiveSession() {
         kind: $("meetingKind").value,
         features: selectedFeatures(),
         correct_typos: correctTypos(),
+        name_speakers: nameSpeakers(),
       }),
     }));
     $("liveStatus").textContent = "完成";

@@ -79,6 +79,33 @@ def speaker_of(line: str) -> str | None:
     return f"{prefix}{m.group('code').upper()}"
 
 
+def _has_speech(line: str) -> bool:
+    """這一行扣掉時間戳與講者標籤後，還有沒有實際說話內容。
+
+    分辨三種退化行與真正的內容：
+    - 「[10:09] 講者A：」        → 空標籤，模型放棄轉錄
+    - 「[13:10] 。」「[13:07] .」 → 只剩標點的殘骸
+    - 「[8:35] 講者A：你會不會？」→ 有字，是真的內容
+    判準是「有沒有任何文字或數字字元」：中文字、英數都算數，純標點與空白不算。
+    """
+    rest = strip_time_prefix(line)
+    m = SPEAKER_RE.match(rest)
+    if m:
+        rest = rest[m.end():]
+    return any(ch.isalnum() for ch in rest)
+
+
+def drop_empty_lines(text: str) -> str:
+    """丟掉沒有實際說話內容的行——只有時間戳、空的「講者A：」標籤，或只剩標點。
+
+    模型偶爾會整段放棄轉錄內容，只吐時間戳與空標籤或一個句號（實測台語質詢
+    有一整個 chunk 這樣）。這種行沒資訊，還會灌爆畫面。標註率的修正已讓這種
+    chunk 觸發重試；這裡再把重試後仍殘留的空行從最終逐字稿移除。
+    沒有時間戳也沒有標籤但有文字的行（純貼上的逐字稿）一律保留。
+    """
+    return "\n".join(ln for ln in text.split("\n") if _has_speech(ln))
+
+
 def replace_speaker(line: str, name: str) -> str:
     """把一行的講者代號換成真實姓名（沒有標籤就原樣回傳）。
 
@@ -94,15 +121,18 @@ def replace_speaker(line: str, name: str) -> str:
 
 
 def speaker_label_ratio(text: str) -> float:
-    """有講者標籤的行數佔比（0~1）。空字串回傳 1.0（沒東西可標，不算失敗）。
+    """有講者標籤「且有內容」的行數佔比（0~1）。空字串回傳 1.0（沒東西可標）。
 
-    用來偵測「模型這一輪放棄標講者」——實測同一段音訊、同一個模型、
-    temperature=0，標註率可能是 26% 也可能是 95%，重跑一次就好了。
+    用來偵測模型這一輪放棄轉錄——有兩種放棄法都要抓到：
+    1. 放棄標講者：行有內容卻沒有「講者A：」前綴。
+    2. 放棄轉內容：只吐時間戳與空的「講者A：」，後面沒有話（實測台語質詢
+       有整個 chunk 這樣）。這種行「有標籤」，若只看標籤就會被誤算成標好了，
+       標註率虛高、重試永不觸發——所以要求標籤與內容兼具才算數。
     """
     lines = [ln for ln in text.split("\n") if ln.strip()]
     if not lines:
         return 1.0
-    return sum(1 for ln in lines if speaker_of(ln)) / len(lines)
+    return sum(1 for ln in lines if speaker_of(ln) and _has_speech(ln)) / len(lines)
 
 
 def collect_speakers(text: str, known: list[str]) -> None:

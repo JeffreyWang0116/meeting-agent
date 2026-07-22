@@ -8,6 +8,7 @@ from app.transcription.segments import (
     collect_speakers,
     drop_lines_before,
     format_time,
+    drop_empty_lines,
     normalize_timestamps,
     parse_time_label,
     replace_speaker,
@@ -275,6 +276,56 @@ def test_label_ratio_of_empty_text_is_not_a_failure():
     """空白段（靜音）不該被當成標註失敗而觸發重試。"""
     assert speaker_label_ratio("") == 1.0
     assert speaker_label_ratio("   ") == 1.0
+
+
+# ---- 有標籤卻沒內容的行不算標好（回歸測試）----
+# 實測台語質詢：某個 chunk 模型整段放棄轉錄，只吐出時間戳與空的「講者A：」，
+# 例如「[10:09] 講者A：」後面什麼都沒有。舊的 ratio 只看行首有沒有標籤，
+# 把這種空行算成「標好了」→ 標註率虛高、重試永遠不觸發，畫面被灌一堆空標籤。
+
+def test_label_ratio_ignores_labelled_but_empty_lines():
+    assert speaker_label_ratio("[0:00] 講者A：\n[0:05] 講者A：") == 0.0
+    assert speaker_label_ratio("[0:00] 講者A：有內容\n[0:05] 講者A：") == 0.5
+
+
+def test_label_ratio_ignores_punctuation_only_lines():
+    """只剩「。」或「.」的行是模型放棄轉錄的殘骸，不算標好。"""
+    assert speaker_label_ratio("[0:00] 講者A：真的有講\n[0:05] 講者A：。") == 0.5
+    assert speaker_label_ratio("[0:00] 講者A：。\n[0:05] 講者B：.") == 0.0
+
+
+def test_label_ratio_still_counts_labelled_lines_with_content():
+    assert speaker_label_ratio("[0:00] 講者A：一\n[0:05] 講者B：二") == 1.0
+
+
+# ---- 移除沒有實際內容的行 ----
+
+def test_drop_empty_lines_removes_labelled_empties():
+    text = "[0:00] 講者A：開場\n[0:05] 講者A：\n[0:09] 講者A：接著說"
+    assert drop_empty_lines(text) == "[0:00] 講者A：開場\n[0:09] 講者A：接著說"
+
+
+def test_drop_empty_lines_removes_timestamp_only_and_blank_lines():
+    assert drop_empty_lines("[0:00] 講者A：有話\n[0:05] \n\n[0:10] ") == "[0:00] 講者A：有話"
+
+
+def test_drop_empty_lines_keeps_plain_content_without_markers():
+    """純貼上、沒有時間戳也沒有標籤但有文字的行要保留。"""
+    assert drop_empty_lines("鈺翔：我下週交\n\nKevin：好") == "鈺翔：我下週交\nKevin：好"
+
+
+def test_drop_empty_lines_keeps_unlabelled_content():
+    assert drop_empty_lines("[0:04] 沒有講者但有內容") == "[0:04] 沒有講者但有內容"
+
+
+def test_drop_empty_lines_removes_punctuation_only_lines():
+    text = "[0:00] 講者A：真的有講\n[0:05] 講者A：。\n[0:09] 講者B：.\n[0:12] 講者A：又講"
+    assert drop_empty_lines(text) == "[0:00] 講者A：真的有講\n[0:12] 講者A：又講"
+
+
+def test_drop_empty_lines_keeps_short_interjection_with_a_word():
+    """「啊。」有實際字（啊），不是純標點，要保留。"""
+    assert drop_empty_lines("[0:00] 講者A：啊。") == "[0:00] 講者A：啊。"
 
 
 # ---- 重疊區去重與跨段對照樣本 ----

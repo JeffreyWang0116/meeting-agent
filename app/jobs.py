@@ -32,6 +32,7 @@ class MediaJobManager:
         kind: str | None = None,
         features: set[str] | None = None,
         correct_typos: bool = False,
+        name_speakers: bool = False,
     ) -> str:
         job_id = uuid.uuid4().hex[:12]
         with self._lock:
@@ -47,7 +48,10 @@ class MediaJobManager:
             }
         thread = threading.Thread(
             target=self._run,
-            args=(job_id, Path(file_path), meeting_date, kind, features, correct_typos),
+            args=(
+                job_id, Path(file_path), meeting_date, kind, features,
+                correct_typos, name_speakers,
+            ),
             daemon=True,
         )
         self._threads[job_id] = thread
@@ -88,6 +92,7 @@ class MediaJobManager:
         kind: str | None = None,
         features: set[str] | None = None,
         correct_typos: bool = False,
+        name_speakers: bool = False,
     ) -> None:
         path = file_path
         try:
@@ -120,6 +125,7 @@ class MediaJobManager:
                 kind=kind,
                 features=features,
                 correct_typos=correct_typos,
+                name_speakers=name_speakers,
             )
             # 校正過的話逐字稿會變，job 要換成校正後的版本（前端顯示的就是這份）
             self._update(

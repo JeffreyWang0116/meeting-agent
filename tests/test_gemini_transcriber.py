@@ -142,6 +142,99 @@ def test_transcribe_prompt_asks_for_timestamps():
     assert "時間" in _TRANSCRIBE_PROMPT
 
 
+# ---- 長檔改用強模型整份單次轉錄 ----
+# 實測 14 分鐘台語質詢：lite 分段會把同一位講者拆成多個代號、官員與委員混在
+# 一起；同一支檔用強模型（flash）整份單次轉錄，講者A/B/C/D 前後一致且分得開。
+# 強模型的優勢來自「一次聽完整場」的全局脈絡，分段反而會破壞它，所以長檔走
+# 強模型整份、不分段；短檔仍用便宜的 lite 分段（省額度）。
+
+def _long_file_setup(monkeypatch, tmp_path, duration):
+    """只借用 FakeChunkedSetup 的 media 打樁（ffmpeg 可用、回傳指定長度）。"""
+    return FakeChunkedSetup(monkeypatch, tmp_path, duration=duration, chunk_texts=["x"])
+
+
+def test_long_file_uses_strong_model_whole_pass(monkeypatch, tmp_path):
+    src = tmp_path / "long.wav"
+    src.write_bytes(b"RIFF-fake")
+    _long_file_setup(monkeypatch, tmp_path, duration=900)  # 15 分鐘 > 10 分鐘門檻
+    used = []
+
+    class Tracking(GeminiTranscriber):
+        def _transcribe_one(self, audio_path, hint, model=None):
+            used.append(model or self.model)
+            return "[0:00] 講者A：整場一次轉完\n[5:00] 講者B：分得很清楚"
+
+    t = Tracking(
+        api_key="k", chunk_seconds=240, model="gemini-flash-lite-latest",
+        strong_model="gemini-flash-latest", strong_whole_threshold=600,
+    )
+    text = t.transcribe(src)
+    assert used == ["gemini-flash-latest"]  # 只呼叫一次，且用強模型
+    assert "整場一次轉完" in text
+
+
+def test_medium_file_still_uses_lite_chunking(monkeypatch, tmp_path):
+    """6~10 分鐘的檔仍走便宜的 lite 分段，不動用強模型。"""
+    src = tmp_path / "long.wav"
+    src.write_bytes(b"RIFF-fake")
+    FakeChunkedSetup(monkeypatch, tmp_path, duration=480, chunk_texts=["a", "b"])
+    used = []
+
+    class Tracking(GeminiTranscriber):
+        def _transcribe_one(self, audio_path, hint, model=None):
+            used.append(model or self.model)
+            return "[0:00] 講者A：內容"
+
+    t = Tracking(
+        api_key="k", chunk_seconds=240, model="gemini-flash-lite-latest",
+        strong_model="gemini-flash-latest", strong_whole_threshold=600,
+    )
+    t.transcribe(src)
+    assert used == ["gemini-flash-lite-latest"] * 2  # 兩段各一次、全 lite
+    assert "gemini-flash-latest" not in used
+
+
+def test_long_file_without_strong_model_falls_back_to_chunking(monkeypatch, tmp_path):
+    """沒設定強模型時，長檔仍退回 lite 分段，不會整個轉錄失敗。"""
+    src = tmp_path / "long.wav"
+    src.write_bytes(b"RIFF-fake")
+    FakeChunkedSetup(monkeypatch, tmp_path, duration=900, chunk_texts=["a", "b", "c", "d"])
+    used = []
+
+    class Tracking(GeminiTranscriber):
+        def _transcribe_one(self, audio_path, hint, model=None):
+            used.append(model or self.model)
+            return "[0:00] 講者A：內容"
+
+    t = Tracking(
+        api_key="k", chunk_seconds=240, model="gemini-flash-lite-latest",
+        strong_model=None, strong_whole_threshold=600,
+    )
+    t.transcribe(src)
+    assert set(used) == {"gemini-flash-lite-latest"}  # 全 lite、分段
+    assert len(used) >= 4
+
+
+def test_strong_whole_disabled_when_threshold_zero(monkeypatch, tmp_path):
+    """門檻設 0＝停用長檔強模式，一律照舊 lite 分段。"""
+    src = tmp_path / "long.wav"
+    src.write_bytes(b"RIFF-fake")
+    FakeChunkedSetup(monkeypatch, tmp_path, duration=900, chunk_texts=["a", "b", "c", "d"])
+    used = []
+
+    class Tracking(GeminiTranscriber):
+        def _transcribe_one(self, audio_path, hint, model=None):
+            used.append(model or self.model)
+            return "[0:00] 講者A：內容"
+
+    t = Tracking(
+        api_key="k", chunk_seconds=240, model="gemini-flash-lite-latest",
+        strong_model="gemini-flash-latest", strong_whole_threshold=0,
+    )
+    t.transcribe(src)
+    assert "gemini-flash-latest" not in used  # 停用 → 不動用強模型
+
+
 # ---- 長音檔分段轉錄 ----
 # 實測整份送出 17 分鐘錄音時，Gemini 會整份放棄講者標註、時間戳也會漂掉；
 # 同一支影片只取前 3 分鐘則講者分得又快又準。以下驗證分段機制的縫合行為。
@@ -355,6 +448,36 @@ def test_chunk_with_poor_labels_is_retried(monkeypatch, tmp_path):
     text = t.transcribe(src)
     assert "講者B" in text
     assert setup.calls["n"] >= 2  # 確實重跑了
+
+
+def test_empty_content_labels_trigger_retry(monkeypatch, tmp_path):
+    """整段只有時間戳與空「講者A：」（模型放棄轉錄內容）也要重試。
+    實測台語質詢有整個 chunk 這樣，舊版把空標籤算成標好而不重試。"""
+    src = tmp_path / "long.wav"
+    src.write_bytes(b"RIFF-fake")
+    setup = RetryingSetup(monkeypatch, tmp_path, duration=600, chunk_texts=["", ""])
+    t = setup.transcriber_with_sequence([
+        "[0:00] 講者A：\n[0:05] 講者A：",           # 有標籤但沒內容 → 應判定失敗
+        "[0:00] 講者A：有內容\n[0:05] 講者B：也有",   # 正常
+    ])
+    text = t.transcribe(src)
+    assert "有內容" in text
+    assert setup.calls["n"] >= 3  # 第一段重跑過
+
+
+def test_empty_label_lines_never_reach_output(monkeypatch, tmp_path):
+    """就算重試後仍有殘留的空標籤行，也不該出現在最終逐字稿。"""
+    src = tmp_path / "long.wav"
+    src.write_bytes(b"RIFF-fake")
+    setup = RetryingSetup(monkeypatch, tmp_path, duration=600, chunk_texts=["", ""])
+    t = setup.transcriber_with_sequence(
+        ["[0:00] 講者A：真的有講\n[0:05] 講者A：\n[0:09] 講者A：又講"],
+        label_retries=0,
+    )
+    text = t.transcribe(src)
+    # 中間那行空標籤要被清掉，剩下的兩行內容都在
+    assert "真的有講" in text and "又講" in text
+    assert "講者A：\n" not in text and not text.endswith("講者A：")
 
 
 def test_well_labelled_chunk_is_not_retried(monkeypatch, tmp_path):
