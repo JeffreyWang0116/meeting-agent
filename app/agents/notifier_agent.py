@@ -16,10 +16,17 @@ from app.models import MeetingAnalysis
 _PRIORITY_ZH = {"high": "高", "medium": "中", "low": "低"}
 
 
+def build_email_subject(analysis: MeetingAnalysis) -> str:
+    """信件主旨。與草稿全文分開回傳，前端才能直接填進 Gmail/mailto 的主旨欄，
+    不必反過來剖析草稿第一行。"""
+    m = analysis.meeting
+    return f"【會議紀錄確認】{m.title}（{m.date}）"
+
+
 def build_email_draft(analysis: MeetingAnalysis) -> str:
     m = analysis.meeting
     lines = [
-        f"主旨：【會議紀錄確認】{m.title}（{m.date}）",
+        f"主旨：{build_email_subject(analysis)}",
         "",
         "各位好，",
         "",
@@ -108,6 +115,7 @@ class NotifierAgent:
 
         return {
             "email_draft": email_draft,
+            "email_subject": build_email_subject(analysis),
             "email_draft_path": str(email_path),
             "calendar_events": events,
             "calendar_events_path": str(events_path),

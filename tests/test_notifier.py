@@ -39,6 +39,18 @@ def test_email_draft_contains_key_sections(tmp_path, analysis):
     assert "高" in draft                                   # 優先級中文化
 
 
+def test_email_subject_returned_separately(tmp_path, analysis):
+    """前端要把主旨與內文分開塞進 Gmail/mailto 的 su= 與 body=，不能自己剖字串。"""
+    result = NotifierAgent(tmp_path).notify("m001", analysis)
+    assert result["email_subject"] == "【會議紀錄確認】專題進度會議（2026-07-12）"
+
+
+def test_email_draft_first_line_matches_subject(tmp_path, analysis):
+    """草稿全文（複製用）仍帶主旨行，且與 email_subject 是同一份內容。"""
+    result = NotifierAgent(tmp_path).notify("m001", analysis)
+    assert result["email_draft"].split("\n")[0] == f"主旨：{result['email_subject']}"
+
+
 def test_email_draft_handles_missing_summary(tmp_path):
     """summary 功能沒被使用（None）時，草稿不能出現 Python 的 "None" 字樣。"""
     payload = make_valid_payload()

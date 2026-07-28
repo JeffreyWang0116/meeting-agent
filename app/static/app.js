@@ -380,6 +380,7 @@ function renderResult(result, transcript) {
     : `<p class="empty-note">沒有含期限的代辦，未產生行事曆事件</p>`;
 
   $("rDraft").textContent = result.notifications.email_draft || "";
+  draftSubject = result.notifications.email_subject || "";
   $("result").style.display = "flex";
   $("result").scrollIntoView({ behavior: "smooth" });
   refreshTasks();
@@ -395,6 +396,57 @@ async function copyWithFeedback(btn, text) {
   setTimeout(() => (btn.innerHTML = original), 1500);
 }
 $("btnCopyDraft").addEventListener("click", () => copyWithFeedback($("btnCopyDraft"), $("rDraft").textContent));
+
+// ---- 確認信一鍵開信 ----
+// 收件人刻意留空（出席者名單在信件內文裡，姓名對不到 email），使用者在信件視窗自己選。
+// 主旨與內文則用網址參數帶進去。中文經 encodeURIComponent 後一個字會膨脹成 9 個字元，
+// 一份含十幾項代辦的草稿很容易把網址撐到上萬字元，所以兩條路徑各有長度上限：
+// mailto: 交給作業系統的郵件軟體處理，上限最低（Windows 實測約 2000 字元就會被截斷）；
+// Gmail 網頁版寬鬆得多。超過就改走「複製全文到剪貼簿 + 只帶主旨開信」——
+// 讓使用者按一下貼上，好過寄出一封內容被砍一半的信。
+const MAILTO_URL_LIMIT = 1800;
+const GMAIL_URL_LIMIT = 7000;
+
+let draftSubject = "";  // 由 renderResult 從 notifications.email_subject 帶入
+
+function draftSubjectAndBody() {
+  const draft = $("rDraft").textContent || "";
+  const lines = draft.split("\n");
+  // 主旨會另外填進信件的主旨欄，內文再放一次會重複；順手吃掉它後面的空行
+  let subject = draftSubject;
+  if (lines[0] && lines[0].startsWith("主旨：")) {
+    if (!subject) subject = lines[0].slice(3);  // 舊會議的草稿沒有 email_subject 欄位
+    lines.shift();
+    while (lines.length && !lines[0].trim()) lines.shift();
+  }
+  return { subject: subject || "會議紀錄確認", body: lines.join("\n"), draft };
+}
+
+async function openCompose(via) {
+  const { subject, body, draft } = draftSubjectAndBody();
+  if (!draft.trim()) return;
+  const build = b => via === "gmail"
+    ? `https://mail.google.com/mail/?view=cm&fs=1&su=${encodeURIComponent(subject)}&body=${encodeURIComponent(b)}`
+    : `mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(b)}`;
+
+  let url = build(body);
+  if (url.length > (via === "gmail" ? GMAIL_URL_LIMIT : MAILTO_URL_LIMIT)) {
+    url = build("");
+    try {
+      await navigator.clipboard.writeText(draft);
+      showNotice("信件內容太長，無法帶進網址：已複製全文到剪貼簿，請在信件裡直接貼上。");
+    } catch {
+      showError("信件內容太長，無法帶進網址：請改按「複製」再自行貼到信件裡。");
+      return;
+    }
+  }
+  // mailto 交給系統處理（不會真的離開頁面）；Gmail 是網頁，開新分頁才不會蓋掉分析結果
+  if (via === "gmail") window.open(url, "_blank", "noopener");
+  else window.location.href = url;
+}
+
+$("btnGmailDraft").addEventListener("click", () => openCompose("gmail"));
+$("btnMailtoDraft").addEventListener("click", () => openCompose("mailto"));
 
 // 摘要翻譯（再按一次收起）
 $("btnTransSummary").addEventListener("click", async () => {

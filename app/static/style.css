@@ -708,6 +708,9 @@
   .pending-item .reason, .event-item .desc { color: var(--faint); font-size: .82rem; display: block; margin-top: 3px; }
   .event-item .when { font-family: var(--mono); color: var(--accent); margin-right: 8px; font-weight: 600; }
 
+  /* 草稿工具列：窄螢幕時三顆按鈕折行，不把標題擠掉 */
+  .draft-tools { margin-left: auto; display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+
   pre.draft {
     background: var(--card-2); border: 1px solid var(--border); border-radius: var(--radius-md);
     padding: 18px; white-space: pre-wrap; font-family: var(--mono); font-size: .82rem; color: var(--muted);
