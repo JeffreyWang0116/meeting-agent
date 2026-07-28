@@ -589,7 +589,7 @@ def test_index_serves_html(client):
 def test_pwa_manifest_sw_and_icon_served(client):
     resp = client.get("/manifest.webmanifest")
     assert resp.status_code == 200
-    assert resp.json()["name"] == "主動式會議 Agent"
+    assert resp.json()["name"] == "會議助手"
     assert resp.json()["icons"]
 
     resp = client.get("/sw.js")

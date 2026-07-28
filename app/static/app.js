@@ -1,5 +1,5 @@
 /*
-  主動式會議 Agent — 前端行為（app.js）
+  會議助手 — 前端行為（app.js）
   畫面結構在 index.html、樣式在 style.css，三個檔案的功能分區順序一致。
 
   目錄：

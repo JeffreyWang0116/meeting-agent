@@ -247,7 +247,7 @@ def create_app(
     uploads_dir = settings.data_dir / "tmp" / "uploads"
     usage = UsageTracker(settings.data_dir / "output" / "usage.json")
 
-    app = FastAPI(title="主動式會議 Agent")
+    app = FastAPI(title="會議助手")
 
     # 設了 API_TOKEN 才驗證：本機開發預設不擋，部署到公開網址時務必設定，
     # 否則 /api/backup、/api/restore 等端點任何人都能直接讀寫全部資料

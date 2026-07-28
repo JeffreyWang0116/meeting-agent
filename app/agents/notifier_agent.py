@@ -59,7 +59,7 @@ def build_email_draft(analysis: MeetingAnalysis) -> str:
     else:
         lines.append("（無）")
 
-    lines += ["", "— 此信由主動式會議 Agent 自動產生"]
+    lines += ["", "— 此信由會議助手自動產生"]
     return "\n".join(lines)
 
 
