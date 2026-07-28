@@ -217,7 +217,7 @@ app/
 ├── atomicio.py           # 原子寫檔（斷電不壞資料）
 └── evaluation.py         # 任務抽取 precision/recall（供 eval/run.py）
 eval/                     # 量化評估：標注資料集 + 評估腳本
-tests/                    # pytest 測試（451，全部離線、不需金鑰）
+tests/                    # pytest 測試（455，全部離線、不需金鑰）
 Dockerfile                # 雲端部署映像（Python + ffmpeg，轉錄用 Gemini）
 render.yaml               # Render 一鍵部署藍圖
 data/samples/             # 模擬會議紀錄（中英夾雜、含邊界案例）

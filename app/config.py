@@ -15,8 +15,10 @@ class Settings:
     gemini_api_key: str | None = None
     # 多把 key 輪替：免費層配額爆掉（429）時自動換下一把
     gemini_api_keys: tuple[str, ...] = ()
-    # 別名會自動跟隨最新版 flash；.env 可改成固定版本（如 gemini-3.5-flash）求穩定
-    gemini_model: str = "gemini-flash-latest"
+    # 分析模型。與轉錄同樣預設用高額度的 lite：免費層 Flash 每日只有 20 次、
+    # Lite 有 500 次，預設值選 Flash 會讓照著 README 部署的人很快撞牆。
+    # 想要更強的推理再用 .env 覆蓋（如 gemini-3.5-flash），代價是額度剩 1/25
+    gemini_model: str = "gemini-flash-lite-latest"
     # 轉錄後端：local = 本地 faster-whisper（需 GPU）；gemini = 雲端用 Gemini 聽音訊
     transcribe_engine: str = "local"
     # Gemini 轉錄專用模型：轉錄吃掉絕大多數請求（即時聆聽每段一次）但不需要
@@ -37,8 +39,9 @@ class Settings:
     transcribe_fallback_model: str | None = "gemini-flash-latest"
     # 單一檔案最多幾段可以動用備援模型。免費層實測額度：Flash Lite 每日 500 次、
     # Flash 每日只有 20 次——備援跑一次就吃掉每日 Flash 額度的 5%，遠高於重試
-    # 的成本上限，所以預設 0（不啟用），把預算全花在便宜的 lite 重試，
-    # 稀有的 Flash 額度留給分析。需要極致品質再設成 1
+    # 的成本上限，所以預設 0（不啟用），把預算全花在便宜的 lite 重試，稀有的
+    # Flash 額度留給長檔整份轉錄（見 transcribe_long_file_threshold_seconds，
+    # 那才是它真正划算的地方）。需要極致品質再設成 1
     transcribe_max_fallback_chunks: int = 0
     # 單一檔案總共最多幾次重試。只設每段上限的話總量會隨影片長度線性膨脹
     # （60 分鐘＝15 段 × 2 次＝30 次，佔每日 500 次額度的 6%）；設每檔上限
@@ -77,7 +80,7 @@ def get_settings() -> Settings:
     return Settings(
         gemini_api_key=keys[0] if keys else None,
         gemini_api_keys=keys,
-        gemini_model=os.environ.get("GEMINI_MODEL", "gemini-flash-latest"),
+        gemini_model=os.environ.get("GEMINI_MODEL", "gemini-flash-lite-latest"),
         transcribe_engine=os.environ.get("TRANSCRIBE_ENGINE", "local").lower(),
         transcribe_model=os.environ.get("TRANSCRIBE_MODEL", "gemini-flash-lite-latest"),
         correct_model=os.environ.get("CORRECT_MODEL", "gemini-flash-lite-latest"),
