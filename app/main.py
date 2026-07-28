@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import shutil
 import uuid
 from datetime import date
@@ -33,6 +34,7 @@ from app.orchestrator import Orchestrator
 from app.rag import AskAgent, GeminiEmbedder, RagIndex
 from app.stores import make_store
 from app.transcription import media
+from app.transcription.segments import parse_time_label, replace_term_in_range
 from app.translate import TARGETS as TRANSLATE_TARGETS
 from app.translate import Translator
 from app.transcription.gemini_transcriber import GeminiTranscriber
@@ -129,6 +131,8 @@ class ReplaceTermRequest(BaseModel):
     old: str
     new: str = ""  # 允許空字串＝把該詞整個刪掉
     add_to_glossary: bool = False
+    start: Optional[str] = None  # 時間段下限，如 "12:30"；None/空＝不限
+    end: Optional[str] = None    # 時間段上限；只換時間戳落在 [start, end] 的行
 
 
 class AskRequest(BaseModel):
@@ -415,24 +419,34 @@ def create_app(
         drop_from_rag(meeting_id)
         return updated
 
+    def _time_bound(label: Optional[str]) -> Optional[int]:
+        """把 "12:30" 這種時間標籤轉成秒；空字串／None 回 None（該側不設限）。"""
+        label = (label or "").strip()
+        if not label:
+            return None
+        if not re.fullmatch(r"\d{1,2}(:\d{1,2}){0,2}", label):
+            raise HTTPException(status_code=400, detail=f"時間格式錯誤：{label}（請用「分:秒」如 12:30）")
+        return parse_time_label(label)
+
     @app.post("/api/meetings/{meeting_id}/replace-term")
     def replace_term(meeting_id: str, req: ReplaceTermRequest):
-        """把逐字稿裡某個詞的所有出現處統一換成新詞；可一併加入詞彙表，
-        讓之後的錄音轉錄不再聽錯（事後修正兼事前預防）。"""
+        """把逐字稿裡某個詞統一換成新詞；可只換某個時間段（避免動到其他時段正確的同字），
+        並可一併加入詞彙表，讓之後的錄音轉錄不再聽錯（事後修正兼事前預防）。"""
         old = (req.old or "").strip()
         new = (req.new or "").strip()
         if not old:
             raise HTTPException(status_code=400, detail="原詞不可為空")
+        start_sec, end_sec = _time_bound(req.start), _time_bound(req.end)
+        if start_sec is not None and end_sec is not None and start_sec > end_sec:
+            raise HTTPException(status_code=400, detail="起始時間不能晚於結束時間")
         record = store.get_meeting(meeting_id)
         if record is None:
             raise HTTPException(status_code=404, detail=f"找不到會議：{meeting_id}")
         transcript = record.get("transcript") or ""
-        count = transcript.count(old)
+        new_transcript, count = replace_term_in_range(transcript, old, new, start_sec, end_sec)
         updated = record
         if count:
-            updated = store.update_meeting(
-                meeting_id, {"transcript": transcript.replace(old, new)}
-            )
+            updated = store.update_meeting(meeting_id, {"transcript": new_transcript})
             drop_from_rag(meeting_id)  # 逐字稿變了，RAG 索引要作廢重建
         # 只有真的替換到、且新詞非空才動詞彙表；詞彙表滿了就靜默略過（替換本身已成功）
         added = False

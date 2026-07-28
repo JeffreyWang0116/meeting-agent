@@ -600,16 +600,19 @@
     transition: border-color .15s, color .15s;
   }
   .speaker-chip:hover { border-color: var(--accent); color: var(--accent); }
+  .term-tool { display: flex; flex-direction: column; gap: 8px; }
   .term-replace { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
   .term-replace input[type="text"] {
     flex: 1 1 120px; min-width: 0; font-family: var(--sans); font-size: .86rem; color: var(--ink);
     background: var(--card-2); border: 1px solid var(--border); border-radius: var(--radius-md);
     padding: 8px 11px;
   }
+  .term-replace input.term-start, .term-replace input.term-end { flex: 0 1 92px; }
   .term-replace input[type="text"]:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
   .term-replace .term-arrow { color: var(--faint); flex: none; }
   .term-replace .term-apply { flex: none; }
-  .term-glos { flex: 1 1 100%; margin-top: 2px; }
+  .term-range-lbl { font-size: .8rem; color: var(--muted); flex: none; }
+  .term-glos { margin-top: 2px; }
   .detail-edit textarea, .detail-edit input[type="text"] {
     width: 100%; font-family: var(--sans); font-size: .9rem; color: var(--ink);
     background: var(--card-2); border: 1px solid var(--border); border-radius: var(--radius-md);

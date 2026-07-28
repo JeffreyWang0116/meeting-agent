@@ -439,6 +439,36 @@ def test_replace_term_validation_and_missing_meeting(client):
     ).status_code == 404
 
 
+def test_replace_term_within_time_window(client):
+    meeting_id = make_meeting(client)
+    client.patch(
+        f"/api/meetings/{meeting_id}",
+        json={"transcript": "[0:05] 講者A：涵式\n[1:30] 講者B：涵式\n[2:10] 講者A：涵式"},
+    )
+    # 只替換 1:00~2:00 之間 → 只換中間那一處
+    resp = client.post(
+        f"/api/meetings/{meeting_id}/replace-term",
+        json={"old": "涵式", "new": "函式", "start": "1:00", "end": "2:00"},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["replaced"] == 1
+    assert client.get(f"/api/meetings/{meeting_id}").json()["transcript"] == (
+        "[0:05] 講者A：涵式\n[1:30] 講者B：函式\n[2:10] 講者A：涵式"
+    )
+
+
+def test_replace_term_rejects_bad_time_and_inverted_range(client):
+    meeting_id = make_meeting(client)
+    assert client.post(
+        f"/api/meetings/{meeting_id}/replace-term",
+        json={"old": "a", "new": "b", "start": "亂打"},
+    ).status_code == 400
+    assert client.post(
+        f"/api/meetings/{meeting_id}/replace-term",
+        json={"old": "a", "new": "b", "start": "5:00", "end": "1:00"},
+    ).status_code == 400
+
+
 def test_meeting_markdown_report(client):
     meeting_id = make_meeting(client)
     resp = client.get(f"/api/meetings/{meeting_id}/report.md")

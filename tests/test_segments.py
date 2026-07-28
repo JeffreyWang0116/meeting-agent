@@ -12,6 +12,7 @@ from app.transcription.segments import (
     normalize_timestamps,
     parse_time_label,
     replace_speaker,
+    replace_term_in_range,
     shift_timestamps,
     speaker_label_ratio,
     speaker_of,
@@ -131,6 +132,42 @@ def test_replace_speaker_leaves_unlabelled_lines_alone():
 def test_replace_speaker_only_touches_the_label_not_the_content():
     line = "[0:05] 講者A：剛剛講者A說的那件事"
     assert replace_speaker(line, "王委員") == "[0:05] 王委員：剛剛講者A說的那件事"
+
+
+TR = "[0:05] 講者A：改用涵式\n[1:30] 講者B：涵式很好\n[2:10] 講者A：再談涵式"
+
+
+def test_replace_term_whole_transcript_when_no_bounds():
+    out, n = replace_term_in_range(TR, "涵式", "函式")
+    assert n == 3
+    assert "涵式" not in out and out.count("函式") == 3
+
+
+def test_replace_term_only_within_time_window():
+    # 只換 1:00~2:00 之間：中間那行的「涵式」被換，頭尾兩行的保留
+    out, n = replace_term_in_range(TR, "涵式", "函式", 60, 120)
+    assert n == 1
+    assert out.splitlines()[0] == "[0:05] 講者A：改用涵式"      # 早於窗，不動
+    assert out.splitlines()[1] == "[1:30] 講者B：函式很好"      # 窗內，替換
+    assert out.splitlines()[2] == "[2:10] 講者A：再談涵式"      # 晚於窗，不動
+
+
+def test_replace_term_open_ended_bounds():
+    # 只給下限：2:00 之後
+    _, after = replace_term_in_range(TR, "涵式", "函式", 120, None)
+    assert after == 1
+    # 只給上限：1:00 之前
+    _, before = replace_term_in_range(TR, "涵式", "函式", None, 60)
+    assert before == 1
+
+
+def test_replace_term_continuation_line_inherits_time():
+    # 續行沒有自己的時間戳，沿用上一個時間；窗設在第一行時間內，續行也算在內
+    text = "[0:05] 講者A：涵式一\n沒有時間戳的續行也講涵式\n[9:00] 講者B：涵式二"
+    out, n = replace_term_in_range(text, "涵式", "函式", 0, 60)
+    assert n == 2
+    assert out.splitlines()[1] == "沒有時間戳的續行也講函式"
+    assert out.splitlines()[2] == "[9:00] 講者B：涵式二"  # 窗外不動
 
 
 def test_collect_speakers_preserves_first_appearance_order():

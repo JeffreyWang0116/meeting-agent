@@ -175,6 +175,37 @@ def drop_lines_before(text: str, seconds: float) -> str:
     return "\n".join(kept)
 
 
+def replace_term_in_range(
+    text: str,
+    old: str,
+    new: str,
+    start_seconds: float | None = None,
+    end_seconds: float | None = None,
+) -> tuple[str, int]:
+    """把 old 換成 new，但只在時間戳落在 [start, end]（含端點）的行內替換。
+
+    用於「只改某個時間段的詞」，避免把其他時段裡本來就正確的同字也換掉。
+    兩個界線可各自省略（None＝該側不設限）；都省略時＝整份替換。逐字稿慣例是
+    只在換人講時標時間戳，續行沒有自己的時間戳——續行沿用上一個看到的時間；
+    第一個時間戳之前的行視為 0 秒（會議開頭）。回傳（替換後全文, 實際替換次數）。
+    """
+    if not old:
+        return text, 0
+    lo = float("-inf") if start_seconds is None else start_seconds
+    hi = float("inf") if end_seconds is None else end_seconds
+    current = 0  # 第一個時間戳之前當作會議開頭 0 秒
+    out, count = [], 0
+    for line in text.split("\n"):
+        m = TIME_PREFIX_RE.match(line)
+        if m:
+            current = parse_time_label(m.group(1))
+        if lo <= current <= hi and old in line:
+            count += line.count(old)
+            line = line.replace(old, new)
+        out.append(line)
+    return "\n".join(out), count
+
+
 def chunk_hint(speakers: list[str], previous_tail: str = "") -> str:
     """長音檔分段轉錄時，每一段都要帶的提示。
 
