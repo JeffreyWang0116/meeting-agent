@@ -209,7 +209,12 @@ class FirestoreStore(TaskStore):
     def export_all(self) -> dict:
         meetings = [s.to_dict() for s in self._db.collection(self._meetings).stream()]
         tasks = [s.to_dict() for s in self._db.collection(self._tasks).stream()]
-        return {"meetings": meetings, "tasks": tasks, "glossary": self.get_glossary()}
+        return {
+            "meetings": meetings,
+            "tasks": tasks,
+            "glossary": self.get_glossary(),
+            "speaker_roster": self.get_speaker_roster(),
+        }
 
     def import_all(self, data: dict) -> None:
         with self._lock:
@@ -224,6 +229,8 @@ class FirestoreStore(TaskStore):
                 self._db.collection(self._tasks).document(t["id"]).set(t)
         if "glossary" in data:
             self.save_glossary(data.get("glossary") or [])
+        if "speaker_roster" in data:
+            self.save_speaker_roster(data.get("speaker_roster") or [])
 
     # ---- 自訂詞彙（meta collection 底下單一 glossary 文件） ----
 
@@ -234,3 +241,13 @@ class FirestoreStore(TaskStore):
     def save_glossary(self, terms: list[dict]) -> None:
         with self._lock:
             self._db.collection(self._meta).document("glossary").set({"terms": terms})
+
+    # ---- 講者名冊（meta collection 底下單一 speakers 文件） ----
+
+    def get_speaker_roster(self) -> list[str]:
+        snap = self._db.collection(self._meta).document("speakers").get()
+        return snap.to_dict().get("names", []) if snap.exists else []
+
+    def save_speaker_roster(self, names: list[str]) -> None:
+        with self._lock:
+            self._db.collection(self._meta).document("speakers").set({"names": names})

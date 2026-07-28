@@ -156,3 +156,51 @@ def test_prompt_demands_evidence_and_forbids_guessing():
     assert "依據" in prompt
     assert "講者A" in prompt          # 逐字稿本身要進 prompt
     assert "中聯油脂案" in prompt
+
+
+# ---- 講者名冊 ----
+
+def test_roster_names_appear_in_prompt_as_spelling_reference_only():
+    """名冊是「寫法參考」不是「判斷依據」：不能因為某人在名冊上就把代號指給他。"""
+    agent = SpeakerNamerAgent(api_key="k", known_names=lambda: ["吳宗憲", "石崇良"])
+    prompt = agent.build_prompt(TRANSCRIPT)
+    assert "吳宗憲、石崇良" in prompt
+    assert "不是判斷依據" in prompt
+
+
+def test_empty_roster_adds_nothing_to_prompt():
+    with_roster = SpeakerNamerAgent(api_key="k", known_names=lambda: []).build_prompt(TRANSCRIPT)
+    assert with_roster == SpeakerNamerAgent(api_key="k").build_prompt(TRANSCRIPT)
+
+
+def test_applied_names_are_remembered():
+    """成功對應的姓名記進名冊，下次同一群人開會就有寫法可循。"""
+    remembered = []
+    agent = SpeakerNamerAgent(
+        api_key="k",
+        generate=lambda p: _reply({"講者A": "吳宗憲", "講者B": "石崇良"}),
+        remember_names=remembered.extend,
+    )
+    agent.name_speakers(TRANSCRIPT)
+    assert remembered == ["吳宗憲", "石崇良"]
+
+
+def test_nothing_remembered_when_no_names_applied():
+    remembered = []
+    agent = SpeakerNamerAgent(
+        api_key="k", generate=lambda p: "這不是 JSON", remember_names=remembered.extend
+    )
+    agent.name_speakers(TRANSCRIPT)
+    assert remembered == []
+
+
+def test_remember_failure_does_not_break_naming():
+    """名冊寫入失敗（例如雲端資料庫短暫掛掉）不該讓已經完成的對應付諸流水。"""
+    def boom(_names):
+        raise RuntimeError("store 掛了")
+
+    agent = SpeakerNamerAgent(
+        api_key="k", generate=lambda p: _reply({"講者A": "吳宗憲"}), remember_names=boom
+    )
+    text, applied = agent.name_speakers(TRANSCRIPT)
+    assert "吳宗憲：" in text and applied

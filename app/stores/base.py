@@ -67,8 +67,16 @@ class TaskStore(ABC):
         """整份儲存自訂詞彙表。"""
 
     @abstractmethod
+    def get_speaker_roster(self) -> list[str]:
+        """讀取講者名冊（["王霖翔", ...]，最近用到的在前），沒有回傳空清單。"""
+
+    @abstractmethod
+    def save_speaker_roster(self, names: list[str]) -> None:
+        """整份儲存講者名冊。"""
+
+    @abstractmethod
     def export_all(self) -> dict:
-        """匯出整份資料（meetings + tasks + glossary）供備份下載。"""
+        """匯出整份資料（meetings + tasks + glossary + speaker_roster）供備份下載。"""
 
     @abstractmethod
     def import_all(self, data: dict) -> None:

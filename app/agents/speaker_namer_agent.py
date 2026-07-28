@@ -29,7 +29,7 @@ _TIME_MARKER = re.compile(r"\[\d{1,2}(?::\d{2}){1,2}\]")
 MAX_NAME_LEN = 20
 
 PROMPT_TEMPLATE = """你是會議逐字稿的講者辨識模組。以下逐字稿的講者以「講者A」「講者B」等代號標示，請根據對話內容判斷每個代號實際上是誰。
-
+{roster_line}
 務必遵守的規則：
 1. 只輸出一個 JSON 物件。不要 markdown 圍欄、不要任何額外說明文字。
 2. 只在逐字稿裡有明確依據時才對應。可用的依據例如：有人喊「請王委員發言」，則下一位發言者就是王委員；或某人自我介紹、被點名、被稱呼職稱。
@@ -52,6 +52,15 @@ JSON 結構：
 ---"""
 
 
+# 講者名冊只用來統一姓名寫法。措辭刻意強調它不是判斷依據——名單一旦被當成
+# 「候選答案」，模型就會傾向把每個代號都硬塞給名單上的人，正好違反規則 3。
+_ROSTER_LINE = """
+常見講者名單（僅供姓名寫法參考，不是判斷依據）：{names}。
+若你依逐字稿線索判斷出某代號就是名單中的人，姓名請照名單的寫法；
+但絕不可因為某人在名單上，就把找不到依據的代號指給他。
+"""
+
+
 class SpeakerNamerAgent:
     def __init__(
         self,
@@ -59,12 +68,18 @@ class SpeakerNamerAgent:
         model: str = "gemini-flash-lite-latest",
         generate=None,
         api_keys=None,
+        known_names=None,
+        remember_names=None,
     ):
         self._pool = KeyPool(api_keys if api_keys else [api_key])
         self.api_key = self._pool.first
         self.model = model
         # 可注入 callable(prompt) -> str，測試時不需要真的呼叫 Gemini
         self._generate = generate or self._generate_with_gemini
+        # 講者名冊：callable() -> list[str] 讀、callable(list[str]) 寫，
+        # 以 callable 注入才能每次讀到最新內容（與詞彙表同一個作法）
+        self._known_names = known_names
+        self._remember_names = remember_names
 
     # ---- 對外介面 ----
 
@@ -81,10 +96,21 @@ class SpeakerNamerAgent:
             mapping = _parse_mapping(raw)
         except Exception:
             return transcript, []
-        return apply_speaker_names(transcript, mapping)
+        text, applied = apply_speaker_names(transcript, mapping)
+        if applied and self._remember_names:
+            try:
+                self._remember_names([a["name"] for a in applied])
+            except Exception:
+                pass  # 名冊寫入失敗不該讓已經完成的對應付諸流水
+        return text, applied
 
     def build_prompt(self, transcript: str) -> str:
-        return PROMPT_TEMPLATE.format(max_len=MAX_NAME_LEN, transcript=transcript)
+        names = self._known_names() if self._known_names else []
+        return PROMPT_TEMPLATE.format(
+            max_len=MAX_NAME_LEN,
+            transcript=transcript,
+            roster_line=_ROSTER_LINE.format(names="、".join(names)) if names else "",
+        )
 
     # ---- 內部 ----
 
@@ -116,7 +142,8 @@ def _parse_mapping(raw: str) -> dict[str, str]:
     return mapping
 
 
-def _is_safe_name(name: str) -> bool:
+def is_safe_name(name: str) -> bool:
+    """姓名可不可以安全地寫進逐字稿的講者欄。講者名冊沿用同一條規則。"""
     if not name or len(name) > MAX_NAME_LEN:
         return False
     # 冒號會在行首造出第二個假標籤；換行會把一行拆成兩行破壞時間軸
@@ -140,7 +167,7 @@ def apply_speaker_names(
     labels_present = {s for s in (speaker_of(ln) for ln in transcript.split("\n")) if s}
     safe: dict[str, str] = {}
     for label, name in mapping.items():
-        if label not in labels_present or not _is_safe_name(name):
+        if label not in labels_present or not is_safe_name(name):
             return transcript, []
         safe[label] = name
     # 兩個代號指向同一人是模型不該擅自做的合併判斷

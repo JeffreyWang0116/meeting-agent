@@ -27,6 +27,7 @@ from app.agents.reminder_agent import scan as scan_reminders
 from app.config import Settings, get_settings
 from app.export import meeting_report_md, tasks_to_csv, tasks_to_ics
 from app.glossary import Glossary
+from app.speakers import SpeakerRoster
 from app.jobs import MediaJobManager
 from app.orchestrator import Orchestrator
 from app.rag import AskAgent, GeminiEmbedder, RagIndex
@@ -133,6 +134,10 @@ class GlossaryRequest(BaseModel):
     terms: list[dict]
 
 
+class SpeakerRosterRequest(BaseModel):
+    names: list[str]
+
+
 class TaskCreateRequest(BaseModel):
     task: str
     owner: Optional[str] = None
@@ -165,6 +170,8 @@ def create_app(
     # 自訂詞彙表：持久化交給 store（本地 JSON / 雲端 Firestore，與任務同後端），
     # 以 callable 注入，轉錄/分析每次都讀到最新內容
     glossary = Glossary(store)
+    # 講者名冊：只餵給 SpeakerNamerAgent 統一姓名寫法（不進轉錄，理由見 app/speakers.py）
+    roster = SpeakerRoster(store)
     orchestrator = orchestrator or Orchestrator(
         parser=ParserAgent(),
         decision=DecisionAgent(
@@ -186,6 +193,8 @@ def create_app(
             api_keys=settings.gemini_api_keys,
             # 依上下文判讀「誰是誰」，與校正同屬機械性工作，用便宜模型即可
             model=settings.correct_model,
+            known_names=roster.names,
+            remember_names=roster.remember,
         ),
     )
     if transcriber is None:
@@ -564,6 +573,25 @@ def create_app(
             return {"terms": glossary.replace(req.terms)}
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc))
+
+    # ---- 講者名冊 ----
+
+    @app.get("/api/speakers")
+    def get_speakers():
+        return {"names": roster.names()}
+
+    @app.put("/api/speakers")
+    def put_speakers(req: SpeakerRosterRequest):
+        """設定畫面整份取代：手動輸入的錯誤要讓使用者看見。"""
+        try:
+            return {"names": roster.replace(req.names)}
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+
+    @app.post("/api/speakers")
+    def add_speakers(req: SpeakerRosterRequest):
+        """記一筆剛用到的姓名（前端手動改講者名時呼叫），不合格的略過就好。"""
+        return {"names": roster.remember(req.names)}
 
     # ---- 任務管理 ----
 

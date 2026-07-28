@@ -556,6 +556,41 @@ def test_glossary_roundtrip_and_validation(client):
     assert client.put("/api/glossary", json={"terms": [{"term": "  "}]}).status_code == 400
 
 
+# ---- 講者名冊 ----
+
+def test_speaker_roster_roundtrip_and_validation(client):
+    assert client.get("/api/speakers").json() == {"names": []}
+
+    resp = client.put("/api/speakers", json={"names": ["王霖翔", "李經理"]})
+    assert resp.status_code == 200
+    assert resp.json()["names"] == ["王霖翔", "李經理"]
+    assert client.get("/api/speakers").json()["names"] == ["王霖翔", "李經理"]
+
+    # 空姓名、以及「講者A」這種代號要擋（進了名冊只會污染 prompt）
+    assert client.put("/api/speakers", json={"names": ["  "]}).status_code == 400
+    assert client.put("/api/speakers", json={"names": ["講者A"]}).status_code == 400
+
+
+def test_speaker_roster_post_adds_without_replacing(client):
+    """手動改名時前端只送新名字，不該把既有名冊洗掉；最近用到的排最前面。"""
+    client.put("/api/speakers", json={"names": ["王霖翔", "李經理"]})
+    resp = client.post("/api/speakers", json={"names": ["陳工程師"]})
+    assert resp.status_code == 200
+    assert resp.json()["names"] == ["陳工程師", "王霖翔", "李經理"]
+
+
+def test_speaker_roster_post_ignores_bad_names(client):
+    """POST 走的是分析流程的寬鬆路徑：壞名字略過就好，不回 400。"""
+    resp = client.post("/api/speakers", json={"names": ["講者A"]})
+    assert resp.status_code == 200
+    assert resp.json()["names"] == []
+
+
+def test_backup_includes_speaker_roster(client):
+    client.put("/api/speakers", json={"names": ["王霖翔"]})
+    assert client.get("/api/backup").json()["speaker_roster"] == ["王霖翔"]
+
+
 # ---- 其他 ----
 
 def test_gemini_engine_uses_transcribe_model_not_analysis_model(tmp_path):

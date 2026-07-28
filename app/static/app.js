@@ -988,6 +988,7 @@ $("meetingRows").addEventListener("click", async e => {
           body: JSON.stringify({ owner: newName }),
         });
       }
+      rememberSpeaker(newName);  // 記進名冊，下次辨識講者時姓名寫法就有依據
       renderMeetings();
       if (owned.length) { refreshTasks(); refreshReminders(); }
     } catch (err) { showError("講者改名失敗：" + err.message); }
@@ -1723,6 +1724,75 @@ $("glosList").addEventListener("click", e => {
   if (!btn) return;
   glosTerms.splice(Number(btn.dataset.i), 1);
   saveGlossary();
+});
+
+// ---- 講者名冊管理 ----
+// 名冊只影響「講者辨識」時的姓名寫法，與自訂詞彙是兩件事，所以分開一個視窗。
+let rosterNames = [];
+
+function renderRoster() {
+  $("rosterList").innerHTML = rosterNames.length
+    ? rosterNames.map((n, i) => `<div class="glos-item">
+        <b>${esc(n)}</b>
+        <button class="del-btn" data-i="${i}" title="從名冊移除" aria-label="刪除">✕</button>
+      </div>`).join("")
+    : `<p class="empty-note">尚無講者</p>`;
+}
+
+async function saveRoster() {
+  try {
+    const r = await jsonOrThrow(await fetch("/api/speakers", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ names: rosterNames }),
+    }));
+    rosterNames = r.names;
+  } catch (err) {
+    showError("儲存講者名冊失敗：" + err.message);
+    rosterNames = (await jsonOrThrow(await fetch("/api/speakers"))).names;  // 退回伺服器版本
+  }
+  renderRoster();
+}
+
+// 記一個剛用到的姓名（手動改講者名時呼叫）。名冊記不記得起來都不影響改名本身，
+// 所以失敗只當沒發生，不打擾使用者
+async function rememberSpeaker(name) {
+  try {
+    await fetch("/api/speakers", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ names: [name] }),
+    });
+  } catch (err) { /* 名冊是加分項，靜靜略過 */ }
+}
+
+$("btnRoster").addEventListener("click", async () => {
+  $("settingsMenu").classList.remove("open");
+  $("rosterModal").classList.add("open");
+  try {
+    rosterNames = (await jsonOrThrow(await fetch("/api/speakers"))).names;
+    renderRoster();
+  } catch (err) { /* 讀取失敗仍可新增 */ }
+  $("rosterName").focus();
+});
+$("btnRosterClose").addEventListener("click", () => $("rosterModal").classList.remove("open"));
+$("rosterModal").addEventListener("click", e => {
+  if (e.target === $("rosterModal")) $("rosterModal").classList.remove("open");
+});
+$("btnRosterAdd").addEventListener("click", () => {
+  const name = $("rosterName").value.trim();
+  if (!name) return;
+  rosterNames.unshift(name);  // 新加的排最前面，與「最近用到的在前」一致
+  $("rosterName").value = "";
+  saveRoster();
+  $("rosterName").focus();
+});
+$("rosterName").addEventListener("keydown", e => { if (e.key === "Enter") $("btnRosterAdd").click(); });
+$("rosterList").addEventListener("click", e => {
+  const btn = e.target.closest(".del-btn");
+  if (!btn) return;
+  rosterNames.splice(Number(btn.dataset.i), 1);
+  saveRoster();
 });
 
 // ---- PWA：註冊 service worker（讓手機可「加入主畫面」以近原生方式使用） ----

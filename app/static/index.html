@@ -51,6 +51,14 @@
             <hr class="set-sep">
             <div class="set-row">
               <span class="set-label">
+                <svg class="i-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M16.5 20v-1.5a3.5 3.5 0 0 0-3.5-3.5h-5A3.5 3.5 0 0 0 4.5 18.5V20"/><circle cx="10.5" cy="7.5" r="3.5"/><path d="M19.5 20v-1.5a3.5 3.5 0 0 0-2.6-3.38"/><path d="M15.5 4.13a3.5 3.5 0 0 1 0 6.74"/></svg>
+                講者名冊
+              </span>
+              <button class="ghost" id="btnRoster">管理</button>
+            </div>
+            <hr class="set-sep">
+            <div class="set-row">
+              <span class="set-label">
                 <svg class="i-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v6c0 1.7 3.6 3 8 3s8-1.3 8-3V5"/><path d="M4 11v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/></svg>
                 資料備份
               </span>
@@ -424,6 +432,22 @@
         <button class="primary" id="btnGlosAdd">新增</button>
       </div>
       <div id="glosList"><p class="empty-note">尚無詞彙</p></div>
+    </div>
+  </div>
+
+  <!-- 講者名冊管理視窗 -->
+  <div class="modal-overlay" id="rosterModal">
+    <div class="modal">
+      <div class="panel-head">
+        <h2>講者名冊</h2>
+        <button class="panel-x" id="btnRosterClose" aria-label="關閉">✕</button>
+      </div>
+      <p class="hint">常一起開會的人。辨識講者時會用這份名單統一姓名寫法，讓同一個人在每場會議都叫同一個名字。你在歷史會議改過的講者名字會自動記進來。</p>
+      <div class="glossary-add">
+        <input type="text" id="rosterName" placeholder="姓名或職稱">
+        <button class="primary" id="btnRosterAdd">新增</button>
+      </div>
+      <div id="rosterList"><p class="empty-note">尚無講者</p></div>
     </div>
   </div>
 
