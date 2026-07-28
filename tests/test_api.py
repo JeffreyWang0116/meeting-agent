@@ -152,6 +152,25 @@ def test_live_unknown_session_404(client):
     assert client.post("/api/live/nope/finish").status_code == 404
 
 
+def test_live_session_lost_can_fall_back_to_text_analysis(client):
+    """聆聽 session 遺失後的救援路徑所依賴的契約。
+
+    session 只存在記憶體，行程一重啟就永遠找不回來，再怎麼重試 finish 都是 404。
+    前端因此保留一份逐字稿副本，看到 404 就改走純文字分析把整場救回來。
+    這裡釘住它依賴的兩件事：finish 對死掉的 session 回的是 404（不是 400/500，
+    前端靠這個碼分辨「資料不存在」與「暫時性故障」），且純文字分析會回傳
+    transcript 供結果畫面顯示。改動任一個都會讓那條退路無聲失效。
+    """
+    assert client.post("/api/live/nope/finish").status_code == 404
+
+    resp = client.post(
+        "/api/meetings",
+        json={"text": "[0:05] 講者A：鈺翔下週一交 prompt", "meeting_date": "2026-07-12"},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["transcript"]
+
+
 def test_live_finish_without_speech_400(client):
     sid = client.post("/api/live/start").json()["session_id"]
     assert client.post(f"/api/live/{sid}/finish").status_code == 400

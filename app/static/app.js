@@ -75,7 +75,13 @@ function showNotice(msg) {
 function clearError() { $("errorBanner").style.display = "none"; }
 async function jsonOrThrow(resp) {
   const body = await resp.json().catch(() => ({}));
-  if (!resp.ok) throw new Error(body.detail || `伺服器錯誤（${resp.status}）`);
+  if (!resp.ok) {
+    // status 帶在 Error 上：呼叫端要能分辨「這筆資料不存在」(404) 與「暫時性故障」
+    // (502/429)，兩者的處置完全不同
+    const err = new Error(body.detail || `伺服器錯誤（${resp.status}）`);
+    err.status = resp.status;
+    throw err;
+  }
   return body;
 }
 
@@ -1442,6 +1448,12 @@ $("btnLiveStage").addEventListener("click", openStage);
 // 即時字幕流：逐段附加逐字稿行（後端回傳的文字已帶整場時間戳），末端保留打字游標。
 // liveSpeakers 讓同一位講者在整場聆聽中維持同色。
 let liveSpeakers = {};
+// 逐字稿原文（非 HTML）。伺服器重啟會讓聆聽 session 連同它累積的逐字稿一起消失，
+// 這份瀏覽器端的副本是那時唯一還救得回來的內容，見 finishLiveSession 的 404 退路。
+// 取後端每段回傳的完整 transcript 而不是自己串接：段落可能亂序辨識完，
+// 後端是依錄音順序的 index 填槽，它的版本才是對的。
+let liveTranscriptText = "";
+
 function appendCaption(text, translation) {
   const caret = $("liveCaret");
   if (!caret) return;
@@ -1459,6 +1471,7 @@ async function uploadLiveChunk(blob, offsetSeconds) {
     // 本段在整場會議中的開始秒數：後端把段內相對時間戳平移成整場時間
     if (offsetSeconds != null) form.append("offset", offsetSeconds);
     const r = await jsonOrThrow(await fetch(`/api/live/${liveSessionId}/chunk`, { method: "POST", body: form }));
+    if (r.transcript) liveTranscriptText = r.transcript;
     if (r.text) appendCaption(r.text, r.translation);
   } catch (e) { showError("音訊段上傳失敗：" + e.message); }
   finally { uploadsInFlight--; }
@@ -1515,6 +1528,7 @@ $("btnLiveStart").addEventListener("click", async () => {
   liveSegIndex = 0;
   liveSentCount = 0;
   liveSpeakers = {};
+  liveTranscriptText = "";
   acquireWakeLock();  // 保持螢幕常亮，避免手機鎖屏中斷錄音
   $("btnLiveStart").disabled = true;
   $("btnLiveStop").disabled = false;
@@ -1563,28 +1577,53 @@ async function finishLiveSession() {
   $("btnLiveRetry").disabled = true;
   $("liveStatus").textContent = "AI 分析整場會議中…";
   analysisStartTime = Date.now();
+  const options = {
+    meeting_date: $("meetingDate").value || null,
+    kind: $("meetingKind").value,
+    features: selectedFeatures(),
+    correct_typos: correctTypos(),
+    name_speakers: nameSpeakers(),
+  };
   try {
-    const result = await jsonOrThrow(await fetch(`/api/live/${liveSessionId}/finish`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        meeting_date: $("meetingDate").value || null,
-        kind: $("meetingKind").value,
-        features: selectedFeatures(),
-        correct_typos: correctTypos(),
-        name_speakers: nameSpeakers(),
-      }),
-    }));
+    let result;
+    try {
+      result = await jsonOrThrow(await fetch(`/api/live/${liveSessionId}/finish`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(options),
+      }));
+    } catch (e) {
+      // 404＝聆聽 session 不見了。session 只存在伺服器記憶體，行程一重啟（雲端
+      // 重新部署、當掉重生）就永遠找不回來，再按幾次「重試分析」都是同樣的 404。
+      // 但逐字稿在瀏覽器這邊還有一份，改走純文字分析把它救回來——這條路是「貼上
+      // 文字」既有的流程，不需要 session。
+      if (e.status !== 404 || !liveTranscriptText.trim()) throw e;
+      result = await jsonOrThrow(await fetch("/api/meetings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: liveTranscriptText, ...options }),
+      }));
+      // 重啟之後送出的錄音段也會一起 404，所以這份逐字稿可能缺了後半段——
+      // 寧可講清楚，也不要讓使用者以為分析的是完整的一場會議
+      showNotice("聆聽 session 已遺失（伺服器可能重啟過），已改用瀏覽器保留的逐字稿分析。請核對逐字稿結尾是否完整。");
+    }
     $("liveStatus").textContent = "完成";
     liveSessionId = null;
     $("btnLiveStart").disabled = false;
     renderResult(result, result.transcript);
   } catch (e) {
-    showError("分析失敗：" + e.message + "（逐字稿仍在，可按「重試分析」再試一次）");
+    // 404 走到這裡代表上面的退路也救不了：session 沒了、瀏覽器這份逐字稿又是空的。
+    // 這種情況重試永遠是同一個 404，不該再擺一顆按不出結果的按鈕給使用者按
+    const unrecoverable = e.status === 404;
+    showError("分析失敗：" + e.message + (unrecoverable
+      ? "（這場聆聽沒有留下任何逐字稿，無法分析）"
+      : "（逐字稿仍在，可按「重試分析」再試一次）"));
     $("liveStatus").textContent = "分析失敗";
     $("btnLiveStart").disabled = false;  // 也可放棄、重新開始新的一場
-    $("btnLiveRetry").style.display = "inline-flex";
-    $("btnLiveRetry").disabled = false;
+    if (!unrecoverable) {
+      $("btnLiveRetry").style.display = "inline-flex";
+      $("btnLiveRetry").disabled = false;
+    }
   }
 }
 $("btnLiveRetry").addEventListener("click", finishLiveSession);
