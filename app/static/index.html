@@ -199,9 +199,19 @@
       </div>
       <!-- 線上會議戴耳機時，麥克風收不到對方的聲音；勾選後額外分享分頁／系統音訊，和麥克風混音一起錄 -->
       <div class="field-row feature-row">
-        <label class="chk" title="線上會議戴耳機時，麥克風收不到對方的聲音。開啟後會請你分享畫面來擷取聲音：用 Zoom／Teams 等桌面 App 開會請選『整個螢幕』並勾選『分享系統音訊』；會議在瀏覽器分頁（如 Google Meet）請選該『分頁』並勾選『分享分頁音訊』。過程中請保持螢幕分享開著、不要按『停止分享』。桌機版 Chrome／Edge 適用。">
+        <label class="chk" title="線上會議戴耳機時，麥克風收不到對方的聲音。開啟後把對方的聲音一起錄進逐字稿。可從下方選擇音源來源。桌機版 Chrome／Edge 適用。">
           <input type="checkbox" id="liveSystemAudio"> 同時收錄耳機／系統音源（對方聲音）
         </label>
+      </div>
+      <!-- 音源來源：偵測到「立體聲混音」等回放裝置就能直接選、免分享畫面；否則用分享畫面擷取 -->
+      <div class="field-row feature-row" id="liveSysSourceRow" style="display:none">
+        <div class="field" style="flex:1 1 100%">
+          <label class="lbl" for="liveSysSource">耳機／系統音源來源</label>
+          <select class="field-sel" id="liveSysSource" title="選『立體聲混音』等回放裝置可直接擷取耳機聲音、免跳分享視窗；選『分享畫面擷取』則相容性最高但每次會跳出分享視窗">
+            <option value="display">分享畫面擷取（每次會跳分享視窗，相容性最高）</option>
+          </select>
+          <div class="glos-note" id="liveSysHint" style="margin-top:6px"></div>
+        </div>
       </div>
       <div class="actions">
         <button class="primary" id="btnLiveStart">

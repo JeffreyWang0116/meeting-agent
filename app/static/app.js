@@ -139,14 +139,65 @@ function correctTypos() { return $("featCorrect").checked; }
 })();
 function nameSpeakers() { return $("featNameSpeakers").checked; }
 
-// 即時聆聽同時收系統／耳機音源：線上會議戴耳機時麥克風收不到對方，勾了才會多分享一份
-// 分頁／系統音訊混進來。預設關閉（多一次分享權限、且僅桌機支援），記住選擇。
+// 即時聆聽同時收系統／耳機音源：線上會議戴耳機時麥克風收不到對方，勾了才會把對方
+// 的聲音一起錄。預設關閉（多一次權限、且僅桌機支援），記住選擇。
 (function () {
   if (localStorage.getItem("liveSystemAudio") === "1") $("liveSystemAudio").checked = true;
-  $("liveSystemAudio").addEventListener("change", () =>
-    localStorage.setItem("liveSystemAudio", $("liveSystemAudio").checked ? "1" : "0"));
+  const sync = (interactive) => {
+    localStorage.setItem("liveSystemAudio", $("liveSystemAudio").checked ? "1" : "0");
+    $("liveSysSourceRow").style.display = $("liveSystemAudio").checked ? "" : "none";
+    // interactive＝使用者剛手動勾選，才可為了取得裝置名稱去要一次麥克風權限；
+    // 頁面載入時的還原不帶 interactive，避免一開頁就跳權限。
+    if ($("liveSystemAudio").checked) populateSysSources(interactive);
+  };
+  $("liveSystemAudio").addEventListener("change", () => sync(true));
+  // 點開下拉時也解鎖裝置名稱（此時多半已授權過，通常不會再跳權限）
+  $("liveSysSource").addEventListener("focus", () => populateSysSources(true));
+  sync(false);  // 進頁面時依記住的勾選狀態決定要不要展開來源選單
 })();
 function wantSystemAudio() { return $("liveSystemAudio").checked; }
+function sysSourceValue() { return $("liveSysSource").value || "display"; }
+
+// 偵測可直接擷取的「回放輸入裝置」（Windows 立體聲混音、虛擬音效線等）。抓得到就能
+// 用 getUserMedia 直接錄耳機音源、免跳分享視窗；抓不到就只留「分享畫面擷取」。
+// 裝置標籤要授權過麥克風才看得到，所以標籤空白時先要一次麥克風權限再重新列舉。
+const LOOPBACK_RE = /stereo mix|立體聲混音|立体声混音|what ?u ?hear|loopback|cable|voicemeeter|virtual|混音/i;
+async function populateSysSources(interactive) {
+  const sel = $("liveSysSource"), hint = $("liveSysHint");
+  if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) {
+    hint.textContent = "此瀏覽器無法列舉音訊裝置，將使用分享畫面擷取。";
+    return;
+  }
+  const remembered = localStorage.getItem("liveSysSource") || "display";
+  try {
+    let inputs = (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === "audioinput");
+    if (interactive && inputs.length && !inputs[0].label) {  // 沒標籤＝還沒授權過，使用者主動操作時才要一次麥克風權限解鎖名稱
+      try { (await navigator.mediaDevices.getUserMedia({ audio: true })).getTracks().forEach(t => t.stop()); } catch (e) {}
+      inputs = (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === "audioinput");
+    }
+    if (inputs.length && !inputs[0].label) {  // 仍無標籤（尚未授權）：先只放分享畫面，等使用者互動再補
+      hint.textContent = "按一下這個選單或開始聆聽授權麥克風後，才會列出可直接擷取的音源裝置。";
+      return;
+    }
+    const loop = inputs.filter(d => LOOPBACK_RE.test(d.label));
+    // 重建選項：偵測到的回放裝置在前、分享畫面永遠墊底當備援
+    sel.innerHTML = "";
+    for (const d of loop) {
+      sel.appendChild(new Option(`🎧 ${d.label}（直接擷取，免分享視窗）`, d.deviceId));
+    }
+    sel.appendChild(new Option("分享畫面擷取（每次會跳分享視窗，相容性最高）", "display"));
+    // 還原上次選擇；找不到（裝置變動）就退回第一個回放裝置、再退回分享畫面
+    sel.value = remembered;
+    if (sel.value !== remembered) sel.value = loop.length ? loop[0].deviceId : "display";
+    hint.textContent = loop.length
+      ? "已偵測到可直接擷取的音源裝置，選它就不用每次分享畫面。"
+      : "找不到可直接擷取的裝置。在 Windows 音效設定 → 錄製 → 啟用「立體聲混音」後重新整理，即可直接選用、免分享畫面。";
+  } catch (e) {
+    hint.textContent = "列舉裝置失敗，將使用分享畫面擷取：" + e.message;
+  }
+}
+$("liveSysSource").addEventListener("change", () =>
+  localStorage.setItem("liveSysSource", $("liveSysSource").value));
 
 // 即時翻譯目標：記住上次的選擇
 (function () {
@@ -1343,8 +1394,10 @@ let liveMicStream = null, liveSysStream = null, liveMixCtx = null;
 let liveRecording = false, liveSegTimer = null, uploadsInFlight = 0, liveStartTime = null, liveTickTimer = null;
 let liveSegIndex = 0, liveSentCount = 0, liveWakeLock = null, liveStarting = false;
 
-// 取得要錄的串流。withSystemAudio 為真時，額外用「分享畫面」抓分頁／系統音訊
-// （也就是耳機播出去的對方聲音），和麥克風混成一條軌一起錄。
+// 取得要錄的串流。withSystemAudio 為真時，額外抓耳機／系統音源（對方的聲音），
+// 和麥克風混成一條軌一起錄。音源來源由 sysSourceValue() 決定：
+//   deviceId → 直接用 getUserMedia 錄該回放裝置（立體聲混音等），免跳分享視窗；
+//   "display" → 用 getDisplayMedia 分享畫面擷取（相容性最高，但每次會跳分享視窗）。
 async function buildLiveStream(withSystemAudio) {
   try {
     liveMicStream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -1353,31 +1406,7 @@ async function buildLiveStream(withSystemAudio) {
   }
   if (!withSystemAudio) return liveMicStream;
 
-  if (!navigator.mediaDevices.getDisplayMedia) {
-    throw new Error("此瀏覽器不支援擷取系統音源（此功能僅桌機版 Chrome／Edge 可用），請取消勾選「同時收錄耳機／系統音源」");
-  }
-  // 分享對話框一定要挑一個畫面來源才會給音訊，所以連 video 一起要。
-  let sys;
-  try {
-    sys = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
-  } catch (e) {
-    throw new Error("未取得系統音源分享（已取消或被拒）：" + e.message);
-  }
-  liveSysStream = sys;
-  const sysAudio = sys.getAudioTracks()[0];
-  if (!sysAudio) {
-    throw new Error("這次分享沒有帶到聲音。桌面 App 開會請選「整個螢幕」、會議在瀏覽器分頁請選該「分頁」，並務必勾選「分享系統音訊／分頁音訊」再試一次");
-  }
-  // 關鍵：不要 stop 掉畫面軌！系統音源的擷取綁在這個螢幕分享 session 上，
-  // 一旦停掉畫面，聲音會跟著斷（症狀就是「只錄到麥克風」）。改成把畫面「停用」
-  // ——產生黑畫面、幾乎不吃資源，但 session 保持存活，聲音才會持續進來。
-  sys.getVideoTracks().forEach(t => { t.enabled = false; });
-  console.log("[live] 已接上系統音源：", sysAudio.label || "(未命名)", "state=", sysAudio.readyState, "muted=", sysAudio.muted);
-  showNotice("已接上系統／耳機音源，對方的聲音會一起錄進逐字稿。請保持螢幕分享開著，不要按瀏覽器的「停止分享」。");
-  // 使用者按瀏覽器的「停止分享」時，音軌會結束——提醒接下來只剩麥克風
-  sysAudio.addEventListener("ended", () => {
-    if (liveRecording) showNotice("螢幕／系統音源分享已停止，接下來只會錄到麥克風。");
-  });
+  liveSysStream = await acquireSystemAudio(sysSourceValue());
 
   const Ctx = window.AudioContext || window.webkitAudioContext;
   if (!Ctx) throw new Error("此瀏覽器不支援 Web Audio，無法混合系統音源");
@@ -1385,8 +1414,53 @@ async function buildLiveStream(withSystemAudio) {
   if (liveMixCtx.state === "suspended") liveMixCtx.resume().catch(() => {});
   const dest = liveMixCtx.createMediaStreamDestination();
   liveMixCtx.createMediaStreamSource(liveMicStream).connect(dest);
-  liveMixCtx.createMediaStreamSource(sys).connect(dest);
+  liveMixCtx.createMediaStreamSource(liveSysStream).connect(dest);
   return dest.stream;
+}
+
+// 依所選來源取得耳機／系統音源串流；接上時提示、失敗時丟出可讀的錯誤。
+async function acquireSystemAudio(source) {
+  // 直接擷取回放裝置（立體聲混音／虛擬音效線）——關掉麥克風用的回音消除等處理，避免破壞系統音源
+  if (source && source !== "display") {
+    let sys;
+    try {
+      sys = await navigator.mediaDevices.getUserMedia({
+        audio: { deviceId: { exact: source }, echoCancellation: false, noiseSuppression: false, autoGainControl: false },
+      });
+    } catch (e) {
+      throw new Error("無法開啟所選的系統音源裝置：" + e.message + "。請改選其他來源，或在下拉選單改用「分享畫面擷取」");
+    }
+    const t = sys.getAudioTracks()[0];
+    console.log("[live] 已接上系統音源裝置：", t && t.label);
+    showNotice("已接上耳機／系統音源（" + ((t && t.label) || "所選裝置") + "），對方的聲音會一起錄進逐字稿。");
+    return sys;
+  }
+
+  // 分享畫面擷取
+  if (!navigator.mediaDevices.getDisplayMedia) {
+    throw new Error("此瀏覽器不支援分享畫面擷取（此功能僅桌機版 Chrome／Edge 可用），請取消勾選「同時收錄耳機／系統音源」");
+  }
+  let sys;
+  try {  // 分享對話框一定要挑一個畫面來源才會給音訊，所以連 video 一起要。
+    sys = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
+  } catch (e) {
+    throw new Error("未取得系統音源分享（已取消或被拒）：" + e.message);
+  }
+  const sysAudio = sys.getAudioTracks()[0];
+  if (!sysAudio) {
+    sys.getTracks().forEach(t => t.stop());
+    throw new Error("這次分享沒有帶到聲音。桌面 App 開會請選「整個螢幕」、會議在瀏覽器分頁請選該「分頁」，並務必勾選「分享系統音訊／分頁音訊」再試一次");
+  }
+  // 關鍵：不要 stop 掉畫面軌！系統音源的擷取綁在這個螢幕分享 session 上，
+  // 一旦停掉畫面，聲音會跟著斷（症狀就是「只錄到麥克風」）。改成把畫面「停用」
+  // ——產生黑畫面、幾乎不吃資源，但 session 保持存活，聲音才會持續進來。
+  sys.getVideoTracks().forEach(t => { t.enabled = false; });
+  console.log("[live] 已接上系統音源（分享畫面）：", sysAudio.label || "(未命名)", "muted=", sysAudio.muted);
+  showNotice("已接上系統／耳機音源，對方的聲音會一起錄進逐字稿。請保持螢幕分享開著，不要按瀏覽器的「停止分享」。");
+  sysAudio.addEventListener("ended", () => {  // 使用者按「停止分享」時提醒接下來只剩麥克風
+    if (liveRecording) showNotice("螢幕／系統音源分享已停止，接下來只會錄到麥克風。");
+  });
+  return sys;
 }
 
 // 關掉聆聽用到的所有音訊來源與混音器（麥克風、系統音源、混音 AudioContext）
