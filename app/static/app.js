@@ -139,6 +139,15 @@ function correctTypos() { return $("featCorrect").checked; }
 })();
 function nameSpeakers() { return $("featNameSpeakers").checked; }
 
+// 即時聆聽同時收系統／耳機音源：線上會議戴耳機時麥克風收不到對方，勾了才會多分享一份
+// 分頁／系統音訊混進來。預設關閉（多一次分享權限、且僅桌機支援），記住選擇。
+(function () {
+  if (localStorage.getItem("liveSystemAudio") === "1") $("liveSystemAudio").checked = true;
+  $("liveSystemAudio").addEventListener("change", () =>
+    localStorage.setItem("liveSystemAudio", $("liveSystemAudio").checked ? "1" : "0"));
+})();
+function wantSystemAudio() { return $("liveSystemAudio").checked; }
+
 // 即時翻譯目標：記住上次的選擇
 (function () {
   const saved = localStorage.getItem("liveTranslate");
@@ -1326,9 +1335,62 @@ $("btnUpload").addEventListener("click", async () => {
 })();
 
 // ---- 路徑 3：即時聆聽 ----
+// liveStream 是實際交給 MediaRecorder 錄的那條軌：只錄麥克風時就是麥克風串流本身；
+// 若同時收系統／耳機音源，則是「麥克風＋系統音源」混音後的輸出。liveMicStream／
+// liveSysStream 保留原始來源，結束時要各自關掉裝置；liveMixCtx 是負責混音的 AudioContext。
 let liveStream = null, liveRecorder = null, liveSessionId = null;
+let liveMicStream = null, liveSysStream = null, liveMixCtx = null;
 let liveRecording = false, liveSegTimer = null, uploadsInFlight = 0, liveStartTime = null, liveTickTimer = null;
 let liveSegIndex = 0, liveSentCount = 0, liveWakeLock = null, liveStarting = false;
+
+// 取得要錄的串流。withSystemAudio 為真時，額外用「分享畫面」抓分頁／系統音訊
+// （也就是耳機播出去的對方聲音），和麥克風混成一條軌一起錄。
+async function buildLiveStream(withSystemAudio) {
+  try {
+    liveMicStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  } catch (e) {
+    throw new Error("無法取得麥克風權限：" + e.message + "（請到瀏覽器設定允許此網站使用麥克風）");
+  }
+  if (!withSystemAudio) return liveMicStream;
+
+  if (!navigator.mediaDevices.getDisplayMedia) {
+    throw new Error("此瀏覽器不支援擷取系統音源（此功能僅桌機版 Chrome／Edge 可用），請取消勾選「同時收錄耳機／系統音源」");
+  }
+  // 分享對話框一定要挑一個畫面來源才給音訊，所以連 video 一起要，拿到後立刻關掉畫面軌、只留聲音
+  let sys;
+  try {
+    sys = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
+  } catch (e) {
+    throw new Error("未取得系統音源分享（已取消或被拒）：" + e.message);
+  }
+  liveSysStream = sys;
+  sys.getVideoTracks().forEach(t => t.stop());
+  if (sys.getAudioTracks().length === 0) {
+    throw new Error("這次分享沒有帶到聲音。請在分享對話框選「分頁」或「整個螢幕」，並勾選「分享分頁音訊／系統音訊」再試一次");
+  }
+  // 對方按了瀏覽器的「停止分享」時，系統音軌會結束——提醒使用者對方聲音已停止收錄
+  sys.getAudioTracks()[0].addEventListener("ended", () => {
+    if (liveRecording) showNotice("系統／耳機音源分享已停止，接下來只會錄到麥克風。");
+  });
+
+  const Ctx = window.AudioContext || window.webkitAudioContext;
+  if (!Ctx) throw new Error("此瀏覽器不支援 Web Audio，無法混合系統音源");
+  liveMixCtx = new Ctx();
+  if (liveMixCtx.state === "suspended") liveMixCtx.resume().catch(() => {});
+  const dest = liveMixCtx.createMediaStreamDestination();
+  liveMixCtx.createMediaStreamSource(liveMicStream).connect(dest);
+  liveMixCtx.createMediaStreamSource(sys).connect(dest);
+  return dest.stream;
+}
+
+// 關掉聆聽用到的所有音訊來源與混音器（麥克風、系統音源、混音 AudioContext）
+function releaseLiveStreams() {
+  for (const s of [liveMicStream, liveSysStream, liveStream]) {
+    if (s) s.getTracks().forEach(t => t.stop());
+  }
+  if (liveMixCtx) liveMixCtx.close().catch(() => {});
+  liveMicStream = liveSysStream = liveStream = liveMixCtx = null;
+}
 
 // 手機螢幕熄滅會讓瀏覽器暫停錄音 → 聆聽期間用 Wake Lock 保持螢幕常亮
 async function acquireWakeLock() {
@@ -1513,15 +1575,15 @@ $("btnLiveStart").addEventListener("click", async () => {
     return;
   }
   try {
-    liveStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-  } catch (e) { showError("無法取得麥克風權限：" + e.message + "（請到瀏覽器設定允許此網站使用麥克風）"); return; }
+    liveStream = await buildLiveStream(wantSystemAudio());
+  } catch (e) { releaseLiveStreams(); showError(e.message); return; }
   try {
     liveSessionId = (await jsonOrThrow(await fetch("/api/live/start", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ translate_to: $("liveTranslate").value || null }),
     }))).session_id;
-  } catch (e) { showError(e.message); return; }
+  } catch (e) { releaseLiveStreams(); showError(e.message); return; }
 
   liveRecording = true;
   liveStartTime = Date.now();
@@ -1555,7 +1617,7 @@ $("btnLiveStop").addEventListener("click", async () => {
   $("liveStatus").textContent = "整理最後一段錄音…";
 
   if (liveRecorder && liveRecorder.state !== "inactive") liveRecorder.stop();  // 觸發最後一段上傳
-  liveStream.getTracks().forEach(t => t.stop());
+  releaseLiveStreams();  // 關掉麥克風、系統音源與混音器
 
   // 等所有音訊段上傳完成（含最後一段），最多等 3 分鐘
   const deadline = Date.now() + 180000;
