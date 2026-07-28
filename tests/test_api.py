@@ -389,6 +389,56 @@ def test_reanalyze_without_transcript_400(client):
     assert client.post(f"/api/meetings/{meeting_id}/reanalyze").status_code == 400
 
 
+def test_replace_term_uniformly_and_adds_glossary(client):
+    meeting_id = make_meeting(client)  # 逐字稿："鈺翔下週一交 prompt"
+    resp = client.post(
+        f"/api/meetings/{meeting_id}/replace-term",
+        json={"old": "鈺翔", "new": "玉翔", "add_to_glossary": True},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["replaced"] == 1
+    assert body["glossary_added"] is True
+    assert body["meeting"]["transcript"] == "玉翔下週一交 prompt"
+    # 真的寫回了，且新詞進了詞彙表（事後修正兼事前預防）
+    assert client.get(f"/api/meetings/{meeting_id}").json()["transcript"] == "玉翔下週一交 prompt"
+    assert any(t["term"] == "玉翔" for t in client.get("/api/glossary").json()["terms"])
+
+
+def test_replace_term_replaces_every_occurrence(client):
+    meeting_id = make_meeting(client)
+    client.patch(f"/api/meetings/{meeting_id}", json={"transcript": "涵式 A 涵式 B 涵式"})
+    resp = client.post(
+        f"/api/meetings/{meeting_id}/replace-term", json={"old": "涵式", "new": "函式"}
+    )
+    assert resp.status_code == 200
+    assert resp.json()["replaced"] == 3
+    assert client.get(f"/api/meetings/{meeting_id}").json()["transcript"] == "函式 A 函式 B 函式"
+
+
+def test_replace_term_not_found_is_noop(client):
+    meeting_id = make_meeting(client)
+    resp = client.post(
+        f"/api/meetings/{meeting_id}/replace-term",
+        json={"old": "不存在的詞", "new": "x", "add_to_glossary": True},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["replaced"] == 0
+    assert resp.json()["glossary_added"] is False  # 沒替換到就不動詞彙表
+    assert client.get(f"/api/meetings/{meeting_id}").json()["transcript"] == "鈺翔下週一交 prompt"
+    assert client.get("/api/glossary").json()["terms"] == []
+
+
+def test_replace_term_validation_and_missing_meeting(client):
+    meeting_id = make_meeting(client)
+    assert client.post(
+        f"/api/meetings/{meeting_id}/replace-term", json={"old": "  ", "new": "x"}
+    ).status_code == 400  # 空原詞要擋
+    assert client.post(
+        "/api/meetings/nope/replace-term", json={"old": "a", "new": "b"}
+    ).status_code == 404
+
+
 def test_meeting_markdown_report(client):
     meeting_id = make_meeting(client)
     resp = client.get(f"/api/meetings/{meeting_id}/report.md")

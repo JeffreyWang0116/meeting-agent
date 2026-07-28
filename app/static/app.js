@@ -787,6 +787,14 @@ function meetingDetailHtml(id) {
       ${speakers.length ? `<h4>講者（點擊改名，整份逐字稿跟著更新）</h4>
         <div class="speaker-chips">${speakers.map(s =>
           `<span class="speaker-chip" data-id="${esc(id)}" data-speaker="${esc(s)}">✎ ${esc(s)}</span>`).join("")}</div>` : ""}
+      <h4>詞彙統一替換</h4>
+      <div class="term-replace">
+        <input type="text" class="term-from" placeholder="原詞（聽錯的，如：涵式）">
+        <span class="term-arrow">→</span>
+        <input type="text" class="term-to" placeholder="改成（如：函式）">
+        <button class="ghost term-apply" data-id="${esc(id)}">全部替換</button>
+        <label class="chk term-glos"><input type="checkbox" checked> 一併加入詞彙表，之後轉錄不再聽錯</label>
+      </div>
       <h4>完整逐字稿 <button class="ghost copy-detail" data-id="${esc(id)}">複製全文</button></h4>
       <div class="detail-transcript" id="dTranscriptView"></div>
       <div class="detail-actions">
@@ -1018,6 +1026,38 @@ $("meetingRows").addEventListener("click", async e => {
       box.style.display = "block";
     } catch (err) { showError("翻譯失敗：" + err.message); }
     finally { trans.textContent = "翻譯"; }
+    return;
+  }
+
+  const termBtn = e.target.closest(".term-apply");
+  if (termBtn) {
+    const id = termBtn.dataset.id;
+    const wrap = termBtn.closest(".term-replace");
+    const from = wrap.querySelector(".term-from").value.trim();
+    const to = wrap.querySelector(".term-to").value;  // 不 trim：允許留空＝把該詞刪掉
+    const addGlos = wrap.querySelector(".term-glos input").checked;
+    if (!from) { showError("請先輸入要替換的原詞"); return; }
+    if (from === to.trim()) { showError("原詞與新詞相同，無需替換"); return; }
+    termBtn.disabled = true; termBtn.textContent = "替換中…";
+    try {
+      const r = await jsonOrThrow(await fetch(`/api/meetings/${id}/replace-term`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ old: from, new: to, add_to_glossary: addGlos }),
+      }));
+      if (r.replaced === 0) {
+        showNotice(`逐字稿裡找不到「${from}」，沒有任何替換。`);
+        termBtn.disabled = false; termBtn.textContent = "全部替換";
+        return;
+      }
+      meetingDetailCache[id] = r.meeting;
+      showNotice(`已把「${from}」替換成「${to || "（刪除）"}」共 ${r.replaced} 處` +
+        (r.glossary_added ? "，並已加入詞彙表" : "") + "。");
+      renderMeetings();
+    } catch (err) {
+      showError("詞彙替換失敗：" + err.message);
+      termBtn.disabled = false; termBtn.textContent = "全部替換";
+    }
     return;
   }
 

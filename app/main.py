@@ -125,6 +125,12 @@ class ReanalyzeRequest(BaseModel):
     name_speakers: bool = False
 
 
+class ReplaceTermRequest(BaseModel):
+    old: str
+    new: str = ""  # 允許空字串＝把該詞整個刪掉
+    add_to_glossary: bool = False
+
+
 class AskRequest(BaseModel):
     question: str
     meeting_ids: Optional[list[str]] = None  # 限定檢索範圍（複選會議）；None = 全部
@@ -408,6 +414,37 @@ def create_app(
             raise HTTPException(status_code=404, detail=f"找不到會議：{meeting_id}")
         drop_from_rag(meeting_id)
         return updated
+
+    @app.post("/api/meetings/{meeting_id}/replace-term")
+    def replace_term(meeting_id: str, req: ReplaceTermRequest):
+        """把逐字稿裡某個詞的所有出現處統一換成新詞；可一併加入詞彙表，
+        讓之後的錄音轉錄不再聽錯（事後修正兼事前預防）。"""
+        old = (req.old or "").strip()
+        new = (req.new or "").strip()
+        if not old:
+            raise HTTPException(status_code=400, detail="原詞不可為空")
+        record = store.get_meeting(meeting_id)
+        if record is None:
+            raise HTTPException(status_code=404, detail=f"找不到會議：{meeting_id}")
+        transcript = record.get("transcript") or ""
+        count = transcript.count(old)
+        updated = record
+        if count:
+            updated = store.update_meeting(
+                meeting_id, {"transcript": transcript.replace(old, new)}
+            )
+            drop_from_rag(meeting_id)  # 逐字稿變了，RAG 索引要作廢重建
+        # 只有真的替換到、且新詞非空才動詞彙表；詞彙表滿了就靜默略過（替換本身已成功）
+        added = False
+        if req.add_to_glossary and new and count:
+            terms = glossary.terms()
+            if not any(t.get("term") == new for t in terms):
+                try:
+                    glossary.replace(terms + [{"term": new, "note": ""}])
+                    added = True
+                except ValueError:
+                    pass
+        return {"meeting": updated, "replaced": count, "glossary_added": added}
 
     @app.delete("/api/meetings/{meeting_id}")
     def delete_meeting(meeting_id: str):
