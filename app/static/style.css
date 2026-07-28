@@ -578,6 +578,7 @@
   }
   .tag-chip:hover { border-color: var(--ink); color: var(--ink); }
   .tag-chip.active { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+  .tag-chip.tag-more { border-style: dashed; }
 
   /* 歷史會議展開詳情 */
   .meeting-detail {
@@ -757,3 +758,39 @@
     padding: 5px 8px; border-radius: var(--radius-sm); transition: color .15s, background .15s;
   }
   .panel-x:hover { color: var(--high); background: var(--high-soft); }
+
+  /* ---- 即時聆聽沉浸畫面（聲控光球） ---- */
+  .live-stage {
+    position: fixed; inset: 0; z-index: 90;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 18px; padding: 24px;
+    background: var(--bg);
+    animation: fadeIn .3s ease;
+  }
+  .live-stage[hidden] { display: none; }
+  .stage-close { position: absolute; top: 18px; right: 18px; }
+  .stage-orb {
+    width: min(46vh, 78vw); height: min(46vh, 78vw); flex: none;
+    /* WebGL 不可用時的備援：光球模組回傳 null，只留下這圈會呼吸的光暈 */
+    border-radius: 50%; background: radial-gradient(circle, var(--accent-soft) 0%, transparent 68%);
+  }
+  .stage-orb.no-webgl { animation: pulse 2.4s ease-in-out infinite; }
+  .stage-time {
+    font-size: clamp(2rem, 7vw, 3.2rem); font-weight: 300; letter-spacing: -.02em;
+    color: var(--ink); font-variant-numeric: tabular-nums; line-height: 1;
+  }
+  .stage-note { font-size: .84rem; color: var(--muted); display: flex; align-items: center; gap: 8px; min-height: 1.2em; }
+  /* 逐字稿是從面板搬進來的，得覆寫它原本的卡片外觀讓它融進沉浸畫面 */
+  .stage-slot { width: min(680px, 100%); flex: 0 1 auto; min-height: 0; display: flex; }
+  .stage-slot .transcript-box {
+    flex: 1; background: none; border: none; padding: 0; max-height: 26vh;
+    text-align: left; -webkit-mask-image: linear-gradient(transparent, #000 22px);
+    mask-image: linear-gradient(transparent, #000 22px);
+  }
+  .stage-actions { display: flex; gap: 10px; }
+
+  @media (max-width: 640px) {
+    .live-stage { gap: 14px; }
+    .stage-orb { width: min(34vh, 74vw); height: min(34vh, 74vw); }
+    .stage-slot .transcript-box { max-height: 18vh; }
+  }

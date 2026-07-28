@@ -132,16 +132,14 @@
     <!-- 錯字校正不分錄音種類都適用，所以獨立一列、永遠顯示 -->
     <div class="field-row feature-row">
       <label class="chk" title="轉錄後多花一次 AI 請求，用上下文修掉同音錯字（如「涵式」→「函式」）">
-        <input type="checkbox" id="featCorrect"> AI 校正錯字
-        <span class="chk-note">多一次請求</span>
+        <input type="checkbox" id="featCorrect"> 校正錯字
       </label>
     </div>
 
     <!-- 講者姓名對應：預設關閉。台語等語者辨識不穩的錄音容易對錯，猜錯的名字比代號更糟 -->
     <div class="field-row feature-row">
       <label class="chk" title="轉錄後多花一次 AI 請求，依對話內容把「講者A/B/C」換成真實姓名。台語或多口音、語者難分辨的錄音建議關閉，維持代號較不易出錯">
-        <input type="checkbox" id="featNameSpeakers"> AI 辨識講者姓名
-        <span class="chk-note">多一次請求</span>
+        <input type="checkbox" id="featNameSpeakers"> 辨識名稱
       </label>
     </div>
 
@@ -200,6 +198,10 @@
         <button class="primary danger" id="btnLiveStop" disabled>
           <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="5" width="14" height="14" rx="1.5"/></svg>
           結束會議並分析
+        </button>
+        <button class="ghost" id="btnLiveStage" style="display:none">
+          <svg class="i-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3"/></svg>
+          回到沉浸畫面
         </button>
         <button class="ghost" id="btnLiveRetry" style="display:none">
           <svg class="i-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11a9 9 0 1 1-2.7-6.4"/><path d="M21 3v6h-6"/></svg>
@@ -429,6 +431,27 @@
   </footer>
 </div>
 
+<!-- 即時聆聽的沉浸畫面：聆聽期間蓋滿螢幕，顯示聲控光球、計時與即時字幕。
+     裡面的逐字稿是把 #liveTranscript 整個節點搬進來，不是另一份複本，
+     所以現有的字幕附加邏輯完全不用改 -->
+<div class="live-stage" id="liveStage" hidden>
+  <button class="ghost stage-close" id="btnStageClose" title="收合畫面，錄音會繼續進行">
+    <svg class="i-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12M18 6 6 18"/></svg>
+    收合
+  </button>
+  <div class="stage-orb" id="stageOrb"></div>
+  <div class="stage-time mono" id="stageTime">00:00</div>
+  <div class="stage-note" id="stageNote"></div>
+  <div class="stage-slot" id="stageSlot"></div>
+  <div class="stage-actions">
+    <button class="primary danger" id="btnStageStop">
+      <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="5" width="14" height="14" rx="1.5"/></svg>
+      結束會議並分析
+    </button>
+  </div>
+</div>
+
+<script src="/static/orb.js"></script>
 <script src="/static/app.js"></script>
 </body>
 </html>

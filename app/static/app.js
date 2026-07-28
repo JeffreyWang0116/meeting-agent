@@ -690,20 +690,32 @@ function meetingDetailHtml(id) {
 }
 
 let activeTag = "";  // 歷史會議標籤篩選（"" = 全部）
+let tagsExpanded = false;  // AI 每場會議都自己取標籤，久了會很雜——預設只顯示最常用的幾個
+const TAG_FILTER_LIMIT = 12;
 
 function renderTagFilter() {
-  const tags = new Set();
+  const counts = new Map();
   allMeetings.forEach(m => {
-    if (m.kind) tags.add(m.kind);
-    (m.tags || []).forEach(t => tags.add(t));
+    if (m.kind) counts.set(m.kind, (counts.get(m.kind) || 0) + 1);
+    (m.tags || []).forEach(t => counts.set(t, (counts.get(t) || 0) + 1));
   });
   const bar = $("tagFilter");
-  if (!tags.size) { bar.style.display = "none"; return; }
-  if (activeTag && !tags.has(activeTag)) activeTag = "";
+  if (!counts.size) { bar.style.display = "none"; return; }
+  if (activeTag && !counts.has(activeTag)) activeTag = "";
   bar.style.display = "flex";
+
+  const sorted = [...counts.entries()].sort((a, b) => b[1] - a[1]).map(([t]) => t);
+  const overflow = sorted.length - TAG_FILTER_LIMIT;
+  let visible = overflow <= 0 || tagsExpanded ? sorted : sorted.slice(0, TAG_FILTER_LIMIT);
+  // 目前選中的標籤若被截掉了也要顯示，不然使用者會看不到自己選的是哪個
+  if (activeTag && !visible.includes(activeTag)) visible = [...visible, activeTag];
+
   bar.innerHTML = [`<span class="tag-chip ${activeTag ? "" : "active"}" data-tag="">全部</span>`]
-    .concat([...tags].map(t =>
+    .concat(visible.map(t =>
       `<span class="tag-chip ${t === activeTag ? "active" : ""}" data-tag="${esc(t)}">${esc(t)}</span>`))
+    .concat(overflow > 0
+      ? [`<span class="tag-chip tag-more" data-more="1">${tagsExpanded ? "收合" : `更多 +${overflow}`}</span>`]
+      : [])
     .join("");
 }
 
@@ -1028,6 +1040,7 @@ refreshReminders();
 
 // 標籤篩選
 $("tagFilter").addEventListener("click", e => {
+  if (e.target.closest("[data-more]")) { tagsExpanded = !tagsExpanded; renderTagFilter(); return; }
   const chip = e.target.closest(".tag-chip");
   if (!chip) return;
   activeTag = chip.dataset.tag;
@@ -1282,11 +1295,96 @@ function pickMime() {
 function liveTick() {
   if (!liveRecording) return;
   const s = Math.floor((Date.now() - liveStartTime) / 1000);
+  const clock = `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
   const pending = uploadsInFlight > 0 ? `，${uploadsInFlight} 段辨識中…` : "";
   const sent = liveSentCount > 0 ? `已送出 ${liveSentCount} 段${pending}` : `第一段約 ${Math.min(12, chunkSeconds)} 秒後送出`;
-  $("liveStatus").innerHTML =
-    `<span class="rec-dot"></span>聆聽中 ${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}（${sent}）`;
+  $("liveStatus").innerHTML = `<span class="rec-dot"></span>聆聽中 ${clock}（${sent}）`;
+  if (!$("liveStage").hidden) {
+    $("stageTime").textContent = clock;
+    $("stageNote").innerHTML = `<span class="rec-dot"></span>${sent}`;
+  }
 }
+
+// ---- 聆聽沉浸畫面：聲控光球＋計時＋即時字幕 ----
+// 音量分析共用 liveStream（MediaRecorder 錄的同一份），不另外開麥克風：
+// 手機上開第二份串流可能跟錄音搶裝置，也會多跳一次權限。
+let orb = null, orbRaf = 0, audioCtx = null, analyser = null, analyserData = null;
+let transcriptHome = null;  // 逐字稿節點原本的位置，收合時要放回去
+
+function initStageAudio() {
+  if (analyser || !liveStream) return;
+  const Ctx = window.AudioContext || window.webkitAudioContext;
+  if (!Ctx) return;
+  try {
+    audioCtx = new Ctx();
+    analyser = audioCtx.createAnalyser();
+    analyser.fftSize = 512;
+    analyser.smoothingTimeConstant = 0.3;
+    // 只接到 analyser、刻意不接 destination——接上輸出等於把麥克風擴音出來，會回授
+    audioCtx.createMediaStreamSource(liveStream).connect(analyser);
+    analyserData = new Uint8Array(analyser.frequencyBinCount);
+  } catch (e) {
+    audioCtx = null; analyser = null;  // 分析失敗不影響錄音，光球退化成只自轉
+  }
+}
+
+function releaseStageAudio() {
+  if (audioCtx) audioCtx.close().catch(() => {});
+  audioCtx = null; analyser = null; analyserData = null;
+}
+
+function pumpLevel() {
+  orbRaf = requestAnimationFrame(pumpLevel);
+  if (!orb || !analyser) return;
+  analyser.getByteFrequencyData(analyserData);
+  let sum = 0;
+  for (let i = 0; i < analyserData.length; i++) {
+    const v = analyserData[i] / 255;
+    sum += v * v;
+  }
+  orb.setLevel(Math.sqrt(sum / analyserData.length) * 4.5);  // RMS 比平均值更貼近人聲強弱
+}
+
+function openStage() {
+  $("liveStage").hidden = false;
+  $("btnLiveStage").style.display = "none";
+
+  // 把逐字稿「整個節點」搬進沉浸畫面（不是複製），現有字幕附加邏輯才不用改
+  const box = $("liveTranscript");
+  if (!transcriptHome) transcriptHome = { parent: box.parentNode, next: box.nextSibling };
+  $("stageSlot").appendChild(box);
+
+  const holder = $("stageOrb");
+  orb = window.createVoiceOrb ? window.createVoiceOrb(holder) : null;
+  holder.classList.toggle("no-webgl", !orb);  // 沒有 WebGL 就退回 CSS 呼吸光暈
+
+  initStageAudio();
+  if (audioCtx && audioCtx.state === "suspended") audioCtx.resume();
+  cancelAnimationFrame(orbRaf);
+  pumpLevel();
+  liveTick();
+}
+
+// 只收合畫面，錄音與上傳完全不受影響
+function closeStage() {
+  if ($("liveStage").hidden) return;
+  $("liveStage").hidden = true;
+  cancelAnimationFrame(orbRaf);
+  orbRaf = 0;
+  if (orb) { orb.destroy(); orb = null; }
+  const box = $("liveTranscript");
+  if (transcriptHome) {
+    transcriptHome.parent.insertBefore(box, transcriptHome.next);
+    transcriptHome = null;
+  }
+}
+
+$("btnStageStop").addEventListener("click", () => $("btnLiveStop").click());
+$("btnStageClose").addEventListener("click", () => {
+  closeStage();
+  if (liveRecording) $("btnLiveStage").style.display = "inline-flex";
+});
+$("btnLiveStage").addEventListener("click", openStage);
 
 // 即時字幕流：逐段附加逐字稿行（後端回傳的文字已帶整場時間戳），末端保留打字游標。
 // liveSpeakers 讓同一位講者在整場聆聽中維持同色。
@@ -1374,6 +1472,7 @@ $("btnLiveStart").addEventListener("click", async () => {
   liveTickTimer = setInterval(liveTick, 1000);
   liveTick();
   recordSegment();
+  openStage();
 });
 
 $("btnLiveStop").addEventListener("click", async () => {
@@ -1382,6 +1481,9 @@ $("btnLiveStop").addEventListener("click", async () => {
   clearTimeout(liveSegTimer);
   clearInterval(liveTickTimer);
   releaseWakeLock();
+  closeStage();
+  releaseStageAudio();
+  $("btnLiveStage").style.display = "none";
   $("btnLiveStop").disabled = true;
   $("liveStatus").textContent = "整理最後一段錄音…";
 
