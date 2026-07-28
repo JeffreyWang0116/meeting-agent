@@ -1356,7 +1356,7 @@ async function buildLiveStream(withSystemAudio) {
   if (!navigator.mediaDevices.getDisplayMedia) {
     throw new Error("此瀏覽器不支援擷取系統音源（此功能僅桌機版 Chrome／Edge 可用），請取消勾選「同時收錄耳機／系統音源」");
   }
-  // 分享對話框一定要挑一個畫面來源才給音訊，所以連 video 一起要，拿到後立刻關掉畫面軌、只留聲音
+  // 分享對話框一定要挑一個畫面來源才會給音訊，所以連 video 一起要。
   let sys;
   try {
     sys = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
@@ -1364,13 +1364,19 @@ async function buildLiveStream(withSystemAudio) {
     throw new Error("未取得系統音源分享（已取消或被拒）：" + e.message);
   }
   liveSysStream = sys;
-  sys.getVideoTracks().forEach(t => t.stop());
-  if (sys.getAudioTracks().length === 0) {
-    throw new Error("這次分享沒有帶到聲音。請在分享對話框選「分頁」或「整個螢幕」，並勾選「分享分頁音訊／系統音訊」再試一次");
+  const sysAudio = sys.getAudioTracks()[0];
+  if (!sysAudio) {
+    throw new Error("這次分享沒有帶到聲音。桌面 App 開會請選「整個螢幕」、會議在瀏覽器分頁請選該「分頁」，並務必勾選「分享系統音訊／分頁音訊」再試一次");
   }
-  // 對方按了瀏覽器的「停止分享」時，系統音軌會結束——提醒使用者對方聲音已停止收錄
-  sys.getAudioTracks()[0].addEventListener("ended", () => {
-    if (liveRecording) showNotice("系統／耳機音源分享已停止，接下來只會錄到麥克風。");
+  // 關鍵：不要 stop 掉畫面軌！系統音源的擷取綁在這個螢幕分享 session 上，
+  // 一旦停掉畫面，聲音會跟著斷（症狀就是「只錄到麥克風」）。改成把畫面「停用」
+  // ——產生黑畫面、幾乎不吃資源，但 session 保持存活，聲音才會持續進來。
+  sys.getVideoTracks().forEach(t => { t.enabled = false; });
+  console.log("[live] 已接上系統音源：", sysAudio.label || "(未命名)", "state=", sysAudio.readyState, "muted=", sysAudio.muted);
+  showNotice("已接上系統／耳機音源，對方的聲音會一起錄進逐字稿。請保持螢幕分享開著，不要按瀏覽器的「停止分享」。");
+  // 使用者按瀏覽器的「停止分享」時，音軌會結束——提醒接下來只剩麥克風
+  sysAudio.addEventListener("ended", () => {
+    if (liveRecording) showNotice("螢幕／系統音源分享已停止，接下來只會錄到麥克風。");
   });
 
   const Ctx = window.AudioContext || window.webkitAudioContext;
