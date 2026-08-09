@@ -47,6 +47,16 @@ logger = logging.getLogger(__name__)
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 
+class NoCacheStatic(StaticFiles):
+    """前端檔案一改就要生效：只做協商快取（每次帶 ETag 問一次，沒變就回 304），
+    不讓瀏覽器用啟發式規則自己留舊檔。部署後看到的還是舊版 CSS 是最難查的 bug。"""
+
+    def file_response(self, *args, **kwargs):
+        resp = super().file_response(*args, **kwargs)
+        resp.headers["Cache-Control"] = "no-cache"
+        return resp
+
+
 # 錄音種類：影響 Decision Agent 的分析重點（見 KIND_HINTS），也存進會議紀錄供分類
 MEETING_KINDS = {"會議", "通話", "訪談", "語音備忘錄", "講座", "其它"}
 
@@ -327,10 +337,12 @@ def create_app(
 
     @app.get("/", include_in_schema=False)
     def index():
-        return FileResponse(STATIC_DIR / "index.html")
+        # 與 /static 同樣只做協商快取：入口 HTML 一旦被留成舊版，
+        # 後面所有靜態檔的版本就都跟著錯
+        return FileResponse(STATIC_DIR / "index.html", headers={"Cache-Control": "no-cache"})
 
     # 前端靜態檔（style.css / app.js / icon.svg）統一由 /static 供應
-    app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+    app.mount("/static", NoCacheStatic(directory=STATIC_DIR), name="static")
 
     # ---- PWA：manifest / service worker ----
     # sw.js 必須從根路徑供應，service worker 的 scope 才涵蓋整個站
