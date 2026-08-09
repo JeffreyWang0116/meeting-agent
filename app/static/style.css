@@ -116,22 +116,67 @@
     background-attachment: fixed;
   }
 
-  .wrap { max-width: 940px; margin: 0 auto; padding: 36px 20px 80px; display: flex; flex-direction: column; gap: 22px; }
+  /* ---- 圖示（Lucide，來自 /static/icons.svg 的 <symbol>）----
+     stroke-width 寫在這裡而不是雪碧圖裡：它是可繼承的 SVG presentation property，
+     會傳進 <use> 的 shadow tree，所以三種尺寸各自調到視覺重量一致 */
+  .i { width: 16px; height: 16px; flex: none; vertical-align: -3px; stroke-width: 1.7; }
+  .i-sm { width: 13px; height: 13px; flex: none; vertical-align: -2px; stroke-width: 1.9; }
+  .i-lg { width: 20px; height: 20px; flex: none; vertical-align: -5px; stroke-width: 1.5; }
 
-  /* ---- 圖示 ---- */
-  .i { width: 16px; height: 16px; flex: none; vertical-align: -3px; }
-  .i-sm { width: 13px; height: 13px; vertical-align: -2px; }
-  .i-lg { width: 20px; height: 20px; vertical-align: -5px; }
+  /* ---- App shell：左固定側欄 ＋ 右工作區 ----
+     側欄用 sticky 而非 fixed，body 仍是唯一捲動容器，
+     結果頁右欄的 position: sticky 才能正常運作 */
+  .app { display: grid; grid-template-columns: 236px minmax(0, 1fr); min-height: 100dvh; }
+  .sidebar {
+    position: sticky; top: 0; align-self: start; height: 100dvh;
+    display: flex; flex-direction: column; gap: 22px; padding: 26px 14px;
+    border-right: 1px solid var(--border); background: var(--card);
+  }
+  .side-brand {
+    display: flex; align-items: center; gap: 10px; padding: 0 10px;
+    font-size: 1.06rem; font-weight: 500; letter-spacing: -.015em; color: var(--ink);
+  }
+  .side-brand .i { color: var(--accent); }
+  .side-nav { display: flex; flex-direction: column; gap: 2px; }
+  .nav-item {
+    display: flex; align-items: center; gap: 11px; width: 100%; text-align: left;
+    border: none; background: none; padding: 10px 12px; border-radius: var(--radius-md);
+    font-family: var(--sans); font-size: .89rem; font-weight: 500; color: var(--muted);
+    transition: color .15s, background .15s;
+  }
+  .nav-item .i { color: var(--faint); transition: color .15s; }
+  .nav-item:hover { color: var(--ink); background: var(--card-2); }
+  .nav-item:hover .i { color: var(--muted); }
+  .nav-item.active { color: var(--ink); background: var(--card-3); }
+  .nav-item.active .i { color: var(--accent); }
+  .nav-text { flex: 1; min-width: 0; }
+  .nav-badge {
+    flex: none; font-family: var(--label); font-size: .7rem; font-weight: 500;
+    min-width: 20px; text-align: center; padding: 1px 7px; border-radius: 999px;
+    color: var(--medium); background: var(--medium-soft); border: 1px solid var(--medium);
+  }
+  .nav-badge[hidden] { display: none; }
 
-  /* ---- 頁首 ---- */
-  header { display: flex; flex-direction: column; gap: 18px; }
-  .brand-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+  .main { min-width: 0; display: flex; flex-direction: column; }
+  .topbar {
+    position: sticky; top: 0; z-index: 50;
+    display: flex; align-items: center; justify-content: space-between; gap: 16px;
+    padding: 16px 28px; border-bottom: 1px solid var(--border);
+    background: color-mix(in srgb, var(--bg) 88%, transparent);
+    backdrop-filter: blur(10px);
+  }
   /* 招牌細字大標：weight 300 + 負字距，靠尺度而非粗細建立權威感 */
-  .brand h1 {
-    margin: 0; font-size: 2.4rem; font-weight: 300; letter-spacing: -.028em; line-height: 1.02;
-    text-wrap: balance; color: var(--ink);
+  .topbar h1 {
+    margin: 0; font-size: 1.5rem; font-weight: 300; letter-spacing: -.025em; line-height: 1.1;
+    color: var(--ink);
   }
   .head-tools { display: flex; align-items: center; gap: 14px; }
+
+  .wrap { width: 100%; max-width: 1280px; margin: 0 auto; padding: 28px 28px 80px; display: flex; flex-direction: column; gap: 22px; }
+  /* 一次只顯示一個 view；表單類窄一點好讀，資料類吃滿寬度 */
+  .view { display: none; flex-direction: column; gap: 22px; max-width: 980px; }
+  .view.active { display: flex; animation: fadeIn .2s ease; }
+  #view-home, #view-result, #view-task, #view-meeting { max-width: 100%; }
   #themeToggle { padding: 8px 10px; }
   #themeToggle .icon-sun { display: none; }
   body.light #themeToggle .icon-sun { display: inline; }
@@ -309,14 +354,17 @@
   .status-sel.st-done { color: var(--low); border-color: var(--low); }
   .row-done td { opacity: .55; }
   .row-done td:first-child { text-decoration: line-through; }
+  /* 這兩顆按鈕裡面現在是 <svg> 不是文字符號，要用 flex 置中才不會偏 */
   .del-btn {
+    display: inline-flex; align-items: center; justify-content: center;
     background: none; border: none; color: var(--faint); font-size: .85rem; line-height: 1;
-    padding: 4px 6px; border-radius: var(--radius-sm); transition: color .15s, background .15s;
+    padding: 5px 6px; border-radius: var(--radius-sm); transition: color .15s, background .15s;
   }
   .del-btn:hover { color: var(--high); background: var(--high-soft); }
   .edit-btn {
+    display: inline-flex; align-items: center; justify-content: center;
     background: none; border: none; color: var(--faint); line-height: 1;
-    padding: 4px 6px; border-radius: var(--radius-sm); transition: color .15s, background .15s;
+    padding: 5px 6px; border-radius: var(--radius-sm); transition: color .15s, background .15s;
   }
   .edit-btn:hover { color: var(--accent); background: var(--accent-soft); }
   .edit-btn.save { color: var(--low); }
@@ -535,12 +583,34 @@
   .site-footer summary:hover { color: var(--ink); }
   .site-footer ul { margin: 8px 0 0; padding-left: 18px; display: flex; flex-direction: column; gap: 4px; line-height: 1.7; }
 
+  /* ---- 平板／手機：側欄改成底部 tab bar ---- */
+  .nav-item[hidden] { display: none; }
+  @media (max-width: 900px) {
+    .app { grid-template-columns: 1fr; }
+    .sidebar {
+      position: fixed; inset: auto 0 0 0; z-index: 70; height: auto;
+      flex-direction: row; gap: 0; padding: 5px 6px calc(5px + env(safe-area-inset-bottom));
+      border-right: none; border-top: 1px solid var(--border);
+    }
+    .side-brand { display: none; }
+    .side-nav { flex: 1; flex-direction: row; justify-content: space-around; gap: 0; }
+    .nav-item {
+      position: relative; flex-direction: column; gap: 3px; align-items: center;
+      padding: 7px 4px; font-size: .66rem; text-align: center;
+    }
+    .nav-item .i { width: 19px; height: 19px; }
+    .nav-text { flex: none; }
+    .nav-badge { position: absolute; top: 2px; left: 50%; margin-left: 5px; min-width: 16px; font-size: .6rem; padding: 0 5px; }
+    .wrap { padding: 22px 16px 96px; }
+    .topbar { padding: 13px 16px; }
+  }
+
   /* ---- 手機響應式 ---- */
   @media (max-width: 640px) {
     body { font-size: 14.5px; }
-    .wrap { padding: 20px 12px 60px; gap: 16px; }
+    .wrap { padding: 18px 12px 92px; gap: 16px; }
     .panel { padding: 16px; border-radius: var(--radius-md); }
-    .brand h1 { font-size: 1.45rem; }
+    .topbar h1 { font-size: 1.2rem; }
     .tabs { align-self: stretch; }
     .tab { flex: 1; justify-content: center; padding: 9px 8px; font-size: .82rem; }
     .panel-actions { width: 100%; }
@@ -638,8 +708,103 @@
 
   .hint { font-size: .82rem; color: var(--faint); margin: 0; }
 
+  /* ---- 骨架載入 ----
+     用純色方塊的明度呼吸，不用漸層掃光：跟本站「零陰影、靠明度分層」的材質一致。
+     prefers-reduced-motion 由檔案開頭那條全域規則統一關掉動畫 */
+  .skel {
+    display: block; height: .72em; min-height: 10px; border-radius: var(--radius-sm);
+    background: var(--card-3); animation: skel-pulse 1.5s ease-in-out infinite;
+  }
+  @keyframes skel-pulse { 0%, 100% { opacity: .5; } 50% { opacity: 1; } }
+  .skel + .skel { margin-top: 8px; }
+  .skel-num { width: 3.2ch; height: 1.5rem; margin: 4px 0 6px; }
+  .skel-list { display: flex; flex-direction: column; gap: 8px; }
+  .skel-block {
+    border: 1px solid var(--border); border-radius: var(--radius-md);
+    background: var(--card-2); padding: 13px 14px;
+  }
+  .skel-row td { padding: 13px 12px; }
+  /* 骨架期間把還沒有資料可操作的按鈕藏起來，免得按了沒反應 */
+  #result.is-loading #btnTransSummary,
+  #result.is-loading #icsLink,
+  #result.is-loading .draft-tools,
+  #result.is-loading h3.sub .aux { display: none; }
+
+  .load-fail {
+    display: flex; align-items: center; gap: 9px; margin: 0;
+    padding: 14px; font-size: .87rem; color: var(--muted);
+    border: 1px dashed var(--border-strong); border-radius: var(--radius-md); background: var(--card-2);
+  }
+  .load-fail .i-sm { color: var(--high); }
+  .load-fail .ghost { margin-left: auto; }
+
+  /* ---- 首頁儀表板 ---- */
+  .home-hero {
+    display: flex; align-items: center; justify-content: space-between; gap: 20px; flex-wrap: wrap;
+    padding: 24px 26px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--card-2);
+  }
+  .hero-copy { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+  .hero-copy h2 {
+    margin: 0; font-size: 1.5rem; font-weight: 300; letter-spacing: -.022em; color: var(--ink); text-wrap: balance;
+  }
+  .stat-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+  .stat-tile {
+    display: flex; flex-direction: column; align-items: flex-start; gap: 4px; text-align: left;
+    padding: 18px 20px; border: 1px solid var(--border); border-radius: var(--radius);
+    background: var(--card-2); color: inherit; font-family: var(--sans);
+    transition: border-color .15s, background .15s, transform .08s;
+  }
+  .stat-tile:not(.static):hover { border-color: var(--border-strong); background: var(--card-3); }
+  .stat-tile:not(.static):active { transform: translateY(1px); }
+  .stat-tile.static { cursor: default; }
+  .stat-num {
+    font-family: var(--label); font-size: 2rem; font-weight: 500; line-height: 1.1;
+    color: var(--ink); font-variant-numeric: tabular-nums;
+  }
+  /* 逾期是唯一該讓人不安的數字，非零才變色 */
+  .stat-num.alarm.hot { color: var(--high); }
+  .stat-lbl { font-size: .8rem; color: var(--faint); }
+  .home-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 18px; align-items: start; }
+  .home-list { display: flex; flex-direction: column; gap: 8px; }
+  .home-row {
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    padding: 11px 14px; border: 1px solid var(--border); border-radius: var(--radius-md);
+    background: var(--card-2); font-size: .88rem; cursor: pointer;
+    transition: border-color .15s, background .15s;
+  }
+  .home-row:hover { border-color: var(--accent-border); background: var(--accent-soft); }
+  .home-row .home-row-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .home-row b { font-weight: 500; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .home-row .meta { font-family: var(--mono); font-size: .75rem; color: var(--faint); }
+  .home-row .i { flex: none; color: var(--faint); }
+  /* 首頁的窄螢幕調整必須寫在自己的基準規則之後（同權重時後者勝），
+     不能併回上面那組「手機響應式」——那一段位置比這裡早 */
+  @media (max-width: 900px) {
+    .stat-grid { grid-template-columns: repeat(2, 1fr); }
+  }
+  @media (max-width: 640px) {
+    .home-hero { padding: 18px; }
+    .home-hero .primary { width: 100%; justify-content: center; }
+    .stat-tile { padding: 14px 15px; }
+    .stat-num { font-size: 1.6rem; }
+  }
+
   /* ---- 結果（工作階段報告）---- */
   #result { display: none; }
+  /* 雙欄工作台：左報告、右逐字稿常駐對照 */
+  .report-grid { display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: 26px; align-items: start; }
+  .report-main { min-width: 0; display: flex; flex-direction: column; gap: 16px; }
+  .report-side { position: sticky; top: 84px; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+  /* 右欄的逐字稿吃滿剩餘視窗高度、內部自己捲，不跟著頁面一起長。
+     這裡不能用 flex 撐開：app.js 會在 #rTransSec 上寫 inline display，
+     會蓋掉 display: flex，所以直接限制內容區高度最單純 */
+  .report-side .transcript-full { max-height: calc(100dvh - 190px); }
+  .report-side .corr-list { max-height: 34dvh; overflow-y: auto; }
+  @media (max-width: 1180px) {
+    .report-grid { grid-template-columns: 1fr; }
+    .report-side { position: static; }
+    .report-side .transcript-full { max-height: 320px; }
+  }
   .report-head { display: flex; flex-direction: column; gap: 12px; }
   .report-head h2 { margin: 0; font-size: 1.7rem; font-weight: 300; letter-spacing: -.025em; text-wrap: balance; }
   .meta-chips { display: flex; gap: 8px; flex-wrap: wrap; }
@@ -757,16 +922,10 @@
     margin: 0; font-size: 1.1rem; font-weight: 600; letter-spacing: -.01em; display: flex; align-items: center; gap: 11px;
   }
 
-  /* ---- 收縮面板 ---- */
-  .panel.collapsible .panel-head h2 { cursor: pointer; user-select: none; }
-  .chevron { display: inline-flex; color: var(--faint); transition: transform .2s ease; flex: none; }
-  .chevron svg { width: 15px; height: 15px; display: block; }
-  .panel.collapsed .chevron { transform: rotate(-90deg); }
-  .panel.collapsed { gap: 0; }
-  .panel.collapsed > :not(.panel-head) { display: none !important; }
   .panel-x {
-    background: none; border: none; color: var(--faint); cursor: pointer; font-size: .95rem; line-height: 1;
-    padding: 5px 8px; border-radius: var(--radius-sm); transition: color .15s, background .15s;
+    display: inline-flex; align-items: center; justify-content: center;
+    background: none; border: none; color: var(--faint); cursor: pointer; line-height: 1;
+    padding: 6px 8px; border-radius: var(--radius-sm); transition: color .15s, background .15s;
   }
   .panel-x:hover { color: var(--high); background: var(--high-soft); }
 

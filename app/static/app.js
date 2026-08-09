@@ -3,6 +3,7 @@
   畫面結構在 index.html、樣式在 style.css，三個檔案的功能分區順序一致。
 
   目錄：
+    0. 版面路由（側欄切換 view）
     1. 共用基礎（API 認證、圖示、小工具）
     2. 全域初始化（日期、錄音種類、功能勾選、分頁）
     3. 逐字稿（連續文件式渲染、時間/引用句跳轉）
@@ -10,14 +11,49 @@
     5. 任務庫
     6. 歷史會議
     7. 主動提醒與每日通知
+    7.5 首頁儀表板（數字磚＋最近會議＋需要注意）
     8. 跨會議問答（RAG＋搜尋）
     9. 輸入路徑（純文字／檔案上傳／即時聆聽）
-   10. 介面與資料工具（面板收縮、主題、設定、詞彙、備份、PWA）
+   10. 介面與資料工具（主題、設定、詞彙、備份、PWA）
 */
 "use strict";
 const $ = id => document.getElementById(id);
 const PRIORITY_ZH = { high: "高", medium: "中", low: "低" };
 let chunkSeconds = 45;
+
+/* ==================================================================
+   0. 版面路由：側欄一次只顯示一個 view
+   ------------------------------------------------------------------
+   所有 view 的資料在載入時就一起抓（refreshTasks/Meetings/Reminders），
+   切換只是顯示/隱藏，不重新請求，所以切分頁沒有等待感。
+   ================================================================== */
+// 結果頁的雙欄斷點，和 style.css 的 @media (max-width: 1180px) 對齊
+const WIDE = window.matchMedia("(min-width: 1181px)");
+const VIEW_TITLES = {
+  home: "首頁", new: "新會議", result: "分析結果",
+  reminder: "主動提醒", ask: "詢問會議", task: "任務庫", meeting: "歷史會議",
+};
+function showView(name) {
+  if (!VIEW_TITLES[name]) name = "home";
+  // 結果頁在跑過一次分析前是空的，別讓網址列直接跳進去
+  if (name === "result" && $("navResult").hidden) name = "home";
+  document.querySelectorAll(".view").forEach(v => v.classList.toggle("active", v.id === `view-${name}`));
+  document.querySelectorAll(".nav-item").forEach(b => {
+    const on = b.dataset.view === name;
+    b.classList.toggle("active", on);
+    b.setAttribute("aria-current", on ? "page" : "false");
+  });
+  $("viewTitle").textContent = VIEW_TITLES[name];
+  if (location.hash.slice(1) !== name) history.replaceState(null, "", `#${name}`);
+  window.scrollTo(0, 0);
+}
+// 側欄、數字磚、面板上的「看全部」共用同一個屬性，不必各自綁事件
+document.addEventListener("click", e => {
+  const el = e.target.closest("[data-view]");
+  if (el) showView(el.dataset.view);
+});
+window.addEventListener("hashchange", () => showView(location.hash.slice(1)));
+showView(location.hash.slice(1) || "home");
 
 /* ==================================================================
    1. 共用基礎：API 認證、圖示、esc／錯誤橫幅等小工具
@@ -42,17 +78,33 @@ window.fetch = async (input, init = {}) => {
   return resp;
 };
 
-// ---- 圖示（線條風，24x24 viewBox，currentColor） ----
-const ICON_PATHS = {
-  calendar: '<rect x="3" y="4.5" width="18" height="16" rx="1.5"/><path d="M16 2.5v4M8 2.5v4M3 9.5h18"/>',
-  user: '<circle cx="12" cy="8" r="4"/><path d="M4.5 21a7.5 7.5 0 0 1 15 0"/>',
-  help: '<circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 1 1 3.5 2.3c-.8.4-1 .9-1 1.7"/><path d="M12 17h.01"/>',
-  alert: '<path d="M12 9v4.5"/><path d="m10.6 3.5-9 15.6a1 1 0 0 0 .9 1.5h18.9a1 1 0 0 0 .9-1.5l-9-15.6a1 1 0 0 0-1.7 0Z"/><circle cx="12" cy="17" r=".6" fill="currentColor" stroke="none"/>',
-  check: '<circle cx="12" cy="12" r="9"/><path d="m8.5 12 2.5 2.5L16 9"/>',
-};
+// ---- 圖示：Lucide，全部收在 /static/icons.svg 雪碧圖（授權說明見該檔開頭） ----
+// 用 <use> 引用 symbol：路徑資料只存一份，樣式（大小、stroke-width、顏色）
+// 由 .i / .i-sm / .i-lg 在 CSS 決定，繼承進 shadow tree
 function icon(name, cls) {
-  return `<svg class="${cls || "i"}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">${ICON_PATHS[name] || ""}</svg>`;
+  return `<svg class="${cls || "i"}" aria-hidden="true"><use href="/static/icons.svg#${name}"/></svg>`;
 }
+
+// ---- 骨架載入 ----
+// 資料還沒回來時先擺出版面輪廓，取代「尚無資料」——後者在載入中是騙人的。
+// 每支 refresh 都要負責把骨架收掉（成功換成資料、失敗換成重試），不能讓它一直閃。
+const skelLine = w => `<span class="skel" style="width:${w}"></span>`;
+const skelBlocks = n => `<div class="skel-list">${
+  Array.from({ length: n }, () => `<div class="skel-block">${skelLine("58%")}${skelLine("32%")}</div>`).join("")
+}</div>`;
+const skelRows = (n, cols) => Array.from({ length: n }, () =>
+  `<tr class="skel-row">${Array.from({ length: cols }, () => `<td>${skelLine("72%")}</td>`).join("")}</tr>`).join("");
+
+let tasksLoaded = false, meetingsLoaded = false, remindersLoaded = false;
+
+function loadFail(kind) {
+  return `<p class="load-fail">${icon("circle-alert", "i-sm")}載不到資料<button class="ghost" data-retry="${kind}">重試</button></p>`;
+}
+document.addEventListener("click", e => {
+  const btn = e.target.closest("[data-retry]");
+  if (!btn) return;
+  ({ tasks: refreshTasks, meetings: refreshMeetings, reminders: refreshReminders })[btn.dataset.retry]?.();
+});
 
 function esc(s) {
   return String(s ?? "").replace(/[&<>"']/g, c =>
@@ -61,7 +113,7 @@ function esc(s) {
 function showError(msg) {
   const b = $("errorBanner");
   b.classList.remove("notice");
-  b.innerHTML = icon("alert") + `<span>${esc(msg)}</span>`;
+  b.innerHTML = icon("circle-alert") + `<span>${esc(msg)}</span>`;
   b.style.display = "flex";
   b.scrollIntoView({ behavior: "smooth", block: "nearest" });
 }
@@ -340,7 +392,17 @@ function jumpToTranscript(container, timeLabel, quote) {
   if (!target && quote) target = findLineByQuote(lines, quote);
   if (!target) return false;
   target.classList.add("hl");
-  target.scrollIntoView({ behavior: "smooth", block: "center" });
+  // 逐字稿容器自己會捲（結果頁右欄、歷史會議詳情都是）。直接算它的 scrollTop，
+  // 不用 scrollIntoView——後者會連整頁一起捲走，把左邊剛點的那張卡片捲不見
+  if (container.scrollHeight > container.clientHeight + 1) {
+    const delta = target.getBoundingClientRect().top - container.getBoundingClientRect().top;
+    container.scrollTo({
+      top: container.scrollTop + delta - (container.clientHeight - target.offsetHeight) / 2,
+      behavior: "smooth",
+    });
+  } else {
+    target.scrollIntoView({ behavior: "smooth", block: "center" });
+  }
   return true;
 }
 
@@ -367,11 +429,52 @@ function renderCorrections(corrections) {
 let currentTranscript = "";
 let analysisStartTime = null;
 
+// AI 分析要跑十幾秒到一分鐘。與其讓人盯著一顆 disabled 的按鈕，不如先把報告的
+// 版面輪廓擺出來：既回饋「系統在做事」，也預告等一下會拿到哪些區塊。
+// renderResult 會把每一格覆蓋掉，所以這裡填什麼都不會殘留。
+function showResultSkeleton() {
+  if ($("result").classList.contains("is-loading")) return;  // 輪詢會重複呼叫，別一直把畫面捲回頂端
+  const lines = n => Array.from({ length: n }, (_, i) => skelLine(`${94 - i * 12}%`)).join("");
+  $("rTitle").innerHTML = skelLine("46%");
+  $("rMeta").innerHTML = `${skelLine("92px")}${skelLine("64px")}${skelLine("120px")}`;
+  $("rSummary").innerHTML = lines(3);
+  $("rHighlights").innerHTML = skelBlocks(3);
+  $("rDecisions").innerHTML = skelBlocks(2);
+  $("rTodos").innerHTML = skelBlocks(3);
+  $("rPending").innerHTML = skelBlocks(1);
+  $("rEvents").innerHTML = skelBlocks(1);
+  $("rDraft").innerHTML = lines(4);
+  ["hSummary", "hHighlights", "hDecisions", "hTodos"].forEach(id => ($(id).style.display = "flex"));
+  $("rSummary").style.display = "block";
+  $("rHighlights").style.display = "flex";
+  $("rDecisions").style.display = "flex";
+  $("rTodos").style.display = "flex";
+  $("rSummaryTrans").style.display = "none";
+  $("rTransSec").style.display = "none";
+  $("rCorrSec").style.display = "none";
+  $("result").classList.add("is-loading");
+  $("result").style.display = "flex";
+  $("navResult").hidden = false;
+  showView("result");
+}
+
+// 分析失敗：骨架整個收掉退回「新會議」。上一份結果這時也已經過期了，一併清掉，
+// 免得使用者以為那是這次跑出來的
+function hideResultSkeleton() {
+  if (!$("result").classList.contains("is-loading")) return;
+  $("result").classList.remove("is-loading");
+  $("result").style.display = "none";
+  $("navResult").hidden = true;
+  showView("new");
+}
+
 function renderResult(result, transcript) {
+  $("result").classList.remove("is-loading");
   // 後端校正過的話，result.transcript 才是最終版本（傳進來的可能是校正前的）
   currentTranscript = (result.transcript || transcript || "").trim();
   $("rTransSec").style.display = currentTranscript ? "block" : "none";
-  $("rTransSec").open = false;
+  // 雙欄版面下逐字稿是常駐對照欄，預設攤開；單欄（窄螢幕）才收起來免得洗版
+  $("rTransSec").open = WIDE.matches;
   renderChat($("rTranscript"), currentTranscript);
   renderCorrections(result.corrections || []);
   const a = result.analysis, m = a.meeting;
@@ -436,7 +539,7 @@ function renderResult(result, transcript) {
     : `<p class="empty-note">未偵測到代辦事項</p>`;
 
   $("rPending").innerHTML = a.pending_items.length
-    ? a.pending_items.map(p => `<div class="pending-item">${icon("help")}<span>${esc(p.topic)}${p.reason ? `<span class="reason">${esc(p.reason)}</span>` : ""}</span></div>`).join("")
+    ? a.pending_items.map(p => `<div class="pending-item">${icon("circle-help")}<span>${esc(p.topic)}${p.reason ? `<span class="reason">${esc(p.reason)}</span>` : ""}</span></div>`).join("")
     : `<p class="empty-note">無</p>`;
 
   $("icsLink").href = `/api/meetings/${encodeURIComponent(result.meeting_id)}/events.ics`;
@@ -448,7 +551,8 @@ function renderResult(result, transcript) {
   $("rDraft").textContent = result.notifications.email_draft || "";
   draftSubject = result.notifications.email_subject || "";
   $("result").style.display = "flex";
-  $("result").scrollIntoView({ behavior: "smooth" });
+  $("navResult").hidden = false;
+  showView("result");
   refreshTasks();
   refreshMeetings();
   refreshReminders();
@@ -586,7 +690,7 @@ function taskRowHtml(t) {
         <td class="mono">${esc(t.meeting_id)}</td>
         <td><div class="row-ops">
           <button class="edit-btn save save-edit" data-id="${esc(t.id)}" title="儲存" aria-label="儲存">✓</button>
-          <button class="del-btn cancel-edit" title="取消" aria-label="取消">✕</button>
+          <button class="del-btn cancel-edit" title="取消" aria-label="取消">${icon("x", "i-sm")}</button>
         </div></td>
       </tr>`;
   }
@@ -602,9 +706,9 @@ function taskRowHtml(t) {
         <td class="mono">${esc(t.meeting_id)}</td>
         <td><div class="row-ops">
           <button class="edit-btn start-edit" data-id="${esc(t.id)}" title="編輯名稱、負責人、期限" aria-label="編輯">
-            <svg class="i-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.8 2.8 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>
+            ${icon("square-pen", "i-sm")}
           </button>
-          <button class="del-btn" data-id="${esc(t.id)}" title="刪除此任務" aria-label="刪除">✕</button>
+          <button class="del-btn" data-id="${esc(t.id)}" title="刪除此任務" aria-label="刪除">${icon("x", "i-sm")}</button>
         </div></td>
       </tr>`;
 }
@@ -619,13 +723,19 @@ function renderTasks() {
   $("taskRows").innerHTML = rows.length
     ? rows.map(taskRowHtml).join("")
     : `<tr><td colspan="7" class="empty-note">${allTasks.length ? "沒有符合條件的任務" : "尚無任務"}</td></tr>`;
+  renderHome();
 }
 
 async function refreshTasks() {
   try {
     allTasks = (await jsonOrThrow(await fetch("/api/tasks"))).tasks;
+    tasksLoaded = true;
     renderTasks();
-  } catch (e) { /* 靜默 */ }
+  } catch (e) {
+    tasksLoaded = true;  // 骨架不能一直閃：載不到就明講，並留一個重試入口
+    $("taskRows").innerHTML = `<tr><td colspan="7">${loadFail("tasks")}</td></tr>`;
+    renderHome();
+  }
 }
 
 $("taskRows").addEventListener("change", async e => {
@@ -808,15 +918,15 @@ function meetingDetailHtml(id) {
       <div class="detail-transcript" id="dTranscriptView"></div>
       <div class="detail-actions">
         <button class="ghost edit-detail" data-id="${esc(id)}">
-          <svg class="i-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.8 2.8 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>
+          ${icon("square-pen", "i-sm")}
           編輯
         </button>
         <button class="ghost reanalyze-detail" data-id="${esc(id)}">
-          <svg class="i-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11a9 9 0 1 1-2.7-6.4"/><path d="M21 3v6h-6"/></svg>
+          ${icon("refresh-cw", "i-sm")}
           重新分析
         </button>
         <button class="ghost share-detail" data-id="${esc(id)}">
-          <svg class="i-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="m8.6 13.5 6.8 4M15.4 6.5l-6.8 4"/></svg>
+          ${icon("share-2", "i-sm")}
           分享
         </button>
         <a class="ghost btn-link" href="/api/meetings/${esc(id)}/events.ics" download>加入行事曆</a>
@@ -868,7 +978,7 @@ function renderMeetings() {
           <span class="meeting-ops">
             <button class="ghost view-meeting" data-id="${esc(m.id)}">${m.id === expandedMeetingId ? "收合" : "查閱"}</button>
             <a class="ghost btn-link" href="/api/meetings/${esc(m.id)}/report.md" download>下載</a>
-            <button class="del-btn del-meeting" data-id="${esc(m.id)}" title="刪除此會議與其任務" aria-label="刪除">✕</button>
+            <button class="del-btn del-meeting" data-id="${esc(m.id)}" title="刪除此會議與其任務" aria-label="刪除">${icon("x", "i-sm")}</button>
           </span>
         </div>` + (m.id === expandedMeetingId ? meetingDetailHtml(m.id) : "")).join("")
     : `<p class="empty-note">${allMeetings.length ? "沒有符合此標籤的會議" : "尚無會議紀錄"}</p>`;
@@ -879,14 +989,20 @@ function renderMeetings() {
     if (d.transcript) renderChat(view, d.transcript);
     else view.innerHTML = `<p class="empty-note">此會議沒有存逐字稿全文</p>`;
   }
+  renderHome();
 }
 
 async function refreshMeetings() {
   try {
     allMeetings = (await jsonOrThrow(await fetch("/api/meetings"))).meetings;
+    meetingsLoaded = true;
     renderMeetings();
     renderAskScope();
-  } catch (e) { /* 靜默 */ }
+  } catch (e) {
+    meetingsLoaded = true;
+    $("meetingRows").innerHTML = loadFail("meetings");
+    renderHome();
+  }
 }
 
 async function openMeetingDetail(id) {
@@ -1142,7 +1258,7 @@ async function refreshReminders() {
           <span class="alert-chip">${chip}</span>
           <div class="alert-msg">${esc(msg)}</div>
           <button class="ghost copy-alert" data-copy="${esc(msg)}">複製</button>
-          <button class="del-btn del-alert" title="刪除此提醒（按「重新掃描」可全部復原）" aria-label="刪除">✕</button>
+          <button class="del-btn del-alert" title="刪除此提醒（按「重新掃描」可全部復原）" aria-label="刪除">${icon("x", "i-sm")}</button>
         </div>`;
     const items = [
       ...r.reminders.map(x => alertItem(`k-${x.kind}`, ALERT_LABEL[x.kind](x), x.message)),
@@ -1152,9 +1268,16 @@ async function refreshReminders() {
       ? items.join("")
       : `<div class="empty-alert">${icon("check")}<p>尚無提醒</p></div>`;
     updateAlertCount();
+    remindersLoaded = true;
     lastReminders = r;
+    renderHome();
     maybeNotifyReminders(false);
-  } catch (e) { /* 靜默：提醒失敗不擋主流程 */ }
+  } catch (e) {
+    remindersLoaded = true;
+    $("reminderBody").innerHTML = loadFail("reminders");
+    updateAlertCount();
+    renderHome();
+  }
 }
 
 // ---- 每日提醒通知（Notification API）----
@@ -1219,6 +1342,81 @@ $("tagFilter").addEventListener("click", e => {
 });
 
 /* ==================================================================
+   7.5 首頁儀表板
+   ------------------------------------------------------------------
+   不另外打 API，把 refreshTasks/refreshMeetings/refreshReminders 已經
+   抓回來的資料濃縮成四個數字＋兩張短清單，讓人一進站就知道現況。
+   ================================================================== */
+let todayAnalysis = 0;
+let usageLoaded = false;
+
+function renderHome() {
+  const open = allTasks.filter(t => t.status !== "done");
+  const urgent = lastReminders
+    ? lastReminders.reminders.filter(x => x.kind === "overdue" || x.kind === "due_soon").length
+    : null;
+
+  // 還沒載完就放骨架，別先寫 0 再跳成真實數字——那會看起來像資料掉了又回來
+  const num = (loaded, v) => (loaded ? String(v) : `<span class="skel skel-num"></span>`);
+  $("statMeetings").innerHTML = num(meetingsLoaded, allMeetings.length);
+  $("statOpen").innerHTML = num(tasksLoaded, open.length);
+  $("statOverdue").innerHTML = num(remindersLoaded, urgent);
+  $("statOverdue").classList.toggle("hot", urgent > 0);
+  $("statUsage").innerHTML = num(usageLoaded, todayAnalysis);
+
+  // 側欄徽章：不用切過去也知道那邊有幾件事在等
+  $("navAlert").textContent = urgent || "";
+  $("navAlert").hidden = !urgent;
+  $("navTask").textContent = open.length || "";
+  $("navTask").hidden = !open.length;
+
+  $("homeMeetings").innerHTML = !meetingsLoaded
+    ? skelBlocks(3)
+    : allMeetings.length
+    ? `<div class="home-list">${allMeetings.slice(0, 5).map(m => `
+        <div class="home-row" data-meeting="${esc(m.id)}" title="開啟這場會議">
+          <span class="home-row-main">
+            <b>${esc(m.meeting.title)}</b>
+            <span class="meta">${esc(m.meeting.date)}${m.kind ? ` · ${esc(m.kind)}` : ""}</span>
+          </span>${icon("chevron-right")}
+        </div>`).join("")}</div>`
+    : `<p class="empty-note">尚無會議紀錄，從「新會議」開始第一場。</p>`;
+
+  const alerts = lastReminders
+    ? [
+        ...lastReminders.reminders.map(x => ({ cls: `k-${x.kind}`, chip: ALERT_LABEL[x.kind](x), msg: x.message })),
+        ...lastReminders.followups.map(f => ({ cls: "k-follow", chip: "追問", msg: f.message })),
+      ]
+    : [];
+  $("homeAlerts").innerHTML = !remindersLoaded
+    ? skelBlocks(3)
+    : alerts.length
+    ? alerts.slice(0, 4).map(a => `
+        <div class="alert-item ${a.cls}">
+          <span class="alert-chip">${esc(a.chip)}</span>
+          <div class="alert-msg">${esc(a.msg)}</div>
+        </div>`).join("")
+    : `<p class="empty-note">目前沒有需要注意的事項。</p>`;
+}
+
+$("homeMeetings").addEventListener("click", e => {
+  const row = e.target.closest("[data-meeting]");
+  if (!row) return;
+  showView("meeting");
+  openMeetingDetail(row.dataset.meeting);
+});
+
+// 今日分析次數：設定選單也會用同一支 API，這裡先抓一次給首頁的數字磚
+async function refreshUsage() {
+  try {
+    todayAnalysis = (await jsonOrThrow(await fetch("/api/usage"))).today?.analysis ?? 0;
+  } catch (e) { todayAnalysis = "—"; }
+  usageLoaded = true;
+  renderHome();
+}
+refreshUsage();
+
+/* ==================================================================
    8. 跨會議問答：RAG 問答＋關鍵字即時搜尋
    ================================================================== */
 // ---- 跨會議問答（RAG） ----
@@ -1259,7 +1457,7 @@ async function sendAsk() {
   log.style.display = "flex";
   log.insertAdjacentHTML("beforeend",
     `<div class="ask-item">
-       <button class="del-btn del-ask" title="刪除這則問答" aria-label="刪除">✕</button>
+       <button class="del-btn del-ask" title="刪除這則問答" aria-label="刪除">${icon("x", "i-sm")}</button>
        <div class="ask-q"><span>Q</span><div>${esc(q)}</div></div>
        <div class="ask-a pending"><span>A</span><div>檢索會議紀錄中…</div></div>
      </div>`);
@@ -1333,10 +1531,8 @@ $("askSearchHits").addEventListener("click", e => {
   const hit = e.target.closest(".ask-hit");
   if (!hit) return;
   hideSearchHits();
-  const panel = $("meetingPanel");
-  panel.classList.remove("collapsed");  // 歷史面板若收合先展開
+  showView("meeting");
   openMeetingDetail(hit.dataset.id);
-  panel.scrollIntoView({ behavior: "smooth", block: "start" });
 });
 // 每則問答各自刪除；刪到全空就把整個對話框收起來
 $("askLog").addEventListener("click", e => {
@@ -1357,6 +1553,7 @@ $("btnAnalyzeText").addEventListener("click", async () => {
   const original = btn.innerHTML;
   btn.disabled = true; btn.textContent = "AI 分析中…";
   analysisStartTime = Date.now();
+  showResultSkeleton();
   try {
     const result = await jsonOrThrow(await fetch("/api/meetings", {
       method: "POST",
@@ -1371,7 +1568,7 @@ $("btnAnalyzeText").addEventListener("click", async () => {
       }),
     }));
     renderResult(result, $("textInput").value);
-  } catch (e) { showError(e.message); }
+  } catch (e) { hideResultSkeleton(); showError(e.message); }
   finally { btn.disabled = false; btn.innerHTML = original; }
 });
 
@@ -1415,10 +1612,13 @@ $("btnUpload").addEventListener("click", async () => {
         renderChat($("fileTranscript"), job.transcript);
         $("fileTranscript").scrollTop = $("fileTranscript").scrollHeight;
       }
+      // 轉錄階段的進度條與逐字稿在「新會議」畫面，看得到才有意義；
+      // 進到分析階段才切去結果頁擺骨架
+      if (job.status === "analyzing") showResultSkeleton();
       if (job.status === "done") { renderResult(job.result, job.transcript); break; }
       if (job.status === "error") throw new Error(job.error || "轉錄失敗");
     }
-  } catch (e) { showError(e.message); $("fileStatus").textContent = "失敗"; }
+  } catch (e) { hideResultSkeleton(); showError(e.message); $("fileStatus").textContent = "失敗"; }
   finally { btn.disabled = false; }
 });
 
@@ -1771,6 +1971,7 @@ async function finishLiveSession() {
   $("btnLiveRetry").disabled = true;
   $("liveStatus").textContent = "AI 分析整場會議中…";
   analysisStartTime = Date.now();
+  showResultSkeleton();
   const options = {
     meeting_date: $("meetingDate").value || null,
     kind: $("meetingKind").value,
@@ -1809,6 +2010,7 @@ async function finishLiveSession() {
     // 404 走到這裡代表上面的退路也救不了：session 沒了、瀏覽器這份逐字稿又是空的。
     // 這種情況重試永遠是同一個 404，不該再擺一顆按不出結果的按鈕給使用者按
     const unrecoverable = e.status === 404;
+    hideResultSkeleton();  // 退回「新會議」，重試分析的按鈕也在那裡
     showError("分析失敗：" + e.message + (unrecoverable
       ? "（這場聆聽沒有留下任何逐字稿，無法分析）"
       : "（逐字稿仍在，可按「重試分析」再試一次）"));
@@ -1823,26 +2025,8 @@ async function finishLiveSession() {
 $("btnLiveRetry").addEventListener("click", finishLiveSession);
 
 /* ==================================================================
-   10. 介面與資料工具：面板收縮、主題、設定選單、自訂詞彙、備份還原、PWA、觸覺回饋
+   10. 介面與資料工具：主題、設定選單、自訂詞彙、備份還原、PWA、觸覺回饋
    ================================================================== */
-// ---- 面板收縮（點標題展開/收合，狀態記在瀏覽器）----
-const COLLAPSE_KEY = "collapsedPanels";
-function saveCollapsed() {
-  const ids = [...document.querySelectorAll(".panel.collapsible.collapsed")].map(p => p.id);
-  try { localStorage.setItem(COLLAPSE_KEY, JSON.stringify(ids)); } catch (e) {}
-}
-(function initCollapse() {
-  let saved = [];
-  try { saved = JSON.parse(localStorage.getItem(COLLAPSE_KEY) || "[]"); } catch (e) {}
-  document.querySelectorAll(".panel.collapsible").forEach(panel => {
-    if (saved.includes(panel.id)) panel.classList.add("collapsed");
-    panel.querySelector(".panel-head h2").addEventListener("click", () => {
-      panel.classList.toggle("collapsed");
-      saveCollapsed();
-    });
-  });
-})();
-
 // ---- 深淺色主題切換（記住偏好） ----
 (function () {
   if (localStorage.getItem("theme") === "light") document.body.classList.add("light");
@@ -1888,7 +2072,7 @@ function renderGlossary() {
     ? glosTerms.map((t, i) => `<div class="glos-item">
         <b>${esc(t.term)}</b>
         ${t.note ? `<span class="glos-note">${esc(t.note)}</span>` : ""}
-        <button class="del-btn" data-i="${i}" title="刪除此詞彙" aria-label="刪除">✕</button>
+        <button class="del-btn" data-i="${i}" title="刪除此詞彙" aria-label="刪除">${icon("x", "i-sm")}</button>
       </div>`).join("")
     : `<p class="empty-note">尚無詞彙</p>`;
 }
@@ -1967,7 +2151,7 @@ function renderRoster() {
   $("rosterList").innerHTML = rosterNames.length
     ? rosterNames.map((n, i) => `<div class="glos-item">
         <b>${esc(n)}</b>
-        <button class="del-btn" data-i="${i}" title="從名冊移除" aria-label="刪除">✕</button>
+        <button class="del-btn" data-i="${i}" title="從名冊移除" aria-label="刪除">${icon("x", "i-sm")}</button>
       </div>`).join("")
     : `<p class="empty-note">尚無講者</p>`;
 }

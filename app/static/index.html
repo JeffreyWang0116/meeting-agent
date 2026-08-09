@@ -12,37 +12,78 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Space+Grotesk:wght@400;500&display=swap" rel="stylesheet">
+<link rel="preload" as="image" href="/static/icons.svg" type="image/svg+xml">
 <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-<div class="wrap">
-  <header>
-    <div class="brand-row">
-      <div class="brand">
-        <h1>會議助手</h1>
-      </div>
+<!-- 版面：左側固定導覽（app shell）＋右側單一工作區。
+     每個 .view 是一個獨立畫面，同時只顯示一個，由 app.js 的 showView() 切換。
+     圖示一律用 <use> 引 /static/icons.svg 的 Lucide symbol，不再內嵌 path。 -->
+<div class="app">
+  <aside class="sidebar">
+    <div class="side-brand">
+      <svg class="i" aria-hidden="true"><use href="/static/icons.svg#mic"/></svg>
+      會議助手
+    </div>
+    <nav class="side-nav" aria-label="主導覽">
+      <button class="nav-item" data-view="home">
+        <svg class="i" aria-hidden="true"><use href="/static/icons.svg#house"/></svg>
+        <span class="nav-text">首頁</span>
+      </button>
+      <button class="nav-item" data-view="new">
+        <svg class="i" aria-hidden="true"><use href="/static/icons.svg#circle-plus"/></svg>
+        <span class="nav-text">新會議</span>
+      </button>
+      <button class="nav-item" data-view="result" id="navResult" hidden>
+        <svg class="i" aria-hidden="true"><use href="/static/icons.svg#file-text"/></svg>
+        <span class="nav-text">分析結果</span>
+      </button>
+      <button class="nav-item" data-view="reminder">
+        <svg class="i" aria-hidden="true"><use href="/static/icons.svg#bell"/></svg>
+        <span class="nav-text">主動提醒</span>
+        <span class="nav-badge" id="navAlert" hidden></span>
+      </button>
+      <button class="nav-item" data-view="ask">
+        <svg class="i" aria-hidden="true"><use href="/static/icons.svg#search"/></svg>
+        <span class="nav-text">詢問會議</span>
+      </button>
+      <button class="nav-item" data-view="task">
+        <svg class="i" aria-hidden="true"><use href="/static/icons.svg#database"/></svg>
+        <span class="nav-text">任務庫</span>
+        <span class="nav-badge" id="navTask" hidden></span>
+      </button>
+      <button class="nav-item" data-view="meeting">
+        <svg class="i" aria-hidden="true"><use href="/static/icons.svg#clock"/></svg>
+        <span class="nav-text">歷史會議</span>
+      </button>
+    </nav>
+  </aside>
+
+  <main class="main">
+    <header class="topbar">
+      <h1 id="viewTitle">首頁</h1>
       <div class="head-tools">
         <div class="settings-wrap">
           <button class="ghost" id="btnSettings" title="設定" aria-label="設定" aria-expanded="false">
-            <svg class="i-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.2"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1.03 1.56V21a2 2 0 1 1-4 0v-.09a1.7 1.7 0 0 0-1.11-1.56 1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.7 1.7 0 0 0 .34-1.87 1.7 1.7 0 0 0-1.56-1.03H3a2 2 0 1 1 0-4h.09a1.7 1.7 0 0 0 1.56-1.11 1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.7 1.7 0 0 0 1.87.34h.08A1.7 1.7 0 0 0 10 4.09V4a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1.03 1.56 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.7 1.7 0 0 0-.34 1.87v.08a1.7 1.7 0 0 0 1.56 1.03H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.56 1.03Z"/></svg>
+            <svg class="i-sm" aria-hidden="true"><use href="/static/icons.svg#settings"/></svg>
             設定
           </button>
           <div class="settings-menu" id="settingsMenu">
             <div class="set-row">
               <span class="set-label">
-                <svg class="i-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20.5 14.5A8.5 8.5 0 0 1 9.5 3.5a8.5 8.5 0 1 0 11 11Z"/></svg>
+                <svg class="i-sm" aria-hidden="true"><use href="/static/icons.svg#moon"/></svg>
                 深淺色主題
               </span>
               <button class="ghost" id="themeToggle" title="切換深淺色主題" aria-label="切換深淺色主題">
-                <svg class="i-sm icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20.5 14.5A8.5 8.5 0 0 1 9.5 3.5a8.5 8.5 0 1 0 11 11Z"/></svg>
-                <svg class="i-sm icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M4.9 4.9l1.4 1.4m11.4 11.4 1.4 1.4M2 12h2m16 0h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+                <svg class="i-sm icon-moon" aria-hidden="true"><use href="/static/icons.svg#moon"/></svg>
+                <svg class="i-sm icon-sun" aria-hidden="true"><use href="/static/icons.svg#sun"/></svg>
                 切換
               </button>
             </div>
             <hr class="set-sep">
             <div class="set-row">
               <span class="set-label">
-                <svg class="i-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2Z"/></svg>
+                <svg class="i-sm" aria-hidden="true"><use href="/static/icons.svg#book-open"/></svg>
                 自訂詞彙
               </span>
               <button class="ghost" id="btnGlossary">管理</button>
@@ -50,7 +91,7 @@
             <hr class="set-sep">
             <div class="set-row">
               <span class="set-label">
-                <svg class="i-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M16.5 20v-1.5a3.5 3.5 0 0 0-3.5-3.5h-5A3.5 3.5 0 0 0 4.5 18.5V20"/><circle cx="10.5" cy="7.5" r="3.5"/><path d="M19.5 20v-1.5a3.5 3.5 0 0 0-2.6-3.38"/><path d="M15.5 4.13a3.5 3.5 0 0 1 0 6.74"/></svg>
+                <svg class="i-sm" aria-hidden="true"><use href="/static/icons.svg#users"/></svg>
                 講者名冊
               </span>
               <button class="ghost" id="btnRoster">管理</button>
@@ -58,7 +99,7 @@
             <hr class="set-sep">
             <div class="set-row">
               <span class="set-label">
-                <svg class="i-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v6c0 1.7 3.6 3 8 3s8-1.3 8-3V5"/><path d="M4 11v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/></svg>
+                <svg class="i-sm" aria-hidden="true"><use href="/static/icons.svg#database"/></svg>
                 資料備份
               </span>
               <span style="display:flex; gap:6px">
@@ -70,7 +111,7 @@
             <hr class="set-sep">
             <div class="set-row">
               <span class="set-label">
-                <svg class="i-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9a6 6 0 0 1 12 0c0 5 2 6 2 6H4s2-1 2-6"/><path d="M10 20a2 2 0 0 0 4 0"/></svg>
+                <svg class="i-sm" aria-hidden="true"><use href="/static/icons.svg#bell"/></svg>
                 每日提醒通知
               </span>
               <button class="ghost" id="btnNotifyToggle">開啟</button>
@@ -78,7 +119,7 @@
             <hr class="set-sep">
             <div class="set-row">
               <span class="set-label">
-                <svg class="i-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 18 0 9 9 0 0 0-18 0Z"/><path d="M12 7v5l3 2"/></svg>
+                <svg class="i-sm" aria-hidden="true"><use href="/static/icons.svg#clock"/></svg>
                 今日 API 用量
               </span>
             </div>
@@ -90,394 +131,502 @@
           </div>
         </div>
       </div>
-    </div>
-  </header>
+    </header>
 
-  <div class="banner" id="errorBanner"></div>
+    <div class="wrap">
+      <div class="banner" id="errorBanner"></div>
 
-  <div class="panel">
-    <div class="tabs">
-      <button class="tab active" data-pane="paneText">
-        <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2h9l5 5v13a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2Z"/><path d="M15 2v5h5"/><path d="M8 13h8M8 17h8M8 9h3"/></svg>
-        文字貼上
-      </button>
-      <button class="tab" data-pane="paneFile">
-        <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15V3"/><path d="m7 8 5-5 5 5"/><path d="M4 15v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4"/></svg>
-        檔案上傳
-      </button>
-      <button class="tab" data-pane="paneLive">
-        <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 11a7 7 0 0 1-14 0"/><path d="M12 18v3"/></svg>
-        即時聆聽
-      </button>
-    </div>
-
-    <div class="field-row">
-      <div class="field">
-        <label class="lbl" for="meetingDate">會議日期</label>
-        <input type="date" id="meetingDate">
-      </div>
-      <div class="field">
-        <label class="lbl" for="meetingKind">錄音種類</label>
-        <select class="field-sel" id="meetingKind" title="AI 會依種類調整分析重點">
-          <option value="會議">會議</option>
-          <option value="通話">通話</option>
-          <option value="訪談">訪談</option>
-          <option value="語音備忘錄">語音備忘錄</option>
-          <option value="講座">講座</option>
-          <option value="其它">其它</option>
-        </select>
-      </div>
-    </div>
-
-    <div class="field-row feature-row" id="featureRow" style="display:none">
-      <label class="chk"><input type="checkbox" id="featSummary" checked> 會議摘要</label>
-      <label class="chk"><input type="checkbox" id="featHighlights" checked> 會議重點</label>
-      <label class="chk"><input type="checkbox" id="featDecisions" checked> 決議事項</label>
-      <label class="chk"><input type="checkbox" id="featTodos" checked> 代辦事項</label>
-    </div>
-
-    <!-- 錯字校正不分錄音種類都適用，所以獨立一列、永遠顯示 -->
-    <div class="field-row feature-row">
-      <label class="chk" title="轉錄後多花一次 AI 請求，用上下文修掉同音錯字（如「涵式」→「函式」）">
-        <input type="checkbox" id="featCorrect"> 校正錯字
-      </label>
-    </div>
-
-    <!-- 講者姓名對應：預設關閉。台語等語者辨識不穩的錄音容易對錯，猜錯的名字比代號更糟 -->
-    <div class="field-row feature-row">
-      <label class="chk" title="轉錄後多花一次 AI 請求，依對話內容把「講者A/B/C」換成真實姓名。台語或多口音、語者難分辨的錄音建議關閉，維持代號較不易出錯">
-        <input type="checkbox" id="featNameSpeakers"> 辨識名稱
-      </label>
-    </div>
-
-    <!-- 文字貼上 -->
-    <div class="pane active" id="paneText">
-      <div class="field">
-        <label class="lbl" for="textInput">貼上會議紀錄 / 群組討論文字</label>
-        <textarea id="textInput"></textarea>
-      </div>
-      <div class="actions">
-        <button class="primary" id="btnAnalyzeText">
-          <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5L20 7"/></svg>
-          送出分析
-        </button>
-      </div>
-    </div>
-
-    <!-- 檔案上傳 -->
-    <div class="pane" id="paneFile">
-      <div class="field">
-        <label class="lbl" for="fileInput">選擇會議音檔或影片 · mp3 / wav / m4a / mp4 / mov / mkv</label>
-        <div class="dropzone" id="dropZone">
-          <svg class="i-lg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15V6"/><path d="m8 9 4-4 4 4"/><path d="M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"/></svg>
-          <span class="dz-text">把檔案拖到這裡，或</span>
-          <input type="file" id="fileInput" accept="audio/*,video/*">
+      <!-- ============ 首頁：先給數字，細節點進去 ============ -->
+      <section class="view" id="view-home">
+        <div class="home-hero">
+          <div class="hero-copy">
+            <h2>今天要處理哪一場會議？</h2>
+            <p class="hint">貼上文字、上傳錄音，或直接開始即時聆聽，AI 會產出摘要、決議與待辦。</p>
+          </div>
+          <button class="primary" data-view="new">
+            <svg class="i" aria-hidden="true"><use href="/static/icons.svg#plus"/></svg>
+            開始新會議
+          </button>
         </div>
-      </div>
-      <div class="actions">
-        <button class="primary" id="btnUpload">
-          <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15V3"/><path d="m7 8 5-5 5 5"/><path d="M4 15v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4"/></svg>
-          上傳並轉錄
-        </button>
-      </div>
-      <div class="progress" id="fileProgress" style="display:none"><div></div></div>
-      <div class="status-line" id="fileStatus"></div>
-      <div class="transcript-box" id="fileTranscript"></div>
-    </div>
 
-    <!-- 即時聆聽 -->
-    <div class="pane" id="paneLive">
-      <div class="field-row">
-        <div class="field">
-          <label class="lbl" for="liveTranslate">即時翻譯</label>
-          <select class="field-sel" id="liveTranslate" title="逐段把聽到的內容翻譯成另一種語言，逐句雙語對照">
-            <option value="">關閉</option>
-            <option value="en">譯成英文</option>
-            <option value="zh">譯成中文</option>
-          </select>
+        <!-- 數字磚一開始就是骨架，等 refreshMeetings/Tasks/Reminders 回來才換成數字 -->
+        <div class="stat-grid">
+          <button class="stat-tile" data-view="meeting">
+            <span class="stat-num" id="statMeetings"><span class="skel skel-num"></span></span>
+            <span class="stat-lbl">會議紀錄</span>
+          </button>
+          <button class="stat-tile" data-view="task">
+            <span class="stat-num" id="statOpen"><span class="skel skel-num"></span></span>
+            <span class="stat-lbl">未完成任務</span>
+          </button>
+          <button class="stat-tile" data-view="reminder">
+            <span class="stat-num alarm" id="statOverdue"><span class="skel skel-num"></span></span>
+            <span class="stat-lbl">逾期／即將到期</span>
+          </button>
+          <div class="stat-tile static">
+            <span class="stat-num" id="statUsage"><span class="skel skel-num"></span></span>
+            <span class="stat-lbl">今日分析次數</span>
+          </div>
         </div>
-      </div>
-      <!-- 線上會議戴耳機時，麥克風收不到對方的聲音；勾選後額外分享分頁／系統音訊，和麥克風混音一起錄 -->
-      <div class="field-row feature-row">
-        <label class="chk" title="線上會議戴耳機時，麥克風收不到對方的聲音。開啟後把對方的聲音一起錄進逐字稿。可從下方選擇音源來源。桌機版 Chrome／Edge 適用。">
-          <input type="checkbox" id="liveSystemAudio"> 同時收錄耳機／系統音源（對方聲音）
-        </label>
-      </div>
-      <!-- 音源來源：偵測到「立體聲混音」等回放裝置就能直接選、免分享畫面；否則用分享畫面擷取 -->
-      <div class="field-row feature-row" id="liveSysSourceRow" style="display:none">
-        <div class="field" style="flex:1 1 100%">
-          <label class="lbl" for="liveSysSource">耳機／系統音源來源</label>
-          <select class="field-sel" id="liveSysSource" title="選『立體聲混音』等回放裝置可直接擷取耳機聲音、免跳分享視窗；選『分享畫面擷取』則相容性最高但每次會跳出分享視窗">
-            <option value="display">分享畫面擷取（每次會跳分享視窗，相容性最高）</option>
-          </select>
-          <div class="glos-note" id="liveSysHint" style="margin-top:6px"></div>
+
+        <div class="home-grid">
+          <div class="panel">
+            <div class="panel-head">
+              <h2>
+                <svg class="i" aria-hidden="true"><use href="/static/icons.svg#clock"/></svg>
+                最近會議
+              </h2>
+              <button class="ghost" data-view="meeting">看全部</button>
+            </div>
+            <div id="homeMeetings">
+              <div class="skel-list">
+                <div class="skel-block"><span class="skel" style="width:58%"></span><span class="skel" style="width:32%"></span></div>
+                <div class="skel-block"><span class="skel" style="width:58%"></span><span class="skel" style="width:32%"></span></div>
+                <div class="skel-block"><span class="skel" style="width:58%"></span><span class="skel" style="width:32%"></span></div>
+              </div>
+            </div>
+          </div>
+          <div class="panel">
+            <div class="panel-head">
+              <h2>
+                <svg class="i" aria-hidden="true"><use href="/static/icons.svg#bell"/></svg>
+                需要注意
+              </h2>
+              <button class="ghost" data-view="reminder">看全部</button>
+            </div>
+            <div class="alert-list" id="homeAlerts">
+              <div class="skel-list">
+                <div class="skel-block"><span class="skel" style="width:58%"></span><span class="skel" style="width:32%"></span></div>
+                <div class="skel-block"><span class="skel" style="width:58%"></span><span class="skel" style="width:32%"></span></div>
+                <div class="skel-block"><span class="skel" style="width:58%"></span><span class="skel" style="width:32%"></span></div>
+              </div>
+            </div>
+          </div>
         </div>
-      </div>
-      <div class="actions">
-        <button class="primary" id="btnLiveStart">
-          <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 11a7 7 0 0 1-14 0"/><path d="M12 18v3"/></svg>
-          開始聆聽
-        </button>
-        <button class="primary danger" id="btnLiveStop" disabled>
-          <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="5" width="14" height="14" rx="1.5"/></svg>
-          結束會議並分析
-        </button>
-        <button class="ghost" id="btnLiveStage" style="display:none">
-          <svg class="i-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3"/></svg>
-          回到沉浸畫面
-        </button>
-        <button class="ghost" id="btnLiveRetry" style="display:none">
-          <svg class="i-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11a9 9 0 1 1-2.7-6.4"/><path d="M21 3v6h-6"/></svg>
-          重試分析
-        </button>
-        <span class="status-line" id="liveStatus"></span>
-      </div>
-      <div class="transcript-box" id="liveTranscript"></div>
-    </div>
-  </div>
+      </section>
 
-  <!-- 主動提醒（Agent 自主掃描） -->
-  <div class="panel collapsible" id="reminderPanel">
+      <!-- ============ 新會議：三種輸入路徑 ============ -->
+      <section class="view" id="view-new">
+        <div class="panel">
+          <div class="tabs">
+            <button class="tab active" data-pane="paneText">
+              <svg class="i" aria-hidden="true"><use href="/static/icons.svg#file-text"/></svg>
+              文字貼上
+            </button>
+            <button class="tab" data-pane="paneFile">
+              <svg class="i" aria-hidden="true"><use href="/static/icons.svg#upload"/></svg>
+              檔案上傳
+            </button>
+            <button class="tab" data-pane="paneLive">
+              <svg class="i" aria-hidden="true"><use href="/static/icons.svg#mic"/></svg>
+              即時聆聽
+            </button>
+          </div>
+
+          <div class="field-row">
+            <div class="field">
+              <label class="lbl" for="meetingDate">會議日期</label>
+              <input type="date" id="meetingDate">
+            </div>
+            <div class="field">
+              <label class="lbl" for="meetingKind">錄音種類</label>
+              <select class="field-sel" id="meetingKind" title="AI 會依種類調整分析重點">
+                <option value="會議">會議</option>
+                <option value="通話">通話</option>
+                <option value="訪談">訪談</option>
+                <option value="語音備忘錄">語音備忘錄</option>
+                <option value="講座">講座</option>
+                <option value="其它">其它</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="field-row feature-row" id="featureRow" style="display:none">
+            <label class="chk"><input type="checkbox" id="featSummary" checked> 會議摘要</label>
+            <label class="chk"><input type="checkbox" id="featHighlights" checked> 會議重點</label>
+            <label class="chk"><input type="checkbox" id="featDecisions" checked> 決議事項</label>
+            <label class="chk"><input type="checkbox" id="featTodos" checked> 代辦事項</label>
+          </div>
+
+          <!-- 錯字校正不分錄音種類都適用，所以獨立一列、永遠顯示 -->
+          <div class="field-row feature-row">
+            <label class="chk" title="轉錄後多花一次 AI 請求，用上下文修掉同音錯字（如「涵式」→「函式」）">
+              <input type="checkbox" id="featCorrect"> 校正錯字
+            </label>
+          </div>
+
+          <!-- 講者姓名對應：預設關閉。台語等語者辨識不穩的錄音容易對錯，猜錯的名字比代號更糟 -->
+          <div class="field-row feature-row">
+            <label class="chk" title="轉錄後多花一次 AI 請求，依對話內容把「講者A/B/C」換成真實姓名。台語或多口音、語者難分辨的錄音建議關閉，維持代號較不易出錯">
+              <input type="checkbox" id="featNameSpeakers"> 辨識名稱
+            </label>
+          </div>
+
+          <!-- 文字貼上 -->
+          <div class="pane active" id="paneText">
+            <div class="field">
+              <label class="lbl" for="textInput">貼上會議紀錄 / 群組討論文字</label>
+              <textarea id="textInput"></textarea>
+            </div>
+            <div class="actions">
+              <button class="primary" id="btnAnalyzeText">
+                <svg class="i" aria-hidden="true"><use href="/static/icons.svg#check"/></svg>
+                送出分析
+              </button>
+            </div>
+          </div>
+
+          <!-- 檔案上傳 -->
+          <div class="pane" id="paneFile">
+            <div class="field">
+              <label class="lbl" for="fileInput">選擇會議音檔或影片 · mp3 / wav / m4a / mp4 / mov / mkv</label>
+              <div class="dropzone" id="dropZone">
+                <svg class="i-lg" aria-hidden="true"><use href="/static/icons.svg#file-up"/></svg>
+                <span class="dz-text">把檔案拖到這裡，或</span>
+                <input type="file" id="fileInput" accept="audio/*,video/*">
+              </div>
+            </div>
+            <div class="actions">
+              <button class="primary" id="btnUpload">
+                <svg class="i" aria-hidden="true"><use href="/static/icons.svg#upload"/></svg>
+                上傳並轉錄
+              </button>
+            </div>
+            <div class="progress" id="fileProgress" style="display:none"><div></div></div>
+            <div class="status-line" id="fileStatus"></div>
+            <div class="transcript-box" id="fileTranscript"></div>
+          </div>
+
+          <!-- 即時聆聽 -->
+          <div class="pane" id="paneLive">
+            <div class="field-row">
+              <div class="field">
+                <label class="lbl" for="liveTranslate">即時翻譯</label>
+                <select class="field-sel" id="liveTranslate" title="逐段把聽到的內容翻譯成另一種語言，逐句雙語對照">
+                  <option value="">關閉</option>
+                  <option value="en">譯成英文</option>
+                  <option value="zh">譯成中文</option>
+                </select>
+              </div>
+            </div>
+            <!-- 線上會議戴耳機時，麥克風收不到對方的聲音；勾選後額外分享分頁／系統音訊，和麥克風混音一起錄 -->
+            <div class="field-row feature-row">
+              <label class="chk" title="線上會議戴耳機時，麥克風收不到對方的聲音。開啟後把對方的聲音一起錄進逐字稿。可從下方選擇音源來源。桌機版 Chrome／Edge 適用。">
+                <input type="checkbox" id="liveSystemAudio"> 同時收錄耳機／系統音源（對方聲音）
+              </label>
+            </div>
+            <!-- 音源來源：偵測到「立體聲混音」等回放裝置就能直接選、免分享畫面；否則用分享畫面擷取 -->
+            <div class="field-row feature-row" id="liveSysSourceRow" style="display:none">
+              <div class="field" style="flex:1 1 100%">
+                <label class="lbl" for="liveSysSource">耳機／系統音源來源</label>
+                <select class="field-sel" id="liveSysSource" title="選『立體聲混音』等回放裝置可直接擷取耳機聲音、免跳分享視窗；選『分享畫面擷取』則相容性最高但每次會跳出分享視窗">
+                  <option value="display">分享畫面擷取（每次會跳分享視窗，相容性最高）</option>
+                </select>
+                <div class="glos-note" id="liveSysHint" style="margin-top:6px"></div>
+              </div>
+            </div>
+            <div class="actions">
+              <button class="primary" id="btnLiveStart">
+                <svg class="i" aria-hidden="true"><use href="/static/icons.svg#mic"/></svg>
+                開始聆聽
+              </button>
+              <button class="primary danger" id="btnLiveStop" disabled>
+                <svg class="i" aria-hidden="true"><use href="/static/icons.svg#square"/></svg>
+                結束會議並分析
+              </button>
+              <button class="ghost" id="btnLiveStage" style="display:none">
+                <svg class="i-sm" aria-hidden="true"><use href="/static/icons.svg#disc"/></svg>
+                回到沉浸畫面
+              </button>
+              <button class="ghost" id="btnLiveRetry" style="display:none">
+                <svg class="i-sm" aria-hidden="true"><use href="/static/icons.svg#refresh-cw"/></svg>
+                重試分析
+              </button>
+              <span class="status-line" id="liveStatus"></span>
+            </div>
+            <div class="transcript-box" id="liveTranscript"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ 分析結果：左報告、右逐字稿（雙欄工作台） ============ -->
+      <section class="view" id="view-result">
+        <div class="panel" id="result">
+          <div class="report-head">
+            <h2 id="rTitle"></h2>
+            <div class="meta-chips" id="rMeta"></div>
+          </div>
+
+          <div class="report-grid">
+            <div class="report-main">
+              <h3 class="sub" id="hSummary">
+                <svg class="i-sm" aria-hidden="true"><use href="/static/icons.svg#file-text"/></svg>
+                會議摘要
+                <button class="ghost" id="btnTransSummary" style="margin-left:auto">
+                  <svg class="i-sm" aria-hidden="true"><use href="/static/icons.svg#languages"/></svg>
+                  <span id="transSummaryLabel">翻譯</span>
+                </button>
+              </h3>
+              <p id="rSummary"></p>
+              <div class="summary-trans" id="rSummaryTrans" style="display:none"></div>
+
+              <h3 class="sub" id="hHighlights">
+                <svg class="i-sm" aria-hidden="true"><use href="/static/icons.svg#star"/></svg>
+                會議重點
+                <span class="aux">點擊跳到右側逐字稿</span>
+              </h3>
+              <ol class="highlight-list" id="rHighlights"></ol>
+
+              <h3 class="sub" id="hDecisions">
+                <svg class="i-sm" aria-hidden="true"><use href="/static/icons.svg#circle-check-big"/></svg>
+                決議事項
+              </h3>
+              <ol id="rDecisions"></ol>
+
+              <h3 class="sub" id="hTodos">
+                <svg class="i-sm" aria-hidden="true"><use href="/static/icons.svg#list-todo"/></svg>
+                代辦事項
+              </h3>
+              <div class="todo-list" id="rTodos"></div>
+
+              <h3 class="sub">
+                <svg class="i-sm" aria-hidden="true"><use href="/static/icons.svg#circle-help"/></svg>
+                待確認事項
+                <span class="aux">議而未決，留待下次會議</span>
+              </h3>
+              <div class="pending-list" id="rPending"></div>
+
+              <h3 class="sub">
+                <svg class="i-sm" aria-hidden="true"><use href="/static/icons.svg#calendar"/></svg>
+                行事曆事件
+                <a class="ghost btn-link" id="icsLink" href="#" download style="margin-left:auto">下載 .ics</a>
+              </h3>
+              <div class="event-list" id="rEvents"></div>
+
+              <h3 class="sub">
+                <svg class="i-sm" aria-hidden="true"><use href="/static/icons.svg#mail"/></svg>
+                會議結論確認信草稿
+                <div class="draft-tools">
+                  <button class="ghost" id="btnGmailDraft" title="開啟 Gmail 撰寫視窗，主旨與內文都已填好，收件人自己選">
+                    <svg class="i-sm" aria-hidden="true"><use href="/static/icons.svg#send"/></svg>
+                    Gmail
+                  </button>
+                  <button class="ghost" id="btnMailtoDraft" title="用這台裝置預設的郵件軟體開啟">
+                    <svg class="i-sm" aria-hidden="true"><use href="/static/icons.svg#external-link"/></svg>
+                    預設信箱
+                  </button>
+                  <button class="ghost" id="btnCopyDraft">
+                    <svg class="i-sm" aria-hidden="true"><use href="/static/icons.svg#copy"/></svg>
+                    複製
+                  </button>
+                </div>
+              </h3>
+              <pre class="draft" id="rDraft"></pre>
+            </div>
+
+            <!-- 右欄：逐字稿常駐對照，跟著頁面捲動 sticky 在視窗內 -->
+            <aside class="report-side">
+              <details class="transcript-details" id="rTransSec" style="display:none">
+                <summary>
+                  <svg class="i-sm" aria-hidden="true"><use href="/static/icons.svg#scroll-text"/></svg>
+                  會議逐字稿
+                  <button class="ghost" id="btnCopyTranscript" style="margin-left:auto">
+                    <svg class="i-sm" aria-hidden="true"><use href="/static/icons.svg#copy"/></svg>
+                    複製
+                  </button>
+                </summary>
+                <div class="transcript-full" id="rTranscript"></div>
+              </details>
+
+              <details class="transcript-details" id="rCorrSec" style="display:none">
+                <summary>
+                  <svg class="i-sm" aria-hidden="true"><use href="/static/icons.svg#square-pen"/></svg>
+                  AI 校正的錯字
+                  <span class="head-count has" id="corrCount"></span>
+                </summary>
+                <div class="corr-list" id="rCorrections"></div>
+              </details>
+            </aside>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ 主動提醒（Agent 自主掃描） ============ -->
+      <section class="view" id="view-reminder">
+        <div class="panel" id="reminderPanel">
+          <div class="panel-head">
+            <h2>
+              <svg class="i" aria-hidden="true"><use href="/static/icons.svg#bell"/></svg>
+              主動提醒
+              <span class="head-count" id="alertCount"></span>
+            </h2>
+            <button class="ghost" id="btnRefreshReminders">
+              <svg class="i-sm" aria-hidden="true"><use href="/static/icons.svg#refresh-cw"/></svg>
+              重新掃描
+            </button>
+          </div>
+          <div class="alert-list" id="reminderBody">
+            <div class="skel-list">
+              <div class="skel-block"><span class="skel" style="width:58%"></span><span class="skel" style="width:32%"></span></div>
+              <div class="skel-block"><span class="skel" style="width:58%"></span><span class="skel" style="width:32%"></span></div>
+              <div class="skel-block"><span class="skel" style="width:58%"></span><span class="skel" style="width:32%"></span></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ 跨會議問答（RAG） ============ -->
+      <section class="view" id="view-ask">
+        <div class="panel" id="askPanel">
+          <div class="panel-head">
+            <h2>
+              <svg class="i" aria-hidden="true"><use href="/static/icons.svg#search"/></svg>
+              詢問會議
+            </h2>
+          </div>
+          <details class="ask-scope">
+            <summary id="askScopeSummary">選取會議</summary>
+            <div class="ask-scope-list" id="askScopeList"><p class="empty-note">尚無會議</p></div>
+          </details>
+          <div class="ask-log" id="askLog"></div>
+          <div class="ask-bar">
+            <input type="text" id="askInput">
+            <button class="primary" id="btnAsk">
+              <svg class="i" aria-hidden="true"><use href="/static/icons.svg#send"/></svg>
+              查詢
+            </button>
+          </div>
+          <div class="ask-search-hits" id="askSearchHits"></div>
+        </div>
+      </section>
+
+      <!-- ============ 任務庫 ============ -->
+      <section class="view" id="view-task">
+        <div class="panel" id="taskPanel">
+          <div class="panel-head">
+            <h2>
+              <svg class="i" aria-hidden="true"><use href="/static/icons.svg#database"/></svg>
+              任務庫
+            </h2>
+            <div class="panel-actions">
+              <button class="ghost" id="btnAddTask">
+                <svg class="i-sm" aria-hidden="true"><use href="/static/icons.svg#plus"/></svg>
+                新增任務
+              </button>
+              <input type="search" id="taskSearch" placeholder="搜尋任務、負責人…">
+              <select id="taskFilter">
+                <option value="">全部狀態</option>
+                <option value="todo">待辦</option>
+                <option value="doing">進行中</option>
+                <option value="done">完成</option>
+              </select>
+              <a class="ghost btn-link" href="/api/export/tasks.csv" download>
+                <svg class="i-sm" aria-hidden="true"><use href="/static/icons.svg#download"/></svg>
+                匯出 CSV
+              </a>
+              <button class="ghost" id="btnRefreshTasks">
+                <svg class="i-sm" aria-hidden="true"><use href="/static/icons.svg#refresh-cw"/></svg>
+                重新整理
+              </button>
+            </div>
+          </div>
+          <div class="task-add" id="taskAddRow" style="display:none">
+            <input type="text" id="newTaskName" placeholder="任務名稱">
+            <input type="text" id="newTaskOwner" placeholder="負責人（選填）">
+            <input type="date" id="newTaskDue" title="期限（選填）">
+            <select id="newTaskPriority" class="status-sel">
+              <option value="high">高</option>
+              <option value="medium" selected>中</option>
+              <option value="low">低</option>
+            </select>
+            <button class="primary" id="btnAddTaskSave">新增</button>
+            <button class="ghost" id="btnAddTaskCancel">取消</button>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>任務</th><th>負責人</th><th class="mono">期限</th><th>優先級</th><th>狀態</th><th class="mono">會議</th><th></th></tr></thead>
+              <tbody id="taskRows">
+                <tr class="skel-row"><td><span class="skel" style="width:72%"></span></td><td><span class="skel" style="width:60%"></span></td><td><span class="skel" style="width:70%"></span></td><td><span class="skel" style="width:50%"></span></td><td><span class="skel" style="width:64%"></span></td><td><span class="skel" style="width:70%"></span></td><td></td></tr>
+                <tr class="skel-row"><td><span class="skel" style="width:64%"></span></td><td><span class="skel" style="width:52%"></span></td><td><span class="skel" style="width:70%"></span></td><td><span class="skel" style="width:50%"></span></td><td><span class="skel" style="width:64%"></span></td><td><span class="skel" style="width:62%"></span></td><td></td></tr>
+                <tr class="skel-row"><td><span class="skel" style="width:80%"></span></td><td><span class="skel" style="width:58%"></span></td><td><span class="skel" style="width:70%"></span></td><td><span class="skel" style="width:50%"></span></td><td><span class="skel" style="width:64%"></span></td><td><span class="skel" style="width:74%"></span></td><td></td></tr>
+                <tr class="skel-row"><td><span class="skel" style="width:56%"></span></td><td><span class="skel" style="width:64%"></span></td><td><span class="skel" style="width:70%"></span></td><td><span class="skel" style="width:50%"></span></td><td><span class="skel" style="width:64%"></span></td><td><span class="skel" style="width:66%"></span></td><td></td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ 歷史會議 ============ -->
+      <section class="view" id="view-meeting">
+        <div class="panel" id="meetingPanel">
+          <div class="panel-head">
+            <h2>
+              <svg class="i" aria-hidden="true"><use href="/static/icons.svg#clock"/></svg>
+              歷史會議
+            </h2>
+          </div>
+          <div class="tag-filter" id="tagFilter" style="display:none"></div>
+          <div id="meetingRows">
+            <div class="skel-list">
+              <div class="skel-block"><span class="skel" style="width:58%"></span><span class="skel" style="width:32%"></span></div>
+              <div class="skel-block"><span class="skel" style="width:58%"></span><span class="skel" style="width:32%"></span></div>
+              <div class="skel-block"><span class="skel" style="width:58%"></span><span class="skel" style="width:32%"></span></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 隱私與資料處理 -->
+      <footer class="site-footer">
+        <details>
+          <summary>隱私與資料處理說明</summary>
+          <ul>
+            <li>你貼上或錄製的會議內容，只用於本次分析：文字與音訊會傳送給 Google Gemini API 進行轉錄與結構化分析。</li>
+            <li>分析產出的任務與會議紀錄存在伺服器的本地資料檔；上傳的音訊檔在轉錄後即不再使用。</li>
+            <li>本服務不會將你的內容用於任何模型訓練，也不會提供給第三方。</li>
+            <li>公開測試站的資料可能在系統重新部署時清空，請自行下載需要保留的會議紀錄（Markdown / CSV）。</li>
+          </ul>
+        </details>
+      </footer>
+    </div>
+  </main>
+</div>
+
+<!-- 自訂詞彙管理視窗 -->
+<div class="modal-overlay" id="glossaryModal">
+  <div class="modal">
     <div class="panel-head">
-      <h2>
-        <span class="chevron"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></span>
-        <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9a6 6 0 0 1 12 0c0 5 2 6 2 6H4s2-1 2-6"/><path d="M10 20a2 2 0 0 0 4 0"/></svg>
-        主動提醒
-        <span class="head-count" id="alertCount"></span>
-      </h2>
-      <button class="ghost" id="btnRefreshReminders">
-        <svg class="i-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11a9 9 0 1 1-2.7-6.4"/><path d="M21 3v6h-6"/></svg>
-        重新掃描
+      <h2>自訂詞彙</h2>
+      <button class="panel-x" id="btnGlossaryClose" aria-label="關閉">
+        <svg class="i-sm" aria-hidden="true"><use href="/static/icons.svg#x"/></svg>
       </button>
     </div>
-    <div class="alert-list" id="reminderBody"></div>
-  </div>
-
-  <!-- 跨會議問答（RAG） -->
-  <div class="panel collapsible" id="askPanel">
-    <div class="panel-head">
-      <h2>
-        <span class="chevron"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></span>
-        <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
-        詢問會議
-      </h2>
+    <p class="hint">會議中常出現的名稱，加進詞彙表後，會優先採用這些寫法。</p>
+    <div class="glossary-add">
+      <input type="text" id="glosTerm" placeholder="名稱">
+      <input type="text" id="glosNote" placeholder="說明（選填）">
+      <button class="primary" id="btnGlosAdd">新增</button>
     </div>
-    <details class="ask-scope">
-      <summary id="askScopeSummary">選取會議</summary>
-      <div class="ask-scope-list" id="askScopeList"><p class="empty-note">尚無會議</p></div>
-    </details>
-    <div class="ask-log" id="askLog"></div>
-    <div class="ask-bar">
-      <input type="text" id="askInput">
-      <button class="primary" id="btnAsk">
-        <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></svg>
-        查詢
+    <div id="glosList"><p class="empty-note">尚無詞彙</p></div>
+  </div>
+</div>
+
+<!-- 講者名冊管理視窗 -->
+<div class="modal-overlay" id="rosterModal">
+  <div class="modal">
+    <div class="panel-head">
+      <h2>講者名冊</h2>
+      <button class="panel-x" id="btnRosterClose" aria-label="關閉">
+        <svg class="i-sm" aria-hidden="true"><use href="/static/icons.svg#x"/></svg>
       </button>
     </div>
-    <div class="ask-search-hits" id="askSearchHits"></div>
+    <p class="hint">常一起開會的人。辨識講者時會用這份名單統一姓名寫法，讓同一個人在每場會議都叫同一個名字。你在歷史會議改過的講者名字會自動記進來。</p>
+    <div class="glossary-add">
+      <input type="text" id="rosterName" placeholder="姓名或職稱">
+      <button class="primary" id="btnRosterAdd">新增</button>
+    </div>
+    <div id="rosterList"><p class="empty-note">尚無講者</p></div>
   </div>
-
-  <!-- 結果 -->
-  <div class="panel" id="result">
-    <div class="report-head">
-      <h2 id="rTitle"></h2>
-      <div class="meta-chips" id="rMeta"></div>
-    </div>
-
-    <h3 class="sub" id="hSummary">
-      <svg class="i-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="3" width="12" height="18" rx="1.5"/><path d="M9 9h6M9 13h6M9 17h4"/></svg>
-      會議摘要
-      <button class="ghost" id="btnTransSummary" style="margin-left:auto">
-        <svg class="i-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="m5 8 6 6"/><path d="m4 14 6-6 2-3"/><path d="M2 5h12"/><path d="M7 2h1"/><path d="m22 22-5-10-5 10"/><path d="M14 18h6"/></svg>
-        <span id="transSummaryLabel">翻譯</span>
-      </button>
-    </h3>
-    <p id="rSummary"></p>
-    <div class="summary-trans" id="rSummaryTrans" style="display:none"></div>
-
-    <h3 class="sub" id="hHighlights">
-      <svg class="i-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="m12 2.5 2.9 5.9 6.6 1-4.8 4.6 1.2 6.5L12 17.4l-5.9 3.1 1.2-6.5-4.8-4.6 6.6-1Z"/></svg>
-      會議重點
-      <span class="aux">點擊跳到逐字稿的時間點</span>
-    </h3>
-    <ol class="highlight-list" id="rHighlights"></ol>
-
-    <h3 class="sub" id="hDecisions">
-      <svg class="i-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="m8.5 12 2.5 2.5L16 9"/></svg>
-      決議事項
-    </h3>
-    <ol id="rDecisions"></ol>
-
-    <h3 class="sub" id="hTodos">
-      <svg class="i-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="3" width="12" height="18" rx="1.5"/><path d="M9 3V2h6v1"/><path d="M9 9h6M9 13h6M9 17h4"/></svg>
-      代辦事項
-    </h3>
-    <div class="todo-list" id="rTodos"></div>
-
-    <h3 class="sub">
-      <svg class="i-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 1 1 3.5 2.3c-.8.4-1 .9-1 1.7"/><path d="M12 17h.01"/></svg>
-      待確認事項
-      <span class="aux">議而未決，留待下次會議</span>
-    </h3>
-    <div class="pending-list" id="rPending"></div>
-
-    <h3 class="sub">
-      <svg class="i-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4.5" width="18" height="16" rx="1.5"/><path d="M16 2.5v4M8 2.5v4M3 9.5h18"/></svg>
-      行事曆事件
-      <a class="ghost btn-link" id="icsLink" href="#" download style="margin-left:auto">下載 .ics 加入行事曆</a>
-    </h3>
-    <div class="event-list" id="rEvents"></div>
-
-    <h3 class="sub">
-      <svg class="i-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="4.5" width="19" height="15" rx="1.5"/><path d="m3 6 9 6.5L21 6"/></svg>
-      會議結論確認信草稿
-      <div class="draft-tools">
-        <button class="ghost" id="btnGmailDraft" title="開啟 Gmail 撰寫視窗，主旨與內文都已填好，收件人自己選">
-          <svg class="i-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M21.5 2.5 11 13"/><path d="M21.5 2.5 15 21.5l-4-8.5-8.5-4Z"/></svg>
-          Gmail
-        </button>
-        <button class="ghost" id="btnMailtoDraft" title="用這台裝置預設的郵件軟體開啟">
-          <svg class="i-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3.5h6.5V10"/><path d="M20.5 3.5 11 13"/><path d="M18 14v5.5a1.5 1.5 0 0 1-1.5 1.5h-12A1.5 1.5 0 0 1 3 19.5v-12A1.5 1.5 0 0 1 4.5 6H10"/></svg>
-          預設信箱
-        </button>
-        <button class="ghost" id="btnCopyDraft">
-          <svg class="i-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="8.5" y="8.5" width="12" height="12" rx="1.5"/><path d="M15.5 8.5V5a1.5 1.5 0 0 0-1.5-1.5H5A1.5 1.5 0 0 0 3.5 5v9A1.5 1.5 0 0 0 5 15.5h3.5"/></svg>
-          複製
-        </button>
-      </div>
-    </h3>
-    <pre class="draft" id="rDraft"></pre>
-
-    <details class="transcript-details" id="rTransSec" style="display:none">
-      <summary>
-        <svg class="i-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5.5A1.5 1.5 0 0 1 5.5 4h13A1.5 1.5 0 0 1 20 5.5v13a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 18.5Z"/><path d="M8 9h8M8 13h8M8 17h5"/></svg>
-        會議逐字稿（點會議重點的時間或任務卡的引用句可跳到出處）
-        <button class="ghost" id="btnCopyTranscript" style="margin-left:auto">
-          <svg class="i-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="8.5" y="8.5" width="12" height="12" rx="1.5"/><path d="M15.5 8.5V5a1.5 1.5 0 0 0-1.5-1.5H5A1.5 1.5 0 0 0 3.5 5v9A1.5 1.5 0 0 0 5 15.5h3.5"/></svg>
-          複製全文
-        </button>
-      </summary>
-      <div class="transcript-full" id="rTranscript"></div>
-    </details>
-
-    <details class="transcript-details" id="rCorrSec" style="display:none">
-      <summary>
-        <svg class="i-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
-        AI 校正的錯字
-        <span class="head-count has" id="corrCount"></span>
-      </summary>
-      <div class="corr-list" id="rCorrections"></div>
-    </details>
-  </div>
-
-  <!-- 任務庫 -->
-  <div class="panel collapsible" id="taskPanel">
-    <div class="panel-head">
-      <h2>
-        <span class="chevron"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></span>
-        <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5.5" rx="8" ry="3"/><path d="M4 5.5v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/><path d="M4 11.5v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/></svg>
-        任務庫
-      </h2>
-      <div class="panel-actions">
-        <button class="ghost" id="btnAddTask">
-          <svg class="i-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
-          新增任務
-        </button>
-        <input type="search" id="taskSearch" placeholder="搜尋任務、負責人…">
-        <select id="taskFilter">
-          <option value="">全部狀態</option>
-          <option value="todo">待辦</option>
-          <option value="doing">進行中</option>
-          <option value="done">完成</option>
-        </select>
-        <a class="ghost btn-link" href="/api/export/tasks.csv" download>
-          <svg class="i-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12m0 0 4-4m-4 4-4-4"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>
-          匯出 CSV
-        </a>
-        <button class="ghost" id="btnRefreshTasks">
-          <svg class="i-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11a9 9 0 1 1-2.7-6.4"/><path d="M21 3v6h-6"/></svg>
-          重新整理
-        </button>
-      </div>
-    </div>
-    <div class="task-add" id="taskAddRow" style="display:none">
-      <input type="text" id="newTaskName" placeholder="任務名稱">
-      <input type="text" id="newTaskOwner" placeholder="負責人（選填）">
-      <input type="date" id="newTaskDue" title="期限（選填）">
-      <select id="newTaskPriority" class="status-sel">
-        <option value="high">高</option>
-        <option value="medium" selected>中</option>
-        <option value="low">低</option>
-      </select>
-      <button class="primary" id="btnAddTaskSave">新增</button>
-      <button class="ghost" id="btnAddTaskCancel">取消</button>
-    </div>
-    <div class="table-wrap">
-      <table>
-        <thead><tr><th>任務</th><th>負責人</th><th class="mono">期限</th><th>優先級</th><th>狀態</th><th class="mono">會議</th><th></th></tr></thead>
-        <tbody id="taskRows"><tr><td colspan="7" class="empty-note">尚無任務</td></tr></tbody>
-      </table>
-    </div>
-  </div>
-
-  <!-- 歷史會議 -->
-  <div class="panel collapsible" id="meetingPanel">
-    <div class="panel-head">
-      <h2>
-        <span class="chevron"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></span>
-        <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/></svg>
-        歷史會議
-      </h2>
-    </div>
-    <div class="tag-filter" id="tagFilter" style="display:none"></div>
-    <div id="meetingRows"><p class="empty-note">尚無會議紀錄</p></div>
-  </div>
-
-  <!-- 自訂詞彙管理視窗 -->
-  <div class="modal-overlay" id="glossaryModal">
-    <div class="modal">
-      <div class="panel-head">
-        <h2>自訂詞彙</h2>
-        <button class="panel-x" id="btnGlossaryClose" aria-label="關閉">✕</button>
-      </div>
-      <p class="hint">會議中常出現的名稱，加進詞彙表後，會優先採用這些寫法。</p>
-      <div class="glossary-add">
-        <input type="text" id="glosTerm" placeholder="名稱">
-        <input type="text" id="glosNote" placeholder="說明（選填）">
-        <button class="primary" id="btnGlosAdd">新增</button>
-      </div>
-      <div id="glosList"><p class="empty-note">尚無詞彙</p></div>
-    </div>
-  </div>
-
-  <!-- 講者名冊管理視窗 -->
-  <div class="modal-overlay" id="rosterModal">
-    <div class="modal">
-      <div class="panel-head">
-        <h2>講者名冊</h2>
-        <button class="panel-x" id="btnRosterClose" aria-label="關閉">✕</button>
-      </div>
-      <p class="hint">常一起開會的人。辨識講者時會用這份名單統一姓名寫法，讓同一個人在每場會議都叫同一個名字。你在歷史會議改過的講者名字會自動記進來。</p>
-      <div class="glossary-add">
-        <input type="text" id="rosterName" placeholder="姓名或職稱">
-        <button class="primary" id="btnRosterAdd">新增</button>
-      </div>
-      <div id="rosterList"><p class="empty-note">尚無講者</p></div>
-    </div>
-  </div>
-
-  <!-- 隱私與資料處理 -->
-  <footer class="site-footer">
-    <details>
-      <summary>隱私與資料處理說明</summary>
-      <ul>
-        <li>你貼上或錄製的會議內容，只用於本次分析：文字與音訊會傳送給 Google Gemini API 進行轉錄與結構化分析。</li>
-        <li>分析產出的任務與會議紀錄存在伺服器的本地資料檔；上傳的音訊檔在轉錄後即不再使用。</li>
-        <li>本服務不會將你的內容用於任何模型訓練，也不會提供給第三方。</li>
-        <li>公開測試站的資料可能在系統重新部署時清空，請自行下載需要保留的會議紀錄（Markdown / CSV）。</li>
-      </ul>
-    </details>
-  </footer>
 </div>
 
 <!-- 即時聆聽的沉浸畫面：聆聽期間蓋滿螢幕，顯示聲控光球、計時與即時字幕。
@@ -485,7 +634,7 @@
      所以現有的字幕附加邏輯完全不用改 -->
 <div class="live-stage" id="liveStage" hidden>
   <button class="ghost stage-close" id="btnStageClose" title="收合畫面，錄音會繼續進行">
-    <svg class="i-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12M18 6 6 18"/></svg>
+    <svg class="i-sm" aria-hidden="true"><use href="/static/icons.svg#x"/></svg>
     收合
   </button>
   <div class="stage-orb" id="stageOrb"></div>
@@ -494,7 +643,7 @@
   <div class="stage-slot" id="stageSlot"></div>
   <div class="stage-actions">
     <button class="primary danger" id="btnStageStop">
-      <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="5" width="14" height="14" rx="1.5"/></svg>
+      <svg class="i" aria-hidden="true"><use href="/static/icons.svg#square"/></svg>
       結束會議並分析
     </button>
   </div>
