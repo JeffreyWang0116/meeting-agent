@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Optional
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -45,6 +45,25 @@ from app.usage import UsageTracker
 logger = logging.getLogger(__name__)
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
+
+
+def asset_version(static_dir: Path) -> str:
+    """前端資產的版本字串，取 style.css / app.js 之中較新的 mtime。
+
+    Cache-Control 只管得到「之後才存進去」的快取。在加上這個標頭之前就被瀏覽器
+    存下來的舊 CSS/JS，會依啟發式規則自認新鮮、完全不回來問伺服器——改版後畫面
+    壞掉的就是這批人。要叫得動那種快取，只能換掉 URL。
+
+    入口 HTML 本身是 no-cache，每次都會拿到最新的版本字串，所以帶版本的網址
+    一定跟得上。開發時改完 CSS 直接重新整理就生效，不必再硬重新整理。
+    """
+    stamps = []
+    for name in ("style.css", "app.js"):
+        try:
+            stamps.append((static_dir / name).stat().st_mtime_ns)
+        except OSError:
+            pass  # 檔案不在（測試用的空目錄）就當作版本 0，不要讓首頁掛掉
+    return format(max(stamps, default=0) // 1_000_000, "x")
 
 
 class NoCacheStatic(StaticFiles):
@@ -337,9 +356,13 @@ def create_app(
 
     @app.get("/", include_in_schema=False)
     def index():
-        # 與 /static 同樣只做協商快取：入口 HTML 一旦被留成舊版，
-        # 後面所有靜態檔的版本就都跟著錯
-        return FileResponse(STATIC_DIR / "index.html", headers={"Cache-Control": "no-cache"})
+        # 入口 HTML 只做協商快取：它一舊，底下所有資產的版本就都跟著錯。
+        # 順手把 css/js 的網址蓋上版本（icons.svg 不用，見 asset_version）
+        html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
+        version = asset_version(STATIC_DIR)
+        for name in ("style.css", "app.js", "orb.js"):
+            html = html.replace(f'"/static/{name}"', f'"/static/{name}?v={version}"')
+        return HTMLResponse(html, headers={"Cache-Control": "no-cache"})
 
     # 前端靜態檔（style.css / app.js / icon.svg）統一由 /static 供應
     app.mount("/static", NoCacheStatic(directory=STATIC_DIR), name="static")

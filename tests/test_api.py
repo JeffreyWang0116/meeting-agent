@@ -4,6 +4,7 @@ Gemini 以假 generate 取代、Whisper 以假 transcriber 取代，
 其餘（store、live session、media job、pipeline）全部走真實程式碼。
 """
 import io
+import os
 import time
 
 import pytest
@@ -14,7 +15,7 @@ from app.agents.executor_agent import ExecutorAgent
 from app.agents.notifier_agent import NotifierAgent
 from app.agents.parser_agent import ParserAgent
 from app.config import Settings
-from app.main import create_app
+from app.main import asset_version, create_app
 from app.orchestrator import Orchestrator
 from app.stores.local_store import LocalJsonStore
 from tests.test_decision import valid_json
@@ -718,6 +719,38 @@ def test_index_serves_html(client):
     resp = client.get("/")
     assert resp.status_code == 200
     assert "text/html" in resp.headers["content-type"]
+
+
+def test_index_stamps_css_and_js_with_a_version(client):
+    """瀏覽器在我們加上 Cache-Control 之前存過的舊 CSS/JS，會依啟發式規則自認
+    新鮮、根本不回來問伺服器。標頭救不了已經存進去的那一份，只有換掉 URL 才行。"""
+    html = client.get("/").text
+    assert '"/static/style.css?v=' in html
+    assert '"/static/app.js?v=' in html
+    assert '"/static/style.css"' not in html
+    # 雪碧圖是新檔、不可能有舊快取，且 app.js 在執行期也會組出同樣的網址，
+    # 加了版本反而變成兩個 URL 各下載一次
+    assert "/static/icons.svg?" not in html
+
+
+def test_asset_version_changes_when_a_file_changes(tmp_path):
+    """版本取兩個檔案裡較新的 mtime。部署／編輯都只會讓檔案變新，
+    所以只要有任何一個被動過，版本就會跟著換。"""
+    (tmp_path / "style.css").write_text("a", encoding="utf-8")
+    (tmp_path / "app.js").write_text("b", encoding="utf-8")
+    before = asset_version(tmp_path)
+
+    newer = time.time() + 60
+    os.utime(tmp_path / "style.css", (newer, newer))
+    assert asset_version(tmp_path) != before
+
+    newer2 = newer + 60
+    os.utime(tmp_path / "app.js", (newer2, newer2))
+    assert asset_version(tmp_path) not in (before, "")
+
+
+def test_asset_version_survives_missing_files(tmp_path):
+    assert asset_version(tmp_path)  # 不該炸，也不該回空字串
 
 
 def test_pwa_manifest_sw_and_icon_served(client):
