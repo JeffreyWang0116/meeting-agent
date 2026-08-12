@@ -1,4 +1,5 @@
-import { $, esc, jsonOrThrow } from "./core.js";
+import { api } from "./api.js";
+import { $, esc } from "./core.js";
 
 let chunkSeconds = 45;
 
@@ -27,7 +28,7 @@ function applyKindDefaults() {
 (async function initMeetingKinds() {
   const sel = $("meetingKind");
   try {
-    const r = await jsonOrThrow(await fetch("/api/meeting-kinds"));
+    const r = await api.meetingKinds();
     sel.innerHTML = r.groups.map(g =>
       `<optgroup label="${esc(g.label)}">${g.kinds.map(k =>
         `<option value="${esc(k.value)}">${esc(k.value)}</option>`).join("")}</optgroup>`).join("");
@@ -72,15 +73,11 @@ async function maybePromoteTerms() {
   const terms = meetingTerms();
   if (!$("termsToGlossary").checked || !terms.length) return;
   try {
-    const existing = (await jsonOrThrow(await fetch("/api/glossary"))).terms;
+    const existing = (await api.glossary()).terms;
     const known = new Set(existing.map(t => t.term));
     const merged = existing.concat(terms.filter(t => !known.has(t.term)));
     if (merged.length === existing.length) return;
-    await fetch("/api/glossary", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ terms: merged }),
-    });
+    await api.saveGlossary({ terms: merged });
   } catch (e) { /* 加不進去不影響這次分析 */ }
 }
 
@@ -183,7 +180,7 @@ document.querySelectorAll(".tab").forEach(tab => {
 
 async function loadHealth() {
   try {
-    const h = await jsonOrThrow(await fetch("/api/health"));
+    const h = await api.health();
     chunkSeconds = h.live_chunk_seconds || 45;
   } catch (e) { /* health 失敗不擋操作 */ }
 }

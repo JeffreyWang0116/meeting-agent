@@ -1,4 +1,5 @@
-import { $, esc, icon, jsonOrThrow, loadFail, paginate, registerPager, registerRefresher, renderPager, showError } from "./core.js";
+import { api } from "./api.js";
+import { $, esc, icon, loadFail, paginate, registerPager, registerRefresher, renderPager, showError } from "./core.js";
 import { renderHome } from "./home.js";
 
 let remindersLoaded = false;
@@ -55,7 +56,7 @@ function renderReminders() {
 
 async function refreshReminders() {
   try {
-    lastReminders = await jsonOrThrow(await fetch("/api/reminders"));
+    lastReminders = await api.reminders();
     dismissedAlerts.clear();  // 重新掃描＝把刪掉的那些全部找回來
     remindersLoaded = true;
     renderReminders();

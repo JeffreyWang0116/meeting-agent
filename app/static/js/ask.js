@@ -1,4 +1,5 @@
-import { $, esc, icon, jsonOrThrow } from "./core.js";
+import { api } from "./api.js";
+import { $, esc, icon } from "./core.js";
 import { allMeetings, openMeetingDetail } from "./meetings.js";
 import { showView } from "./router.js";
 
@@ -51,14 +52,10 @@ async function sendAsk() {
   log.scrollTop = log.scrollHeight;
   $("btnAsk").disabled = true;
   try {
-    const r = await jsonOrThrow(await fetch("/api/ask", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
+    const r = await api.ask({
         question: q,
         meeting_ids: askScopeIds.size ? [...askScopeIds] : null,
-      }),
-    }));
+      });
     slot.classList.remove("pending");
     slot.innerHTML = `<span>A</span><div>${esc(r.answer)}${
       r.sources && r.sources.length
@@ -97,7 +94,7 @@ $("askInput").addEventListener("input", () => {
   searchTimer = setTimeout(async () => {
     const seq = ++searchSeq;
     try {
-      const r = await jsonOrThrow(await fetch(`/api/search?q=${encodeURIComponent(kw)}`));
+      const r = await api.search(kw);
       if (seq !== searchSeq) return;  // 已有更新的搜尋，丟棄舊結果
       const box = $("askSearchHits");
       if (!r.hits.length) { hideSearchHits(); return; }

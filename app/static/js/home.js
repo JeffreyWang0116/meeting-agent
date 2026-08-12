@@ -1,4 +1,5 @@
-import { $, esc, icon, jsonOrThrow, skelBlocks } from "./core.js";
+import { api } from "./api.js";
+import { $, esc, icon, skelBlocks } from "./core.js";
 import { allMeetings, meetingsLoaded, openMeetingDetail } from "./meetings.js";
 import { activeAlerts, remindersLoaded } from "./reminders.js";
 import { showView } from "./router.js";
@@ -61,7 +62,7 @@ $("homeMeetings").addEventListener("click", e => {
 // 今日分析次數：設定選單也會用同一支 API，這裡先抓一次給首頁的數字磚
 async function refreshUsage() {
   try {
-    todayAnalysis = (await jsonOrThrow(await fetch("/api/usage"))).today?.analysis ?? 0;
+    todayAnalysis = (await api.usage()).today?.analysis ?? 0;
   } catch (e) { todayAnalysis = "—"; }
   usageLoaded = true;
   renderHome();

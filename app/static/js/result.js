@@ -1,4 +1,5 @@
-import { $, PRIORITY_ZH, esc, icon, jsonOrThrow, showError, showNotice, skelBlocks, skelLine } from "./core.js";
+import { api } from "./api.js";
+import { $, PRIORITY_ZH, esc, icon, showError, showNotice, skelBlocks, skelLine } from "./core.js";
 import { refreshMeetings } from "./meetings.js";
 import { refreshReminders } from "./reminders.js";
 import { WIDE, showView } from "./router.js";
@@ -254,11 +255,7 @@ $("btnTransSummary").addEventListener("click", async () => {
   const original = label.textContent;
   label.textContent = "翻譯中…";
   try {
-    const r = await jsonOrThrow(await fetch("/api/translate", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text: summary, target }),
-    }));
+    const r = await api.translate({ text: summary, target });
     box.textContent = r.translation;
     box.style.display = "block";
   } catch (err) { showError("翻譯失敗：" + err.message); }

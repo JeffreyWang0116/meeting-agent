@@ -5,6 +5,7 @@
   行為完全不變。模組之間允許循環相依（例如 tasks ↔ home），
   因為彼此只在函式執行時才互相呼叫，不在模組求值階段就用到。
 
+    api         全站唯一知道端點網址的地方（換平台時只要重寫這支）
     core        共用基礎：$ / esc / icon / 錯誤橫幅 / 骨架 / 分頁 / API 認證
     router      版面路由：側欄一次只顯示一個 view
     setup       全域初始化：日期、會議種類、功能勾選、本次專用詞彙
@@ -19,6 +20,7 @@
     settings    主題、設定選單、詞彙表、講者名冊、備份、PWA
 */
 import "./core.js";
+import "./api.js";
 import "./router.js";
 import "./setup.js";
 import "./transcript.js";

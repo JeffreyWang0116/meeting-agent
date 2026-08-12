@@ -1,4 +1,5 @@
-import { $, PRIORITY_ZH, esc, icon, jsonOrThrow, loadFail, pageNo, paginate, registerPager, registerRefresher, renderPager, showError } from "./core.js";
+import { api } from "./api.js";
+import { $, PRIORITY_ZH, esc, icon, loadFail, pageNo, paginate, registerPager, registerRefresher, renderPager, showError } from "./core.js";
 import { renderHome } from "./home.js";
 import { refreshMeetings } from "./meetings.js";
 import { refreshReminders } from "./reminders.js";
@@ -65,7 +66,7 @@ function renderTasks() {
 
 async function refreshTasks() {
   try {
-    allTasks = (await jsonOrThrow(await fetch("/api/tasks"))).tasks;
+    allTasks = (await api.listTasks()).tasks;
     tasksLoaded = true;
     renderTasks();
   } catch (e) {
@@ -79,11 +80,7 @@ $("taskRows").addEventListener("change", async e => {
   const sel = e.target.closest(".status-sel");
   if (!sel) return;
   try {
-    const updated = await jsonOrThrow(await fetch(`/api/tasks/${sel.dataset.id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ status: sel.value }),
-    }));
+    const updated = await api.updateTask(sel.dataset.id, { status: sel.value });
     const i = allTasks.findIndex(t => t.id === updated.id);
     if (i >= 0) allTasks[i] = updated;
     renderTasks();
@@ -113,11 +110,7 @@ $("taskRows").addEventListener("click", async e => {
     };
     if (!fields.task) { showError("任務名稱不可為空"); return; }
     try {
-      const updated = await jsonOrThrow(await fetch(`/api/tasks/${save.dataset.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(fields),
-      }));
+      const updated = await api.updateTask(save.dataset.id, fields);
       const i = allTasks.findIndex(t => t.id === updated.id);
       if (i >= 0) allTasks[i] = updated;
       editingTaskId = null;
@@ -130,7 +123,7 @@ $("taskRows").addEventListener("click", async e => {
   if (!btn) return;
   if (!confirm("確定要刪除這筆任務？")) return;
   try {
-    await jsonOrThrow(await fetch(`/api/tasks/${btn.dataset.id}`, { method: "DELETE" }));
+    await api.deleteTask(btn.dataset.id);
     allTasks = allTasks.filter(t => t.id !== btn.dataset.id);
     renderTasks();
     refreshReminders();
@@ -162,16 +155,12 @@ async function submitNewTask() {
   const name = $("newTaskName").value.trim();
   if (!name) { showError("任務名稱不可為空"); return; }
   try {
-    await jsonOrThrow(await fetch("/api/tasks", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
+    await api.createTask({
         task: name,
         owner: $("newTaskOwner").value.trim() || null,
         due_date: $("newTaskDue").value || null,
         priority: $("newTaskPriority").value,
-      }),
-    }));
+      });
     $("newTaskName").value = ""; $("newTaskOwner").value = ""; $("newTaskDue").value = "";
     $("newTaskPriority").value = "medium";
     $("taskAddRow").style.display = "none";

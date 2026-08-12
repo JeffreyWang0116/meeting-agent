@@ -1,4 +1,5 @@
-import { $, clearError, jsonOrThrow, showError, showNotice } from "./core.js";
+import { api } from "./api.js";
+import { $, clearError, showError, showNotice } from "./core.js";
 import { hideResultSkeleton, markAnalysisStart, renderResult, showResultSkeleton } from "./result.js";
 import { chunkSeconds, correctTypos, meetingTerms, nameSpeakers, selectedFeatures, sysSourceValue, wantSystemAudio } from "./setup.js";
 import { chatHtml, renderChat } from "./transcript.js";
@@ -15,10 +16,7 @@ $("btnAnalyzeText").addEventListener("click", async () => {
   markAnalysisStart();
   showResultSkeleton();
   try {
-    const result = await jsonOrThrow(await fetch("/api/meetings", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
+    const result = await api.analyze({
         text: $("textInput").value,
         meeting_date: $("meetingDate").value || null,
         kind: $("meetingKind").value,
@@ -26,8 +24,7 @@ $("btnAnalyzeText").addEventListener("click", async () => {
         correct_typos: correctTypos(),
         name_speakers: nameSpeakers(),
         terms: meetingTerms(),
-      }),
-    }));
+    });
     renderResult(result, $("textInput").value);
   } catch (e) { hideResultSkeleton(); showError(e.message); }
   finally { btn.disabled = false; btn.innerHTML = original; }
@@ -61,11 +58,11 @@ $("btnUpload").addEventListener("click", async () => {
     if (features !== null) form.append("features", features.join(","));
     if (correctTypos()) form.append("correct_typos", "true");
     if (nameSpeakers()) form.append("name_speakers", "true");
-    const { job_id } = await jsonOrThrow(await fetch("/api/media", { method: "POST", body: form }));
+    const { job_id } = await api.uploadMedia(form);
 
     while (true) {
       await new Promise(r => setTimeout(r, 1500));
-      const job = await jsonOrThrow(await fetch(`/api/media/${job_id}`));
+      const job = await api.mediaJob(job_id);
       const pct = Math.round((job.progress || 0) * 100);
       $("fileProgress").firstElementChild.style.width = pct + "%";
       $("fileStatus").textContent =
@@ -337,8 +334,7 @@ async function postLiveChunk(blob, offsetSeconds) {
   form.append("file", blob, "chunk" + ext);
   // 本段在整場會議中的開始秒數：後端把段內相對時間戳平移成整場時間
   if (offsetSeconds != null) form.append("offset", offsetSeconds);
-  const r = await jsonOrThrow(
-    await fetch(`/api/live/${liveSessionId}/chunk`, { method: "POST", body: form }));
+  const r = await api.liveChunk(liveSessionId, form);
   if (r.transcript) liveTranscriptText = r.transcript;
   if (r.text) appendCaption(r.text, r.translation);
 }
@@ -423,11 +419,7 @@ $("btnLiveStart").addEventListener("click", async () => {
     liveStream = await buildLiveStream(wantSystemAudio());
   } catch (e) { releaseLiveStreams(); showError(e.message); return; }
   try {
-    liveSessionId = (await jsonOrThrow(await fetch("/api/live/start", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ translate_to: $("liveTranslate").value || null }),
-    }))).session_id;
+    liveSessionId = (await api.liveStart({ translate_to: $("liveTranslate").value || null })).session_id;
   } catch (e) { releaseLiveStreams(); showError(e.message); return; }
 
   liveRecording = true;
@@ -505,22 +497,14 @@ async function finishLiveSession() {
   try {
     let result;
     try {
-      result = await jsonOrThrow(await fetch(`/api/live/${liveSessionId}/finish`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(options),
-      }));
+      result = await api.liveFinish(liveSessionId, options);
     } catch (e) {
       // 404＝聆聽 session 不見了。session 只存在伺服器記憶體，行程一重啟（雲端
       // 重新部署、當掉重生）就永遠找不回來，再按幾次「重試分析」都是同樣的 404。
       // 但逐字稿在瀏覽器這邊還有一份，改走純文字分析把它救回來——這條路是「貼上
       // 文字」既有的流程，不需要 session。
       if (e.status !== 404 || !liveTranscriptText.trim()) throw e;
-      result = await jsonOrThrow(await fetch("/api/meetings", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: liveTranscriptText, ...options }),
-      }));
+      result = await api.analyze({ text: liveTranscriptText, ...options });
       // 重啟之後送出的錄音段也會一起 404，所以這份逐字稿可能缺了後半段——
       // 寧可講清楚，也不要讓使用者以為分析的是完整的一場會議
       showNotice("聆聽 session 已遺失（伺服器可能重啟過），已改用瀏覽器保留的逐字稿分析。請核對逐字稿結尾是否完整。");

@@ -1,4 +1,5 @@
-import { $, esc, icon, jsonOrThrow, showError } from "./core.js";
+import { api } from "./api.js";
+import { $, esc, icon, showError } from "./core.js";
 import { refreshMeetings } from "./meetings.js";
 import { refreshReminders } from "./reminders.js";
 import { refreshTasks } from "./tasks.js";
@@ -25,7 +26,7 @@ import { refreshTasks } from "./tasks.js";
     btn.setAttribute("aria-expanded", open);
     if (open) {  // 打開時順便更新今日用量
       try {
-        const u = await jsonOrThrow(await fetch("/api/usage"));
+        const u = await api.usage();
         const t = u.today || {};
         $("usageAnalysis").textContent = t.analysis || 0;
         $("usageAsk").textContent = t.ask || 0;
@@ -58,11 +59,7 @@ function renderGlossary() {
 
 async function saveGlossary() {
   try {
-    const r = await jsonOrThrow(await fetch("/api/glossary", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ terms: glosTerms }),
-    }));
+    const r = await api.saveGlossary({ terms: glosTerms });
     glosTerms = r.terms;
     renderGlossary();
   } catch (err) { showError("儲存詞彙失敗：" + err.message); }
@@ -79,11 +76,7 @@ $("restoreFile").addEventListener("change", async () => {
   }
   try {
     const data = JSON.parse(await file.text());
-    const r = await jsonOrThrow(await fetch("/api/restore", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(data),
-    }));
+    const r = await api.restore(data);
     $("settingsMenu").classList.remove("open");
     alert(`已還原 ${r.restored.meetings} 場會議、${r.restored.tasks} 筆任務。`);
     refreshTasks(); refreshMeetings(); refreshReminders();
@@ -95,7 +88,7 @@ $("btnGlossary").addEventListener("click", async () => {
   $("settingsMenu").classList.remove("open");
   $("glossaryModal").classList.add("open");
   try {
-    glosTerms = (await jsonOrThrow(await fetch("/api/glossary"))).terms;
+    glosTerms = (await api.glossary()).terms;
     renderGlossary();
   } catch (err) { /* 讀取失敗仍可新增 */ }
   $("glosTerm").focus();
@@ -137,15 +130,11 @@ function renderRoster() {
 
 async function saveRoster() {
   try {
-    const r = await jsonOrThrow(await fetch("/api/speakers", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ names: rosterNames }),
-    }));
+    const r = await api.saveSpeakers({ names: rosterNames });
     rosterNames = r.names;
   } catch (err) {
     showError("儲存講者名冊失敗：" + err.message);
-    rosterNames = (await jsonOrThrow(await fetch("/api/speakers"))).names;  // 退回伺服器版本
+    rosterNames = (await api.speakers()).names;  // 退回伺服器版本
   }
   renderRoster();
 }
@@ -154,11 +143,7 @@ async function saveRoster() {
 // 所以失敗只當沒發生，不打擾使用者
 async function rememberSpeaker(name) {
   try {
-    await fetch("/api/speakers", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ names: [name] }),
-    });
+    await api.rememberSpeakers({ names: [name] });
   } catch (err) { /* 名冊是加分項，靜靜略過 */ }
 }
 
@@ -166,7 +151,7 @@ $("btnRoster").addEventListener("click", async () => {
   $("settingsMenu").classList.remove("open");
   $("rosterModal").classList.add("open");
   try {
-    rosterNames = (await jsonOrThrow(await fetch("/api/speakers"))).names;
+    rosterNames = (await api.speakers()).names;
     renderRoster();
   } catch (err) { /* 讀取失敗仍可新增 */ }
   $("rosterName").focus();

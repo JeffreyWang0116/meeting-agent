@@ -1,5 +1,6 @@
+import { api } from "./api.js";
 import { renderAskScope } from "./ask.js";
-import { $, PAGE_SIZE, esc, icon, jsonOrThrow, loadFail, pageNo, paginate, registerPager, registerRefresher, renderPager, showError, showNotice } from "./core.js";
+import { $, PAGE_SIZE, esc, icon, loadFail, pageNo, paginate, registerPager, registerRefresher, renderPager, showError, showNotice } from "./core.js";
 import { renderHome } from "./home.js";
 import { refreshReminders } from "./reminders.js";
 import { copyWithFeedback } from "./result.js";
@@ -178,7 +179,7 @@ function renderMeetings() {
 
 async function refreshMeetings() {
   try {
-    allMeetings = (await jsonOrThrow(await fetch("/api/meetings"))).meetings;
+    allMeetings = (await api.listMeetings()).meetings;
     meetingsLoaded = true;
     renderMeetings();
     renderAskScope();
@@ -196,7 +197,7 @@ async function openMeetingDetail(id) {
   renderMeetings();  // 先顯示「載入中」
   if (!meetingDetailCache[id]) {
     try {
-      meetingDetailCache[id] = await jsonOrThrow(await fetch(`/api/meetings/${id}`));
+      meetingDetailCache[id] = await api.getMeeting(id);
     } catch (err) { showError("讀取會議失敗：" + err.message); return; }
   }
   renderMeetings();
@@ -227,7 +228,7 @@ $("meetingRows").addEventListener("click", async e => {
   if (del) {
     if (!confirm("確定要刪除這場會議？它的任務也會一併刪除。")) return;
     try {
-      await jsonOrThrow(await fetch(`/api/meetings/${del.dataset.id}`, { method: "DELETE" }));
+      await api.deleteMeeting(del.dataset.id);
       delete meetingDetailCache[del.dataset.id];
       if (expandedMeetingId === del.dataset.id) expandedMeetingId = null;
       refreshMeetings(); refreshTasks(); refreshReminders();
@@ -248,16 +249,12 @@ $("meetingRows").addEventListener("click", async e => {
   const save = e.target.closest(".save-detail");
   if (save) {
     try {
-      const updated = await jsonOrThrow(await fetch(`/api/meetings/${save.dataset.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+      const updated = await api.updateMeeting(save.dataset.id, {
           title: $("dTitle").value.trim() || "未命名會議",
           summary: $("dSummary").value.trim(),
           transcript: $("dTranscript").value,
           tags: $("dTags").value.split(/[、,，\s]+/).map(t => t.trim()).filter(Boolean),
-        }),
-      }));
+      });
       meetingDetailCache[save.dataset.id] = updated;
       detailEditing = false;
       refreshMeetings();
@@ -272,11 +269,8 @@ $("meetingRows").addEventListener("click", async e => {
     if (!confirm(`重新分析會用目前的逐字稿重跑 AI${note}，這場會議的任務會整批換新。繼續？`)) return;
     rean.disabled = true; rean.textContent = "分析中…";
     try {
-      const r = await jsonOrThrow(await fetch(`/api/meetings/${rean.dataset.id}/reanalyze`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ correct_typos: correct, name_speakers: nameSpeakers() }),
-      }));
+      const r = await api.reanalyze(rean.dataset.id, { correct_typos: correct, name_speakers: nameSpeakers(),
+      });
       const cached = meetingDetailCache[rean.dataset.id];
       if (cached) {
         cached.meeting = r.analysis.meeting;
@@ -324,14 +318,10 @@ $("meetingRows").addEventListener("click", async e => {
     if (box.textContent) { box.style.display = "block"; return; }
     trans.textContent = "翻譯中…";
     try {
-      const r = await jsonOrThrow(await fetch("/api/translate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+      const r = await api.translate({
           text: d.meeting.summary,
           target: /[一-鿿]/.test(d.meeting.summary) ? "en" : "zh",
-        }),
-      }));
+        });
       box.textContent = r.translation;
       box.style.display = "block";
     } catch (err) { showError("翻譯失敗：" + err.message); }
@@ -353,11 +343,7 @@ $("meetingRows").addEventListener("click", async e => {
     const rangeNote = (start || end) ? `（時間段 ${start || "開頭"}–${end || "結尾"}）` : "";
     termBtn.disabled = true; termBtn.textContent = "替換中…";
     try {
-      const r = await jsonOrThrow(await fetch(`/api/meetings/${id}/replace-term`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ old: from, new: to, add_to_glossary: addGlos, start: start || null, end: end || null }),
-      }));
+      const r = await api.replaceTerm(id, { old: from, new: to, add_to_glossary: addGlos, start: start || null, end: end || null });
       if (r.replaced === 0) {
         showNotice(`${rangeNote ? "指定時間段裡" : "逐字稿裡"}找不到「${from}」，沒有任何替換。`);
         termBtn.disabled = false; termBtn.textContent = "替換";
@@ -392,20 +378,11 @@ $("meetingRows").addEventListener("click", async e => {
     // 出席者名單裡的舊名一併換成新名（下游不再殘留「講者A」）
     const attendees = (d.meeting.attendees || []).map(a => (a === oldName ? newName : a));
     try {
-      meetingDetailCache[id] = await jsonOrThrow(
-        await fetch(`/api/meetings/${id}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ transcript: renamed, attendees }),
-        }));
+      meetingDetailCache[id] = await api.updateMeeting(id, { transcript: renamed, attendees });
       // 這場會議中「負責人＝舊名」的任務也跟著改名
       const owned = allTasks.filter(t => t.meeting_id === id && t.owner === oldName);
       for (const t of owned) {
-        await fetch(`/api/tasks/${t.id}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ owner: newName }),
-        });
+        await api.updateTask(t.id, { owner: newName });
       }
       rememberSpeaker(newName);  // 記進名冊，下次辨識講者時姓名寫法就有依據
       renderMeetings();
