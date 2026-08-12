@@ -983,3 +983,18 @@
     .stage-orb { width: min(34vh, 74vw); height: min(34vh, 74vw); }
     .stage-slot .transcript-box { max-height: 18vh; }
   }
+
+  /* ---- 會議種類說明與本次專用詞彙 ---- */
+  .kind-hint {
+    margin: -8px 0 0; font-size: .8rem; line-height: 1.6; color: var(--faint);
+    padding-left: 11px; border-left: 2px solid var(--accent-border);
+  }
+  .kind-hint:empty { display: none; }
+  .lbl-aux { font-weight: 400; color: var(--faint); margin-left: 8px; }
+  #meetingTerms {
+    width: 100%; padding: 10px 13px; font-family: var(--sans); font-size: .92rem; color: var(--ink);
+    background: var(--card-2); border: 1px solid var(--border); border-radius: var(--radius-md);
+    transition: border-color .15s, box-shadow .15s;
+  }
+  #meetingTerms::placeholder { color: var(--faint); }
+  #meetingTerms:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }

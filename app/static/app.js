@@ -181,34 +181,80 @@ async function jsonOrThrow(resp) {
 // ---- 初始化 ----
 $("meetingDate").value = new Date().toLocaleDateString("sv");  // YYYY-MM-DD（本地時區）
 
-// 錄音種類：記住上次的選擇
-(function () {
-  const saved = localStorage.getItem("meetingKind");
-  if (saved && [...$("meetingKind").options].some(o => o.value === saved)) {
-    $("meetingKind").value = saved;
+// 會議種類：選單內容、每種類的預設區塊與說明文字全部來自 /api/meeting-kinds，
+// 前端不自己抄一份名單（兩邊各維護一份必定會不同步）
+const FEATURE_BOX = { summary: "featSummary", highlights: "featHighlights", decisions: "featDecisions", todos: "featTodos" };
+let kindDefaults = {};   // 種類 → 預設開啟的區塊
+let kindHints = {};      // 種類 → 這個種類的分析重點說明
+// 使用者自己動過勾選框就別再覆蓋他，除非他換了種類
+let featuresTouched = false;
+
+function applyKindDefaults() {
+  const kind = $("meetingKind").value;
+  $("kindHint").textContent = kindHints[kind] || "";
+  const on = kindDefaults[kind];
+  if (!on) return;
+  for (const [key, id] of Object.entries(FEATURE_BOX)) $(id).checked = on.includes(key);
+}
+
+(async function initMeetingKinds() {
+  const sel = $("meetingKind");
+  try {
+    const r = await jsonOrThrow(await fetch("/api/meeting-kinds"));
+    sel.innerHTML = r.groups.map(g =>
+      `<optgroup label="${esc(g.label)}">${g.kinds.map(k =>
+        `<option value="${esc(k.value)}">${esc(k.value)}</option>`).join("")}</optgroup>`).join("");
+    r.groups.forEach(g => g.kinds.forEach(k => {
+      kindDefaults[k.value] = k.features;
+      kindHints[k.value] = k.hint;
+    }));
+    const saved = localStorage.getItem("meetingKind");
+    sel.value = saved && kindDefaults[saved] ? saved : r.default;
+  } catch (e) {
+    // 選單載不到就維持 HTML 裡那個「一般會議」，不擋住整個分析流程
   }
-  $("meetingKind").addEventListener("change", () => {
-    localStorage.setItem("meetingKind", $("meetingKind").value);
-    updateFeatureRowVisibility();
+  applyKindDefaults();
+  sel.addEventListener("change", () => {
+    localStorage.setItem("meetingKind", sel.value);
+    featuresTouched = false;  // 換種類＝重新套用該種類的預設
+    applyKindDefaults();
   });
+  Object.values(FEATURE_BOX).forEach(id =>
+    $(id).addEventListener("change", () => { featuresTouched = true; }));
 })();
 
-// 會議摘要／決議事項／代辦事項：只有錄音種類是「會議」時才有意義，
-// 才顯示勾選框讓使用者決定要不要用（其他種類後端預設全部不用）
-function updateFeatureRowVisibility() {
-  $("featureRow").style.display = $("meetingKind").value === "會議" ? "flex" : "none";
-}
-updateFeatureRowVisibility();
-
-// 目前的功能勾選狀態；錄音種類不是「會議」時回傳 null，讓後端套用該種類的預設值（不使用這些功能）
+// 目前的功能勾選狀態。使用者沒動過就回 null，讓後端套用該種類的預設——
+// 這樣預設值只定義在後端一處，前端不會因為勾選框的初始狀態而蓋掉它
 function selectedFeatures() {
-  if ($("meetingKind").value !== "會議") return null;
-  const features = [];
-  if ($("featSummary").checked) features.push("summary");
-  if ($("featHighlights").checked) features.push("highlights");
-  if ($("featDecisions").checked) features.push("decisions");
-  if ($("featTodos").checked) features.push("todos");
-  return features;
+  if (!featuresTouched) return null;
+  return Object.entries(FEATURE_BOX).filter(([, id]) => $(id).checked).map(([key]) => key);
+}
+
+// 本次專用詞彙：使用者用頓號/逗號分隔隨手打，這裡轉成後端要的格式
+function meetingTerms() {
+  return $("meetingTerms").value
+    .split(/[、,，;；\n]/)
+    .map(s => s.trim())
+    .filter(Boolean)
+    .map(term => ({ term, note: "" }));
+}
+
+// 勾了「一併加入全域詞彙表」就把本次的詞補進去。失敗只是少了個方便功能，
+// 不該讓已經跑完的分析看起來像出錯，所以靜靜略過
+async function maybePromoteTerms() {
+  const terms = meetingTerms();
+  if (!$("termsToGlossary").checked || !terms.length) return;
+  try {
+    const existing = (await jsonOrThrow(await fetch("/api/glossary"))).terms;
+    const known = new Set(existing.map(t => t.term));
+    const merged = existing.concat(terms.filter(t => !known.has(t.term)));
+    if (merged.length === existing.length) return;
+    await fetch("/api/glossary", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ terms: merged }),
+    });
+  } catch (e) { /* 加不進去不影響這次分析 */ }
 }
 
 // AI 校正錯字：與錄音種類無關（任何逐字稿都可能有同音錯字），
@@ -508,6 +554,7 @@ function hideResultSkeleton() {
 
 function renderResult(result, transcript) {
   $("result").classList.remove("is-loading");
+  maybePromoteTerms();
   // 後端校正過的話，result.transcript 才是最終版本（傳進來的可能是校正前的）
   currentTranscript = (result.transcript || transcript || "").trim();
   $("rTransSec").style.display = currentTranscript ? "block" : "none";
@@ -529,9 +576,9 @@ function renderResult(result, transcript) {
     m.attendees.map(p => `<span class="meta-chip">${icon("user", "i-sm")}${esc(p)}</span>`).join("") +
     (a.tags || []).map(t => `<span class="meta-chip"><span class="mtag">${esc(t)}</span></span>`).join("") +
     statsChip;
-  // 摘要／決議／代辦：功能沒被使用（非會議種類、或使用者取消勾選）時整節隱藏，
-  // 而不是顯示一個空空的區塊
-  const kind = $("meetingKind").value;
+  // 摘要／重點／決議／代辦：這場會議的種類沒產出這個區塊時整節隱藏。
+  // 改版後每種類都有自己的預設區塊，所以一律改成「有內容才顯示」，
+  // 不再把某一個種類寫死在前端
   $("hSummary").style.display = m.summary ? "flex" : "none";
   $("rSummary").style.display = m.summary ? "block" : "none";
   $("rSummary").textContent = m.summary || "";
@@ -541,7 +588,7 @@ function renderResult(result, transcript) {
   $("transSummaryLabel").textContent = /[一-鿿]/.test(m.summary || "") ? "譯成英文" : "譯成中文";
 
   const highlights = a.highlights || [];
-  const showHighlights = kind === "會議" || highlights.length > 0;
+  const showHighlights = highlights.length > 0;
   $("hHighlights").style.display = showHighlights ? "flex" : "none";
   $("rHighlights").style.display = showHighlights ? "flex" : "none";
   $("rHighlights").innerHTML = highlights.length
@@ -552,14 +599,14 @@ function renderResult(result, transcript) {
       </li>`).join("")
     : `<p class="empty-note">未擷取到會議重點</p>`;
 
-  const showDecisions = kind === "會議" || a.decisions.length > 0;
+  const showDecisions = a.decisions.length > 0;
   $("hDecisions").style.display = showDecisions ? "flex" : "none";
   $("rDecisions").style.display = showDecisions ? "flex" : "none";
   $("rDecisions").innerHTML = a.decisions.length
     ? a.decisions.map(d => `<li>${esc(d.description)}${d.context ? ` <span class="ctx">（${esc(d.context)}）</span>` : ""}</li>`).join("")
     : `<p class="empty-note">本次會議無正式決議</p>`;
 
-  const showTodos = kind === "會議" || a.todos.length > 0;
+  const showTodos = a.todos.length > 0;
   $("hTodos").style.display = showTodos ? "flex" : "none";
   $("rTodos").style.display = showTodos ? "flex" : "none";
   $("rTodos").innerHTML = a.todos.length
@@ -1636,6 +1683,7 @@ $("btnAnalyzeText").addEventListener("click", async () => {
         features: selectedFeatures(),
         correct_typos: correctTypos(),
         name_speakers: nameSpeakers(),
+        terms: meetingTerms(),
       }),
     }));
     renderResult(result, $("textInput").value);
@@ -1666,6 +1714,7 @@ $("btnUpload").addEventListener("click", async () => {
     form.append("file", file);
     if ($("meetingDate").value) form.append("meeting_date", $("meetingDate").value);
     form.append("kind", $("meetingKind").value);
+    form.append("terms", JSON.stringify(meetingTerms()));
     const features = selectedFeatures();
     if (features !== null) form.append("features", features.join(","));
     if (correctTypos()) form.append("correct_typos", "true");
@@ -2049,6 +2098,7 @@ async function finishLiveSession() {
     features: selectedFeatures(),
     correct_typos: correctTypos(),
     name_speakers: nameSpeakers(),
+    terms: meetingTerms(),
   };
   try {
     let result;

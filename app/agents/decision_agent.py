@@ -70,13 +70,72 @@ _WEEKDAY_ZH = "一二三四五六日"
 # 錄音種類 → 分析重點提示。輸出結構（schema）不變，只調整內容重點，
 # 讓任務庫、跨會議問答等下游功能對所有種類一體適用。
 KIND_HINTS = {
-    "會議": "這是一場多人會議：完整萃取決議、代辦與未決事項。",
-    "通話": "這是一通通話（通常只有兩位講者）：重點放在雙方承諾的事項與後續行動；正式決議通常較少。",
-    "訪談": "這是一場訪談：摘要應整理受訪者的重點回答與觀點（問答要點）；代辦通常是訪談後的跟進事項。",
-    "語音備忘錄": "這是個人語音備忘錄：通常只有一位講者，重點是講者自己的待辦與想法；attendees 可留空、決議通常沒有。",
-    "講座": "這是一場講座或課程：摘要應條列講者的重點內容與知識點；通常沒有決議；代辦是聽眾要跟進的行動（如作業、延伸閱讀）。",
+    "一般會議": "一般性的多人會議：完整萃取決議、代辦與未決事項。",
+    "團隊站會": "每日站會／每週同步：摘要壓到三句以內，逐人整理「進度／接下來要做／卡住的地方」。阻礙（blocker）一律視為高優先代辦；例行進度報告不是決議，不要寫進 decisions。",
+    "專案進度會議": "專案進度會議：摘要聚焦「原訂 vs 實際」的落差。重點放在里程碑狀態、延誤原因、風險與因應方式；時程或範圍的變更算決議。",
+    "專案啟動會": "專案啟動會（kickoff）：摘要要交代專案目標、範圍，以及明確排除不做的事。重點放在角色分工、里程碑時程與成功指標；範圍界定與分工都算決議。",
+    "需求訪談": "需求訪談／客戶發現：摘要用受訪者自己的話整理痛點與需求。重點放在現況問題、期望與限制條件；未經對方確認的推論一律放 pending_items，不要當成需求。代辦是訪談後的跟進事項。",
+    "設計技術評審": "設計／技術評審：摘要先說明被評的方案在解什麼問題。重點放在提出的選項與各自取捨；決議務必連同「為什麼選它」一起寫進 context。未解決的疑慮放 pending_items。",
+    "回顧會議": "回顧會議（retrospective）：摘要分成「做得好」與「待改善」兩段。重點擷取雙方的具體事例而非籠統感想；改善行動一律列成代辦並指定負責人，沒人認領就放 pending_items。",
+    "一對一": "一對一：摘要聚焦當事人的目標、遭遇的困難與獲得的回饋。重點放在雙方的承諾事項，決議通常沒有。內容私密，只記錄實際說出口的話，禁止推測情緒或加上評價。",
+    "銷售拜訪": "銷售拜訪／客戶會議：摘要要回答 BANT——預算、決策權責、需求、時程，問不到的那項就明說沒談到。重點放在客戶提出的異議與我方回應，以及明確的下一步（demo、報價、再約時間）。客戶與我方的承諾都要列成代辦。",
+    "面試": "面試：摘要按評估面向整理（技術能力、相關經驗、溝通、動機），每個面向都要附上對話中的具體佐證。重點放在候選人回答的關鍵事例。禁止輸出錄取建議或對人的主觀評價，只整理事實與雙方待辦。",
+    "教育訓練": "教育訓練／講座／課程：摘要條列講者的知識點與結論。重點是可帶走的觀念與範例，通常沒有決議；代辦是聽眾要跟進的行動（作業、延伸閱讀、練習）。",
+    "腦力激盪": "腦力激盪：摘要說明發想的題目與收斂方向。重點是被提出的點子，相近的合併成一條，少數人提的也不要漏掉；點子在被明確採納前一律放 pending_items 而不是決議。",
+    "事故檢討": "事故檢討（postmortem）：摘要依「發生什麼／影響範圍／怎麼解掉」三段整理。重點依時間順序還原事件時間軸。已確認的根因寫進決議，還在推測的放 pending_items；預防措施列成代辦。只描述系統與流程，禁止指名究責。",
+    "全體會議": "全體會議／公司宣達：摘要條列宣布的事項與政策變更。重點放在對聽眾有實質影響的內容，以及 Q&A 中主管的回答；已定案的公司決定算決議，代辦是聽眾要配合的事。",
+    "語音備忘錄": "個人語音備忘錄：通常只有一位講者，重點是講者自己的待辦與想法；attendees 可留空、決議通常沒有。",
     "其它": "種類不明：依內容自行判斷重點。",
 }
+
+# 舊資料相容：改版前存下來的會議帶的是「錄音種類」。這些值不再出現在選單裡，
+# 但既有紀錄仍要能讀取、重新分析與編輯，所以保留對應關係。
+LEGACY_KINDS = {
+    "會議": "一般會議",
+    "通話": "一般會議",
+    "訪談": "需求訪談",
+    "講座": "教育訓練",
+}
+
+MEETING_KINDS = set(KIND_HINTS)
+
+# 各種類預設產生哪些區塊；沒列到的＝四項全開。
+# 挑掉的是那個種類「本來就不會有」的東西（站會沒有正式決議、面試不該有代辦決議），
+# 使用者仍可自己勾回來。
+KIND_DEFAULT_FEATURES = {
+    "團隊站會": {"summary", "todos"},
+    "需求訪談": {"summary", "highlights", "todos"},
+    "一對一": {"summary", "highlights", "todos"},
+    "銷售拜訪": {"summary", "highlights", "todos"},
+    "面試": {"summary", "highlights"},
+    "教育訓練": {"summary", "highlights", "todos"},
+    "腦力激盪": {"summary", "highlights"},
+    "語音備忘錄": {"summary", "todos"},
+    "其它": {"summary", "highlights", "todos"},
+}
+
+
+# 下拉選單的分組與排序。前端直接拿這份拼 optgroup，
+# 不在 HTML 裡再拄一份名單（兩邊各維護一份必定會不同步）
+KIND_GROUPS = [
+    ("常用", ["一般會議", "團隊站會", "一對一", "語音備忘錄"]),
+    ("專案", ["專案啟動會", "專案進度會議", "設計技術評審", "回顧會議", "事故檢討"]),
+    ("對外", ["需求訪談", "銷售拜訪", "面試"]),
+    ("其他", ["教育訓練", "腦力激盪", "全體會議", "其它"]),
+]
+
+DEFAULT_KIND = "一般會議"
+
+
+def resolve_kind(kind: str | None) -> str | None:
+    """把舊的錄音種類值換成對應的會議種類；新值與 None 原樣回傳。"""
+    return LEGACY_KINDS.get(kind, kind)
+
+
+def default_features_for_kind(kind: str | None) -> set[str]:
+    if kind is None:
+        return set(FEATURE_KEYS)
+    return set(KIND_DEFAULT_FEATURES.get(resolve_kind(kind), FEATURE_KEYS))
 
 PROMPT_TEMPLATE = """你是「會議助手」的決策模組。以下是一場會議的逐字稿或文字紀錄，內容可能中英夾雜、口語且混亂。請仔細閱讀並萃取結構化資訊。
 
@@ -115,14 +174,17 @@ def build_prompt(
     kind: str | None = None,
     glossary: list[dict] | None = None,
     features: set[str] | None = None,
+    extra_terms: list[dict] | None = None,
 ) -> str:
     # features=None：向後相容，等同全部功能都開（沒有勾選框限制的舊行為）
     features = FEATURE_KEYS if features is None else features
     kind_line = ""
     if kind:
-        kind_line = f"\n錄音種類：{kind}。{KIND_HINTS.get(kind, '')}"
+        resolved = resolve_kind(kind)
+        kind_line = f"\n會議種類：{resolved}。{KIND_HINTS.get(resolved, '')}"
     glossary_line = ""
-    terms = glossary_prompt_line(glossary or [])
+    # 本次專用詞彙排在全域詞彙表後面：同一個詞若兩邊都有，後出現的寫法更貼近這場會議
+    terms = glossary_prompt_line((glossary or []) + (extra_terms or []))
     if terms:
         glossary_line = f"\n已知詞彙表（輸出的人名與專有名詞一律以此寫法為準）：{terms}。"
     disabled = FEATURE_KEYS - features
@@ -187,6 +249,7 @@ class DecisionAgent:
         meeting_date: date | None = None,
         kind: str | None = None,
         features: set[str] | None = None,
+        extra_terms: list[dict] | None = None,
     ) -> MeetingAnalysis:
         meeting_date = meeting_date or date.today()
         # features=None：向後相容，等同全部功能都開
@@ -197,6 +260,7 @@ class DecisionAgent:
             kind=kind,
             glossary=self._glossary() if self._glossary else None,
             features=features,
+            extra_terms=extra_terms,
         )
 
         prompt = base_prompt

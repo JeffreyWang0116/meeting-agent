@@ -18,5 +18,8 @@ class ExecutorAgent:
         analysis: MeetingAnalysis,
         transcript: str | None = None,
         kind: str | None = None,
+        terms: list[dict] | None = None,
     ) -> str:
-        return self.store.save_meeting(analysis, transcript=transcript, kind=kind)
+        return self.store.save_meeting(
+            analysis, transcript=transcript, kind=kind, terms=terms
+        )

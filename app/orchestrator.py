@@ -46,6 +46,7 @@ class Orchestrator:
         features: set[str] | None = None,
         correct_typos: bool = False,
         name_speakers: bool = False,
+        terms: list[dict] | None = None,
     ) -> dict:
         text = self.parser.parse(raw_text)
         corrections: list[dict] = []
@@ -57,9 +58,11 @@ class Orchestrator:
         if name_speakers and self.namer:
             text, speaker_names = self.namer.name_speakers(text)
         analysis = self.decision.analyze(
-            text, meeting_date=meeting_date, kind=kind, features=features
+            text, meeting_date=meeting_date, kind=kind, features=features, extra_terms=terms
         )
-        meeting_id = self.executor.execute(analysis, transcript=text, kind=kind)
+        meeting_id = self.executor.execute(
+            analysis, transcript=text, kind=kind, terms=terms
+        )
         notifications = self.notifier.notify(meeting_id, analysis)
         return {
             "meeting_id": meeting_id,

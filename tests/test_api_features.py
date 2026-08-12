@@ -78,20 +78,28 @@ def test_no_kind_defaults_to_all_features_backward_compat(client):
     assert a["todos"]
 
 
-def test_non_meeting_kind_defaults_to_no_features(client):
-    resp = client.post("/api/meetings", json={"text": "打給客戶討論報價", "kind": "通話"})
+def test_kind_default_features_drop_the_blocks_that_type_never_has(client):
+    """每種會議種類都會產出有意義的區塊，只挑掉那個種類本來就不會有的。
+    面試：有摘要與重點，但不該產出決議與代辦（避免把對人的判斷寫成任務）。"""
+    resp = client.post("/api/meetings", json={"text": "面試內容", "kind": "面試"})
     a = resp.json()["analysis"]
-    assert a["meeting"]["summary"] is None
+    assert a["meeting"]["summary"]
     assert a["decisions"] == []
     assert a["todos"] == []
     # 最重要的：任務庫真的沒被寫入任務，不只是畫面不顯示
     assert client.get("/api/tasks").json()["tasks"] == []
 
 
+def test_legacy_kind_value_still_accepted(client):
+    """改版前存下來的會議帶的是舊的錄音種類值，不能因此被擋下來。"""
+    resp = client.post("/api/meetings", json={"text": "內容", "kind": "通話"})
+    assert resp.status_code == 200
+
+
 def test_explicit_features_override_kind_default(client):
     resp = client.post(
         "/api/meetings",
-        json={"text": "訪談內容", "kind": "訪談", "features": ["summary"]},
+        json={"text": "訪談內容", "kind": "需求訪談", "features": ["summary"]},
     )
     a = resp.json()["analysis"]
     assert a["meeting"]["summary"]
@@ -123,11 +131,11 @@ def test_media_upload_respects_features(client):
     resp = client.post(
         "/api/media",
         files={"file": ("call.wav", io.BytesIO(b"RIFF-fake-wav"), "audio/wav")},
-        data={"kind": "通話"},
+        data={"kind": "面試"},
     )
     job = wait_for_job(client, resp.json()["job_id"])
     a = job["result"]["analysis"]
-    assert a["meeting"]["summary"] is None
+    assert a["meeting"]["summary"]
     assert a["todos"] == []
     assert client.get("/api/tasks").json()["tasks"] == []
 
@@ -156,23 +164,25 @@ def test_live_finish_respects_features(client):
     )
     resp = client.post(f"/api/live/{sid}/finish", json={"kind": "語音備忘錄"})
     a = resp.json()["analysis"]
-    assert a["meeting"]["summary"] is None
-    assert a["todos"] == []
-    assert client.get("/api/tasks").json()["tasks"] == []
+    # 個人備忘錄：有摘要與待辦，但沒有決議與會議重點
+    assert a["meeting"]["summary"]
+    assert a["todos"]
+    assert a["decisions"] == []
+    assert a["highlights"] == []
 
 
 # ---- 重新分析：/api/meetings/{id}/reanalyze ----
 
 def test_reanalyze_defaults_features_from_stored_kind(client):
     meeting_id = client.post(
-        "/api/meetings", json={"text": "客戶通話內容", "kind": "通話"}
+        "/api/meetings", json={"text": "面試內容", "kind": "面試"}
     ).json()["meeting_id"]
     assert client.get("/api/tasks").json()["tasks"] == []
 
     resp = client.post(f"/api/meetings/{meeting_id}/reanalyze")
     assert resp.status_code == 200
     a = resp.json()["analysis"]
-    assert a["meeting"]["summary"] is None
+    assert a["meeting"]["summary"]
     assert a["todos"] == []
     assert client.get("/api/tasks").json()["tasks"] == []
 
@@ -188,8 +198,9 @@ def test_meeting_kind_includes_highlights_and_persists(client):
     assert detail["highlights"][0]["text"]
 
 
-def test_non_meeting_kind_clears_highlights(client):
-    resp = client.post("/api/meetings", json={"text": "打給客戶討論報價", "kind": "通話"})
+def test_kind_without_highlights_clears_them(client):
+    """語音備忘錄預設不產出會議重點（單人自語沒有「關鍵時刻」）。"""
+    resp = client.post("/api/meetings", json={"text": "備忘內容", "kind": "語音備忘錄"})
     assert resp.json()["analysis"]["highlights"] == []
 
 
@@ -291,3 +302,46 @@ def test_reanalyze_can_correct_and_rewrites_stored_transcript(correcting_client)
     assert body["transcript"] == "這個函式要改"
     detail = correcting_client.get(f"/api/meetings/{meeting_id}").json()
     assert detail["transcript"] == "這個函式要改"
+
+
+# ---- 會議種類清單 API ----
+
+def test_meeting_kinds_endpoint_covers_every_kind(client):
+    """前端的下拉選單直接吃這支 API，漏一個種類就會在選單裡消失。"""
+    from app.agents.decision_agent import MEETING_KINDS
+
+    body = client.get("/api/meeting-kinds").json()
+    listed = [k["value"] for g in body["groups"] for k in g["kinds"]]
+    assert set(listed) == MEETING_KINDS
+    assert len(listed) == len(set(listed))  # 不重複
+    assert body["default"] in listed
+    first = body["groups"][0]["kinds"][0]
+    assert first["hint"] and isinstance(first["features"], list)
+
+
+# ---- 本次會議專用詞彙 ----
+
+def test_per_meeting_terms_are_stored_and_reused_on_reanalyze(client):
+    body = client.post("/api/meetings", json={
+        "text": "開會內容",
+        "kind": "一般會議",
+        "terms": [{"term": "TaskHub", "note": "本次專案代號"}],
+    }).json()
+    detail = client.get(f"/api/meetings/{body['meeting_id']}").json()
+    assert detail["terms"] == [{"term": "TaskHub", "note": "本次專案代號"}]
+
+    # 重新分析要沿用，不能把會前打的詞弄丟
+    assert client.post(f"/api/meetings/{body['meeting_id']}/reanalyze").status_code == 200
+
+
+def test_per_meeting_terms_reject_malformed_input(client):
+    resp = client.post("/api/meetings", json={
+        "text": "開會內容", "terms": [{"term": "  "}],
+    })
+    assert resp.status_code == 400
+
+
+def test_meeting_without_terms_stores_empty_list(client):
+    body = client.post("/api/meetings", json={"text": "開會內容"}).json()
+    detail = client.get(f"/api/meetings/{body['meeting_id']}").json()
+    assert detail["terms"] == []

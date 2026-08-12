@@ -26,10 +26,10 @@ class FakeOrchestrator:
 
     def process_transcript(
         self, text, meeting_date=None, kind=None, features=None,
-        correct_typos=False, name_speakers=False,
+        correct_typos=False, name_speakers=False, terms=None,
     ):
         self.received.append(
-            (text, meeting_date, kind, features, correct_typos, name_speakers)
+            (text, meeting_date, kind, features, correct_typos, name_speakers, terms)
         )
         return {
             "meeting_id": "m123",

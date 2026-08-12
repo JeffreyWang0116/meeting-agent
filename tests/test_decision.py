@@ -83,10 +83,11 @@ def test_prompt_instructs_dedupe_and_priority_reason():
 def test_prompt_includes_kind_hint_when_given():
     from app.agents.decision_agent import build_prompt
 
+    # 舊值「講座」會被對應到新的「教育訓練」
     prompt = build_prompt("測試", MEETING_DATE, kind="講座")
-    assert "錄音種類：講座" in prompt
+    assert "會議種類：教育訓練" in prompt
     # 沒指定種類時不出現種類段落（維持通用行為）
-    assert "錄音種類" not in build_prompt("測試", MEETING_DATE)
+    assert "會議種類" not in build_prompt("測試", MEETING_DATE)
 
 
 def test_analyze_passes_kind_into_prompt():
@@ -97,9 +98,9 @@ def test_analyze_passes_kind_into_prompt():
         return valid_json()
 
     DecisionAgent(generate=fake_generate).analyze(
-        "測試", meeting_date=MEETING_DATE, kind="訪談"
+        "測試", meeting_date=MEETING_DATE, kind="設計技術評審"
     )
-    assert "錄音種類：訪談" in captured["prompt"]
+    assert "會議種類：設計技術評審" in captured["prompt"]
 
 
 def test_prompt_asks_for_tags():
@@ -223,3 +224,49 @@ def test_highlights_kept_when_feature_enabled():
     agent = DecisionAgent(generate=lambda prompt: valid_json())
     analysis = agent.analyze("測試", meeting_date=MEETING_DATE, features={"highlights"})
     assert analysis.highlights[0].time == "1:02"
+
+
+# ---- 會議種類（取代原本的錄音種類）----
+
+def test_kind_hint_shapes_the_prompt_per_meeting_type():
+    """種類的價值在於改變擷取重點，所以提示必須真的進到 prompt。"""
+    from app.agents.decision_agent import KIND_HINTS, build_prompt
+
+    prompt = build_prompt("逐字稿", date(2026, 8, 10), kind="銷售拜訪")
+    assert "會議種類：銷售拜訪" in prompt
+    assert KIND_HINTS["銷售拜訪"] in prompt
+    # 每種類的提示都要不一樣，否則等於沒分類
+    assert len(set(KIND_HINTS.values())) == len(KIND_HINTS)
+
+
+def test_legacy_kind_values_still_resolve():
+    """改版前存下來的會議帶的是舊的錄音種類值，不能因此讀不了或分析不了。"""
+    from app.agents.decision_agent import MEETING_KINDS, resolve_kind
+
+    assert resolve_kind("會議") == "一般會議"
+    assert resolve_kind("講座") == "教育訓練"
+    assert resolve_kind("語音備忘錄") == "語音備忘錄"  # 這個種類留下來了
+    assert resolve_kind(None) is None
+    assert resolve_kind("銷售拜訪") == "銷售拜訪"
+    assert "會議" not in MEETING_KINDS  # 舊值不再出現在選單
+
+
+def test_per_meeting_terms_join_the_global_glossary_in_the_prompt():
+    """本次專用詞彙要和全域詞彙表一起餵給模型，而不是取代它。"""
+    from app.agents.decision_agent import build_prompt
+
+    prompt = build_prompt(
+        "逐字稿",
+        date(2026, 8, 10),
+        glossary=[{"term": "王霖翔", "note": "人名"}],
+        extra_terms=[{"term": "TaskHub", "note": "本次專案代號"}],
+    )
+    assert "王霖翔（人名）" in prompt
+    assert "TaskHub（本次專案代號）" in prompt
+
+
+def test_per_meeting_terms_work_without_a_global_glossary():
+    from app.agents.decision_agent import build_prompt
+
+    prompt = build_prompt("逐字稿", date(2026, 8, 10), extra_terms=[{"term": "Kessel", "note": ""}])
+    assert "Kessel" in prompt

@@ -229,19 +229,29 @@
               <input type="date" id="meetingDate">
             </div>
             <div class="field">
-              <label class="lbl" for="meetingKind">錄音種類</label>
-              <select class="field-sel" id="meetingKind" title="AI 會依種類調整分析重點">
-                <option value="會議">會議</option>
-                <option value="通話">通話</option>
-                <option value="訪談">訪談</option>
-                <option value="語音備忘錄">語音備忘錄</option>
-                <option value="講座">講座</option>
-                <option value="其它">其它</option>
+              <label class="lbl" for="meetingKind">會議種類</label>
+              <!-- 選項由 /api/meeting-kinds 填入，名單只維護在後端一份 -->
+              <select class="field-sel" id="meetingKind" title="AI 會依種類調整擷取重點與摘要格式">
+                <option value="一般會議">一般會議</option>
               </select>
             </div>
           </div>
+          <p class="kind-hint" id="kindHint"></p>
 
-          <div class="field-row feature-row" id="featureRow" style="display:none">
+          <!-- 本次會議專用詞彙：只用在這一場，與設定裡的全域詞彙表合併後餵給轉錄與分析 -->
+          <div class="field">
+            <label class="lbl" for="meetingTerms">
+              本次專用詞彙
+              <span class="lbl-aux">這場會議會出現的專案代號、人名、產品名，用頓號或逗號分隔</span>
+            </label>
+            <input type="text" id="meetingTerms" placeholder="例：TaskHub、王霖翔、Kessel 專案">
+            <label class="chk" title="勾選後這些詞會同時存進設定裡的全域詞彙表，之後每場會議都適用">
+              <input type="checkbox" id="termsToGlossary"> 一併加入全域詞彙表
+            </label>
+          </div>
+
+          <!-- 每個種類都有自己的預設區塊，所以這列一律顯示，讓使用者可以自己調 -->
+          <div class="field-row feature-row" id="featureRow">
             <label class="chk"><input type="checkbox" id="featSummary" checked> 會議摘要</label>
             <label class="chk"><input type="checkbox" id="featHighlights" checked> 會議重點</label>
             <label class="chk"><input type="checkbox" id="featDecisions" checked> 決議事項</label>

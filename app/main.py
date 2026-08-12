@@ -20,14 +20,25 @@ from pydantic import BaseModel
 
 from app.agents.corrector_agent import CorrectorAgent
 from app.agents.speaker_namer_agent import SpeakerNamerAgent
-from app.agents.decision_agent import FEATURE_KEYS, DecisionAgent, DecisionAgentError
+from app.agents.decision_agent import (
+    FEATURE_KEYS,
+    DEFAULT_KIND,
+    KIND_DEFAULT_FEATURES,
+    KIND_GROUPS,
+    KIND_HINTS,
+    LEGACY_KINDS,
+    MEETING_KINDS,
+    DecisionAgent,
+    DecisionAgentError,
+    default_features_for_kind,
+)
 from app.agents.executor_agent import ExecutorAgent
 from app.agents.notifier_agent import NotifierAgent
 from app.agents.parser_agent import ParserAgent
 from app.agents.reminder_agent import scan as scan_reminders
 from app.config import Settings, get_settings
 from app.export import meeting_report_md, tasks_to_csv, tasks_to_ics
-from app.glossary import Glossary
+from app.glossary import Glossary, clean_terms
 from app.speakers import SpeakerRoster
 from app.jobs import MediaJobManager
 from app.orchestrator import Orchestrator
@@ -76,8 +87,7 @@ class NoCacheStatic(StaticFiles):
         return resp
 
 
-# 錄音種類：影響 Decision Agent 的分析重點（見 KIND_HINTS），也存進會議紀錄供分類
-MEETING_KINDS = {"會議", "通話", "訪談", "語音備忘錄", "講座", "其它"}
+# 會議種類與各自的預設區塊都定義在 decision_agent（單一來源），這裡只負責驗證與對外暴露
 
 
 def validate_features(raw) -> set[str] | None:
@@ -94,10 +104,25 @@ def validate_features(raw) -> set[str] | None:
     return set(keys)
 
 
-def default_features_for_kind(kind: str | None) -> set[str]:
-    """會議摘要／決議事項／代辦事項只在錄音種類是「會議」（或未指定）時預設開啟，
-    其他錄音種類（通話、訪談…）預設不使用，除非使用者明確用 features 勾選開啟。"""
-    return set(FEATURE_KEYS) if kind in (None, "會議") else set()
+# 本次專用詞彙的上限：比全域詞彙表短很多，擋掉「整份貼上來」的誤用
+MAX_MEETING_TERMS = 50
+
+
+def validate_terms(raw) -> list[dict] | None:
+    """raw 可以是 list[dict]（JSON 請求）或 JSON 字串（multipart 表單欄位）。"""
+    if raw is None or raw == "":
+        return None
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="terms 不是合法的 JSON")
+    if not isinstance(raw, list):
+        raise HTTPException(status_code=400, detail="terms 必須是陣列")
+    try:
+        return clean_terms(raw, MAX_MEETING_TERMS) or None
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
 
 def resolve_features(raw, kind: str | None) -> set[str]:
@@ -140,6 +165,8 @@ class MeetingRequest(BaseModel):
     # 把講者A/B/C 代號換成真實姓名（多一次 API 請求）。預設關閉：台語等
     # 語者辨識不穩的錄音容易對錯，猜錯的名字比代號更糟
     name_speakers: bool = False
+    # 本次會議專用詞彙，與全域詞彙表合併使用
+    terms: Optional[list[dict]] = None
 
 
 class FinishRequest(BaseModel):
@@ -148,6 +175,7 @@ class FinishRequest(BaseModel):
     features: Optional[list[str]] = None
     correct_typos: bool = False
     name_speakers: bool = False
+    terms: Optional[list[dict]] = None
 
 
 class ReanalyzeRequest(BaseModel):
@@ -311,7 +339,9 @@ def create_app(
             return await call_next(request)
 
     def validate_kind(kind: str | None) -> str | None:
-        if kind and kind not in MEETING_KINDS:
+        # LEGACY_KINDS 一併放行：改版前存下來的會議帶的是舊的錄音種類值，
+        # 編輯或重新分析那些紀錄時不該被擋下來
+        if kind and kind not in MEETING_KINDS and kind not in LEGACY_KINDS:
             raise HTTPException(
                 status_code=400,
                 detail=f"kind 只能是：{'、'.join(sorted(MEETING_KINDS))}",
@@ -325,6 +355,7 @@ def create_app(
         features: set[str] | None = None,
         correct_typos: bool = False,
         name_speakers: bool = False,
+        terms: list[dict] | None = None,
     ) -> dict:
         usage.record("analysis")
         if correct_typos:
@@ -339,6 +370,7 @@ def create_app(
                 features=features,
                 correct_typos=correct_typos,
                 name_speakers=name_speakers,
+                terms=terms,
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc))
@@ -411,7 +443,30 @@ def create_app(
             resolve_features(req.features, kind),
             correct_typos=req.correct_typos,
             name_speakers=req.name_speakers,
+            terms=validate_terms(req.terms),
         )
+
+    @app.get("/api/meeting-kinds")
+    def list_meeting_kinds():
+        """會議種類清單：下拉選單、各種類的預設區塊、提示文字都從這裡來，
+        前後端不用各維護一份名單。"""
+        return {
+            "default": DEFAULT_KIND,
+            "groups": [
+                {
+                    "label": label,
+                    "kinds": [
+                        {
+                            "value": k,
+                            "hint": KIND_HINTS[k],
+                            "features": sorted(KIND_DEFAULT_FEATURES.get(k, FEATURE_KEYS)),
+                        }
+                        for k in kinds
+                    ],
+                }
+                for label, kinds in KIND_GROUPS
+            ],
+        }
 
     @app.get("/api/meetings")
     def list_meetings():
@@ -513,6 +568,8 @@ def create_app(
             raise HTTPException(status_code=400, detail="此會議沒有逐字稿全文，無法重新分析")
 
         kind = record.get("kind")
+        # 會前打的專用詞彙跟著會議存起來，重新分析時要沿用，不能弄丟
+        stored_terms = record.get("terms") or None
         features = resolve_features(req.features if req else None, kind)
         meeting_date = _parse_iso_date_or_none(record.get("meeting", {}).get("date"))
         usage.record("analysis")
@@ -529,7 +586,11 @@ def create_app(
 
         try:
             analysis = orchestrator.decision.analyze(
-                transcript, meeting_date=meeting_date, kind=kind, features=features
+                transcript,
+                meeting_date=meeting_date,
+                kind=kind,
+                features=features,
+                extra_terms=stored_terms,
             )
         except DecisionAgentError as exc:
             raise HTTPException(status_code=502, detail=str(exc))
@@ -796,6 +857,7 @@ def create_app(
         features: Optional[str] = Form(None),
         correct_typos: Optional[str] = Form(None),
         name_speakers: Optional[str] = Form(None),
+        terms: Optional[str] = Form(None),
     ):
         try:
             parsed_date = date.fromisoformat(meeting_date) if meeting_date else None
@@ -803,6 +865,7 @@ def create_app(
             raise HTTPException(status_code=400, detail="meeting_date 必須是 YYYY-MM-DD 格式")
         validate_kind(kind)
         resolved_features = resolve_features(features, kind)
+        resolved_terms = validate_terms(terms)
         # multipart 表單只有字串，"true"/"1" 都當開啟
         _truthy = ("1", "true", "on", "yes")
         correct = str(correct_typos or "").lower() in _truthy
@@ -827,6 +890,7 @@ def create_app(
                 features=resolved_features,
                 correct_typos=correct,
                 name_speakers=name_speakers_on,
+                terms=resolved_terms,
             )
         }
 
@@ -887,6 +951,7 @@ def create_app(
             features,
             correct_typos=bool(req and req.correct_typos),
             name_speakers=bool(req and req.name_speakers),
+            terms=validate_terms(req.terms if req else None),
         )
         # result 帶著校正後的 transcript，放在後面覆蓋原始版本
         return {"transcript": transcript, **result}

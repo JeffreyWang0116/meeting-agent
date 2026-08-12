@@ -76,6 +76,7 @@ class FirestoreStore(TaskStore):
         analysis: MeetingAnalysis,
         transcript: str | None = None,
         kind: str | None = None,
+        terms: list[dict] | None = None,
     ) -> str:
         meeting_id = uuid.uuid4().hex[:12]
         dumped = analysis.model_dump(mode="json")
@@ -90,6 +91,8 @@ class FirestoreStore(TaskStore):
                 "highlights": dumped.get("highlights", []),
                 "transcript": transcript,
                 "kind": kind,
+                # 本次專用詞彙：存起來「重新分析」才不會把使用者會前打的詞弄丟
+                "terms": terms or [],
                 "tags": dumped.get("tags", []),
             })
             for todo in dumped["todos"]:

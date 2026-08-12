@@ -22,6 +22,26 @@ def glossary_prompt_line(terms: list[dict]) -> str:
     )
 
 
+def clean_terms(terms: list[dict], max_terms: int = MAX_TERMS) -> list[dict]:
+    """歸一化詞彙清單：去空白、去重、擋掉過長。
+    全域詞彙表與「本次專用詞彙」共用同一套規則，只是上限不同。"""
+    cleaned, seen = [], set()
+    for t in terms:
+        if not isinstance(t, dict):
+            raise ValueError("詞彙格式錯誤")
+        term = str(t.get("term") or "").strip()
+        note = str(t.get("note") or "").strip()
+        if not term:
+            raise ValueError("詞彙不可為空")
+        if term in seen:
+            continue
+        seen.add(term)
+        cleaned.append({"term": term, "note": note})
+    if len(cleaned) > max_terms:
+        raise ValueError(f"詞彙最多 {max_terms} 條")
+    return cleaned
+
+
 class Glossary:
     def __init__(self, store):
         self._store = store
@@ -37,18 +57,7 @@ class Glossary:
 
     def replace(self, terms: list[dict]) -> list[dict]:
         """整份取代（前端每次送完整清單，邏輯最單純）。回傳清理後的結果。"""
-        cleaned, seen = [], set()
-        for t in terms:
-            term = str(t.get("term") or "").strip()
-            note = str(t.get("note") or "").strip()
-            if not term:
-                raise ValueError("詞彙不可為空")
-            if term in seen:
-                continue
-            seen.add(term)
-            cleaned.append({"term": term, "note": note})
-        if len(cleaned) > MAX_TERMS:
-            raise ValueError(f"詞彙最多 {MAX_TERMS} 條")
+        cleaned = clean_terms(terms)
         with self._lock:
             self._store.save_glossary(cleaned)
             self._cache = cleaned

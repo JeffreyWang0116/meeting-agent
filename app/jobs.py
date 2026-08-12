@@ -30,6 +30,7 @@ class MediaJobManager:
         file_path: Path | str,
         meeting_date: date | None = None,
         kind: str | None = None,
+        terms: list[dict] | None = None,
         features: set[str] | None = None,
         correct_typos: bool = False,
         name_speakers: bool = False,
@@ -50,7 +51,7 @@ class MediaJobManager:
             target=self._run,
             args=(
                 job_id, Path(file_path), meeting_date, kind, features,
-                correct_typos, name_speakers,
+                correct_typos, name_speakers, terms,
             ),
             daemon=True,
         )
@@ -93,6 +94,7 @@ class MediaJobManager:
         features: set[str] | None = None,
         correct_typos: bool = False,
         name_speakers: bool = False,
+        terms: list[dict] | None = None,
     ) -> None:
         path = file_path
         try:
@@ -126,6 +128,7 @@ class MediaJobManager:
                 features=features,
                 correct_typos=correct_typos,
                 name_speakers=name_speakers,
+                terms=terms,
             )
             # 校正過的話逐字稿會變，job 要換成校正後的版本（前端顯示的就是這份）
             self._update(

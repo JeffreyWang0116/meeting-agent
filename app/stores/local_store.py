@@ -56,6 +56,7 @@ class LocalJsonStore(TaskStore):
         analysis: MeetingAnalysis,
         transcript: str | None = None,
         kind: str | None = None,
+        terms: list[dict] | None = None,
     ) -> str:
         meeting_id = uuid.uuid4().hex[:12]
         created_at = datetime.now(timezone.utc).isoformat()
@@ -70,6 +71,8 @@ class LocalJsonStore(TaskStore):
             "highlights": dumped.get("highlights", []),
             "transcript": transcript,
             "kind": kind,
+            # 本次專用詞彙：存起來「重新分析」才不會把使用者會前打的詞弄丟
+            "terms": terms or [],
             "tags": dumped.get("tags", []),
         }
         task_records = [

@@ -17,8 +17,9 @@ class TaskStore(ABC):
         analysis: MeetingAnalysis,
         transcript: str | None = None,
         kind: str | None = None,
+        terms: list[dict] | None = None,
     ) -> str:
-        """儲存一場會議的分析結果（可附逐字稿原文供 RAG 檢索、錄音種類），回傳 meeting_id。"""
+        """儲存一場會議的分析結果（可附逐字稿原文供 RAG 檢索、會議種類、本次專用詞彙），回傳 meeting_id。"""
 
     @abstractmethod
     def get_meeting(self, meeting_id: str) -> dict | None: ...
