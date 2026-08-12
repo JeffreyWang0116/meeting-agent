@@ -32,3 +32,23 @@ def test_meeting_report_md_includes_highlights_with_time():
 def test_meeting_report_md_omits_highlights_section_when_empty():
     md = meeting_report_md(make_record(), tasks=[])
     assert "會議重點" not in md
+
+
+def test_report_includes_kind_specific_sections():
+    """種類專屬區塊（BANT、事件時間軸…）也要進 Markdown 報告，
+    不然下載下來的檔案跟畫面上看到的不一樣。"""
+    record = {
+        "id": "m1",
+        "meeting": {"title": "客戶拜訪", "date": "2026-08-10", "attendees": [], "summary": None},
+        "decisions": [],
+        "pending_items": [],
+        "sections": [
+            {"label": "預算", "items": ["年度預算 50 萬"]},
+            {"label": "時程", "items": []},
+        ],
+    }
+    md = meeting_report_md(record, [])
+    assert "## 預算" in md
+    assert "- 年度預算 50 萬" in md
+    assert "## 時程" in md
+    assert "（本次未提及）" in md

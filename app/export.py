@@ -94,6 +94,12 @@ def meeting_report_md(meeting_record: dict, tasks: list[dict]) -> str:
             for i, h in enumerate(highlights, 1)
         ]
 
+    # 種類專屬區塊（銷售拜訪的 BANT、事故檢討的時間軸…），
+    # 排在代辦前面：它們是這種會議真正要看的東西
+    for sec in meeting_record.get("sections", []):
+        lines += ["", f"## {sec['label']}", ""]
+        lines += [f"- {item}" for item in sec.get("items", [])] or ["（本次未提及）"]
+
     lines += ["", "## 代辦事項", ""]
     if tasks:
         lines += [

@@ -69,6 +69,7 @@ class LocalJsonStore(TaskStore):
             "decisions": dumped["decisions"],
             "pending_items": dumped["pending_items"],
             "highlights": dumped.get("highlights", []),
+            "sections": dumped.get("sections", []),
             "transcript": transcript,
             "kind": kind,
             # 本次專用詞彙：存起來「重新分析」才不會把使用者會前打的詞弄丟

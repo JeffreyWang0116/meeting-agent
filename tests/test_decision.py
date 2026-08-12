@@ -270,3 +270,64 @@ def test_per_meeting_terms_work_without_a_global_glossary():
 
     prompt = build_prompt("逐字稿", date(2026, 8, 10), extra_terms=[{"term": "Kessel", "note": ""}])
     assert "Kessel" in prompt
+
+
+# ---- 種類專屬輸出區塊（銷售拜訪 / 回顧會議 / 事故檢討）----
+
+def test_kind_sections_appear_in_schema_and_instructions():
+    from app.agents.decision_agent import KIND_SECTIONS, build_prompt
+
+    prompt = build_prompt("逐字稿", date(2026, 8, 10), kind="銷售拜訪")
+    assert "sections" in prompt  # schema 範例
+    # 光有 schema 不夠：要有明確的指示告訴模型只能用這幾個 label、每個都要輸出
+    assert "sections 只能有下列" in prompt
+    for label, desc in KIND_SECTIONS["銷售拜訪"].items():
+        assert label in prompt
+        assert desc in prompt  # 每個區塊要裝什麼也要講清楚
+
+
+def test_section_rule_is_numbered_right_after_the_last_rule():
+    """規則編號不能跳號：模型看到 10 之後直接跳 12 會以為自己漏了一條。"""
+    from app.agents.decision_agent import build_prompt
+
+    # 四項功能全開（沒有「這次不需要…」那條），區塊規則應該接在 11
+    full = build_prompt("x", date(2026, 8, 10), kind="銷售拜訪")
+    assert "\n11. sections" in full and "\n12." not in full
+    # 有關掉的功能時，11 是「不需要…」，區塊規則接在 12
+    partial = build_prompt("x", date(2026, 8, 10), kind="銷售拜訪", features={"summary"})
+    assert "\n11. 這次不需要" in partial and "\n12. sections" in partial
+
+
+def test_kinds_without_sections_do_not_get_the_field():
+    """沒有專屬區塊的種類不該被要求輸出 sections，免得模型硬掰。"""
+    from app.agents.decision_agent import build_prompt
+
+    assert "sections" not in build_prompt("逐字稿", date(2026, 8, 10), kind="一般會議")
+
+
+def test_sections_are_cleared_for_kinds_that_do_not_define_them():
+    """模型有時會自作主張多輸出欄位；不屬於這個種類的區塊要被清掉。"""
+    import json as _json
+    from app.agents.decision_agent import DecisionAgent
+
+    payload = _json.loads(valid_json())
+    payload["sections"] = [{"label": "亂掰的區塊", "items": ["x"]}]
+    agent = DecisionAgent(generate=lambda p: _json.dumps(payload, ensure_ascii=False))
+    assert agent.analyze("測試", meeting_date=MEETING_DATE, kind="一般會議").sections == []
+
+
+def test_sections_are_reordered_to_the_defined_order():
+    """模型可能亂序或漏給；只留定義過的 label，並照定義的順序排好。"""
+    import json as _json
+    from app.agents.decision_agent import DecisionAgent
+
+    payload = _json.loads(valid_json())
+    payload["sections"] = [
+        {"label": "需求", "items": ["要自動產出會議紀錄"]},
+        {"label": "亂掰的", "items": ["x"]},
+        {"label": "預算", "items": ["50 萬"]},
+    ]
+    agent = DecisionAgent(generate=lambda p: _json.dumps(payload, ensure_ascii=False))
+    result = agent.analyze("測試", meeting_date=MEETING_DATE, kind="銷售拜訪")
+    assert [s.label for s in result.sections] == ["預算", "需求"]
+    assert result.sections[0].items == ["50 萬"]

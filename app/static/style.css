@@ -998,3 +998,23 @@
   }
   #meetingTerms::placeholder { color: var(--faint); }
   #meetingTerms:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+
+  /* ---- 種類專屬區塊（BANT、回顧三欄、事故時間軸…）----
+     刻意做成通用的「標籤＋條列」卡片：新增種類時只要後端多定義幾個 label，
+     這裡完全不用改 */
+  .section-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
+  .section-card {
+    border: 1px solid var(--border); border-left: 3px solid var(--accent-border);
+    border-radius: 0 var(--radius-md) var(--radius-md) 0;
+    background: var(--card-2); padding: 13px 16px;
+  }
+  .section-card h4 {
+    margin: 0 0 8px; font-size: .82rem; font-weight: 600; color: var(--muted);
+    letter-spacing: .02em;
+  }
+  .section-card ul { margin: 0; padding-left: 1.15em; display: flex; flex-direction: column; gap: 5px; }
+  .section-card li { font-size: .89rem; line-height: 1.65; color: var(--ink); }
+  .section-card li::marker { color: var(--accent); }
+  .section-card .empty-note { font-size: .82rem; }
+  /* 摘要之後多了一節，圖示配色的 nth-of-type 要跟著補一個 */
+  #result h3.sub:nth-of-type(7) > svg { color: var(--faint); }

@@ -30,7 +30,7 @@ _CODE_FENCE = re.compile(r"^\s*```(?:json)?\s*|\s*```\s*$")
 FEATURE_KEYS = {"summary", "decisions", "todos", "highlights"}
 
 
-def _schema_example(features: set[str]) -> str:
+def _schema_example(features: set[str], section_labels: list[str] | None = None) -> str:
     meeting: dict = {"title": "會議標題（從內容歸納）", "date": "YYYY-MM-DD"}
     if "summary" in features:
         meeting["summary"] = "3~5 句繁體中文摘要"
@@ -62,6 +62,11 @@ def _schema_example(features: set[str]) -> str:
         ]
     schema["pending_items"] = [{"topic": "議而未決的議題", "reason": "未決原因，沒有就填 null"}]
     schema["tags"] = ["2~4 個簡短分類標籤（2~6 字），例如：產品、客戶會議、週會"]
+    if section_labels:
+        schema["sections"] = [
+            {"label": label, "items": ["這個區塊的內容，一條一句；沒有就給空陣列"]}
+            for label in section_labels
+        ]
     return json.dumps(schema, ensure_ascii=False, indent=2)
 
 
@@ -127,6 +132,34 @@ KIND_GROUPS = [
 DEFAULT_KIND = "一般會議"
 
 
+# 種類專屬的輸出區塊：標籤 → 這個標籤要裝什麼。
+# 只挑那些「筆記形狀真的不一樣」的種類；其他種類靠 KIND_HINTS 調重點就夠了。
+# 行動項目一律走 todos（才進得了任務庫），所以這裡不重複放一份。
+KIND_SECTIONS = {
+    "銷售拜訪": {
+        "預算": "客戶提到的預算範圍、費用顧慮或付款條件；沒談到就留空陣列",
+        "決策權責": "誰能拍板、還需要誰點頭、採購流程",
+        "需求": "客戶要解決的問題與明確提出的功能需求",
+        "時程": "導入或決策的時間點、截止日、季節因素",
+        "客戶異議與回應": "客戶提出的疑慮，逐條附上我方當下的回應；沒回應到的也要寫出來",
+    },
+    "回顧會議": {
+        "做得好": "這個週期順利、值得延續的具體事例",
+        "待改善": "被提出的問題與痛點，要具體事例而非籠統感想",
+        "下次想嘗試": "被提出、但還沒確定要不要做的做法",
+    },
+    "事故檢討": {
+        "事件時間軸": "依時間順序還原發生了什麼，每條開頭帶時間（如果逐字稿有）",
+        "影響範圍": "哪些使用者、服務或資料受影響，持續多久",
+        "已確認根因": "會中已經確認的原因；還在推測的不要放這裡，改放 pending_items",
+    },
+}
+
+
+def sections_for_kind(kind: str | None) -> dict[str, str]:
+    return KIND_SECTIONS.get(resolve_kind(kind), {}) if kind else {}
+
+
 def resolve_kind(kind: str | None) -> str | None:
     """把舊的錄音種類值換成對應的會議種類；新值與 None 原樣回傳。"""
     return LEGACY_KINDS.get(kind, kind)
@@ -187,15 +220,28 @@ def build_prompt(
     terms = glossary_prompt_line((glossary or []) + (extra_terms or []))
     if terms:
         glossary_line = f"\n已知詞彙表（輸出的人名與專有名詞一律以此寫法為準）：{terms}。"
-    disabled = FEATURE_KEYS - features
-    feature_note = f"\n11. 這次不需要 {'、'.join(sorted(disabled))} 欄位，不要輸出。" if disabled else ""
+    # 規則編號接在 PROMPT_TEMPLATE 的第 10 條之後，而且不能跳號——
+    # 模型看到 10 之後直接跳 12，會以為自己漏讀了一條
+    rules, n = [], 10
+    if FEATURE_KEYS - features:
+        n += 1
+        rules.append(f"\n{n}. 這次不需要 {'、'.join(sorted(FEATURE_KEYS - features))} 欄位，不要輸出。")
+    spec = sections_for_kind(kind)
+    if spec:
+        n += 1
+        detail = "\n".join(f"   - {label}：{desc}" for label, desc in spec.items())
+        rules.append(
+            f"\n{n}. sections 只能有下列這幾個 label，依這個順序全部輸出"
+            "（內容沒談到就給空陣列，不要自己新增或漏掉）：\n" + detail
+        )
+    feature_note = "".join(rules)
     return PROMPT_TEMPLATE.format(
         meeting_date=meeting_date.isoformat(),
         weekday=_WEEKDAY_ZH[meeting_date.weekday()],
         kind_line=kind_line,
         glossary_line=glossary_line,
         feature_note=feature_note,
-        schema=_schema_example(features),
+        schema=_schema_example(features, list(sections_for_kind(kind))),
         transcript=transcript,
     )
 
@@ -269,7 +315,7 @@ class DecisionAgent:
             raw = self._generate(prompt)
             try:
                 analysis = MeetingAnalysis.model_validate_json(strip_code_fence(raw))
-                return self._enforce_features(analysis, features)
+                return self._enforce_features(analysis, features, kind)
             except (ValidationError, ValueError) as exc:
                 last_error = exc
                 prompt = base_prompt + _RETRY_SUFFIX.format(error=exc)
@@ -279,8 +325,18 @@ class DecisionAgent:
         )
 
     @staticmethod
-    def _enforce_features(analysis: MeetingAnalysis, features: set[str]) -> MeetingAnalysis:
+    def _enforce_features(
+        analysis: MeetingAnalysis, features: set[str], kind: str | None = None
+    ) -> MeetingAnalysis:
         """防禦性保護：不管 LLM 有沒有聽話，沒開的功能一律強制清空。"""
+        # 區塊同理：只留這個種類真的定義過的 label，並照定義的順序排好，
+        # 前端才不用防模型自己發明的欄位
+        allowed = sections_for_kind(kind)
+        if allowed:
+            found = {sec.label: sec for sec in analysis.sections}
+            analysis.sections = [found[label] for label in allowed if label in found]
+        else:
+            analysis.sections = []
         if "summary" not in features:
             analysis.meeting.summary = None
         if "decisions" not in features:

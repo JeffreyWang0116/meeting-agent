@@ -534,6 +534,8 @@ function showResultSkeleton() {
   $("rDecisions").style.display = "flex";
   $("rTodos").style.display = "flex";
   $("rSummaryTrans").style.display = "none";
+  $("hSections").style.display = "none";
+  $("rSections").style.display = "none";
   $("rTransSec").style.display = "none";
   $("rCorrSec").style.display = "none";
   $("result").classList.add("is-loading");
@@ -550,6 +552,22 @@ function hideResultSkeleton() {
   $("result").style.display = "none";
   $("navResult").hidden = true;
   showView("new");
+}
+
+// 種類專屬區塊：後端已經把 label 與順序排好了，前端只負責渲染，
+// 不認得任何特定欄位名稱——之後新增種類不用再改這裡
+function renderSections(sections) {
+  const has = (sections || []).length > 0;
+  $("hSections").style.display = has ? "flex" : "none";
+  $("rSections").style.display = has ? "grid" : "none";
+  if (!has) { $("rSections").innerHTML = ""; return; }
+  $("rSections").innerHTML = sections.map(sec => `
+    <div class="section-card">
+      <h4>${esc(sec.label)}</h4>
+      ${(sec.items || []).length
+        ? `<ul>${sec.items.map(x => `<li>${esc(x)}</li>`).join("")}</ul>`
+        : `<p class="empty-note">本次未提及</p>`}
+    </div>`).join("");
 }
 
 function renderResult(result, transcript) {
@@ -586,6 +604,9 @@ function renderResult(result, transcript) {
   $("rSummaryTrans").style.display = "none";
   $("rSummaryTrans").textContent = "";
   $("transSummaryLabel").textContent = /[一-鿿]/.test(m.summary || "") ? "譯成英文" : "譯成中文";
+
+  $("sectionsTitle").textContent = `${$("meetingKind").value}重點`;
+  renderSections(a.sections);
 
   const highlights = a.highlights || [];
   const showHighlights = highlights.length > 0;
@@ -981,6 +1002,11 @@ function meetingDetailHtml(id) {
       ${d.meeting.summary ? `<h4>AI 摘要 <button class="ghost trans-detail" data-id="${esc(id)}">翻譯</button></h4>
       <p class="detail-summary">${esc(d.meeting.summary)}</p>
       <div class="summary-trans" id="dSummaryTrans" style="display:none"></div>` : ""}
+      ${(d.sections || []).length ? `<h4>重點欄位</h4><div class="section-grid">${
+        d.sections.map(sec => `<div class="section-card"><h4>${esc(sec.label)}</h4>${
+          (sec.items || []).length
+            ? `<ul>${sec.items.map(x => `<li>${esc(x)}</li>`).join("")}</ul>`
+            : `<p class="empty-note">本次未提及</p>`}</div>`).join("")}</div>` : ""}
       ${highlights ? `<h4>會議重點</h4><ol class="highlight-list">${highlights}</ol>` : ""}
       ${decisions ? `<h4>決議事項</h4><ol class="detail-decisions">${decisions}</ol>` : ""}
       ${speakers.length ? `<h4>講者（點擊改名，整份逐字稿跟著更新）</h4>
