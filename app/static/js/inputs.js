@@ -317,20 +317,71 @@ function appendCaption(text, translation) {
   $("liveTranscript").scrollTop = $("liveTranscript").scrollHeight;
 }
 
+// 上傳失敗的音訊段。原本失敗就直接丟掉，那 45 秒永久消失、錄音還在繼續，
+// 使用者多半不會發現中間缺了一段——桌機 wifi 很少踩到，手機網路是家常便飯。
+// 記憶體上限：一段 opus 約數百 KB，超過就停止累積並明講，總比整台當掉好。
+const MAX_PENDING_CHUNKS = 24;
+const RETRY_DELAYS_MS = [2000, 5000, 12000];
+let pendingChunks = [];
+let droppedChunks = 0;
+
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+// 400/404 這類「再送幾次也是一樣」的錯不該重試：session 已經死了，
+// 或這段音訊後端根本不收，重試只會拖慢結束流程
+const worthRetrying = err => !(err.status >= 400 && err.status < 500);
+
+async function postLiveChunk(blob, offsetSeconds) {
+  const ext = blob.type.includes("mp4") ? ".mp4" : ".webm";
+  const form = new FormData();
+  form.append("file", blob, "chunk" + ext);
+  // 本段在整場會議中的開始秒數：後端把段內相對時間戳平移成整場時間
+  if (offsetSeconds != null) form.append("offset", offsetSeconds);
+  const r = await jsonOrThrow(
+    await fetch(`/api/live/${liveSessionId}/chunk`, { method: "POST", body: form }));
+  if (r.transcript) liveTranscriptText = r.transcript;
+  if (r.text) appendCaption(r.text, r.translation);
+}
+
 async function uploadLiveChunk(blob, offsetSeconds) {
+  // uploadsInFlight 要涵蓋整個重試過程：結束會議時會等它歸零才送出分析，
+  // 不然重試中的那一段就趕不上，等於還是掉了
   uploadsInFlight++;
   liveSentCount++;
   try {
-    const ext = blob.type.includes("mp4") ? ".mp4" : ".webm";
-    const form = new FormData();
-    form.append("file", blob, "chunk" + ext);
-    // 本段在整場會議中的開始秒數：後端把段內相對時間戳平移成整場時間
-    if (offsetSeconds != null) form.append("offset", offsetSeconds);
-    const r = await jsonOrThrow(await fetch(`/api/live/${liveSessionId}/chunk`, { method: "POST", body: form }));
-    if (r.transcript) liveTranscriptText = r.transcript;
-    if (r.text) appendCaption(r.text, r.translation);
-  } catch (e) { showError("音訊段上傳失敗：" + e.message); }
-  finally { uploadsInFlight--; }
+    for (let attempt = 0; ; attempt++) {
+      try {
+        await postLiveChunk(blob, offsetSeconds);
+        return;
+      } catch (e) {
+        if (attempt >= RETRY_DELAYS_MS.length || !worthRetrying(e)) {
+          // 還沒放棄：排進佇列，結束會議前會再試一輪
+          if (pendingChunks.length < MAX_PENDING_CHUNKS) {
+            pendingChunks.push({ blob, offsetSeconds });
+          } else {
+            droppedChunks++;
+          }
+          return;
+        }
+        await sleep(RETRY_DELAYS_MS[attempt]);
+      }
+    }
+  } finally { uploadsInFlight--; }
+}
+
+// 結束會議前的最後一次補送。此時網路多半已經恢復，成功率比錄音當下高。
+// 回傳仍然失敗的段數，讓呼叫端決定要不要警告使用者。
+async function flushPendingChunks() {
+  if (!pendingChunks.length) return 0;
+  $("liveStatus").textContent = `補送 ${pendingChunks.length} 段稍早失敗的錄音…`;
+  const queue = pendingChunks;
+  pendingChunks = [];
+  const stillFailed = [];
+  for (const c of queue) {
+    try { await postLiveChunk(c.blob, c.offsetSeconds); }
+    catch (e) { stillFailed.push(c); }
+  }
+  return stillFailed.length + droppedChunks;
 }
 
 // 每段用「新的 MediaRecorder」錄，確保每段都有完整檔頭、可獨立解碼。
@@ -383,6 +434,8 @@ $("btnLiveStart").addEventListener("click", async () => {
   liveStartTime = Date.now();
   liveSegIndex = 0;
   liveSentCount = 0;
+  pendingChunks = [];
+  droppedChunks = 0;
   liveSpeakers = {};
   liveTranscriptText = "";
   acquireWakeLock();  // 保持螢幕常亮，避免手機鎖屏中斷錄音
@@ -419,6 +472,13 @@ $("btnLiveStop").addEventListener("click", async () => {
   while (uploadsInFlight > 0 && Date.now() < deadline) {
     await new Promise(r => setTimeout(r, 300));
   }
+
+  // 等待期間網路多半已恢復，這時補送稍早失敗的段成功率最高
+  const lost = await flushPendingChunks();
+  if (lost) {
+    showNotice(`有 ${lost} 段錄音始終上傳失敗，逐字稿會缺少那幾段，分析結果請以逐字稿為準核對。`);
+  }
+
   const caret = $("liveCaret");
   if (caret) caret.remove();  // 收起打字游標
 
