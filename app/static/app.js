@@ -100,8 +100,9 @@ let tasksLoaded = false, meetingsLoaded = false, remindersLoaded = false;
 // ---- 清單分頁 ----
 // 任務、會議、提醒本來就是一次 fetch 全部回來，所以分頁純在前端切，不動 API。
 // 只有超過每頁筆數才會出現頁碼列——資料還少的時候，使用者完全不會看到這個功能。
-// 每頁筆數依單筆高度抓：表格列最矮所以放最多，會議卡片還能展開詳情所以放最少。
-const PAGE_SIZE = { tasks: 20, meetings: 10, reminders: 10 };
+// 三個清單一律 10 筆一頁：單筆高度雖然不同，但一致的節奏比各自最佳化好預期，
+// 也讓分頁在資料量還不多的時候就先出現。要個別調整改這裡即可。
+const PAGE_SIZE = { tasks: 10, meetings: 10, reminders: 10 };
 const pageNo = { tasks: 1, meetings: 1, reminders: 1 };
 
 function paginate(kind, items) {
