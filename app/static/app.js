@@ -97,6 +97,43 @@ const skelRows = (n, cols) => Array.from({ length: n }, () =>
 
 let tasksLoaded = false, meetingsLoaded = false, remindersLoaded = false;
 
+// ---- 清單分頁 ----
+// 任務、會議、提醒本來就是一次 fetch 全部回來，所以分頁純在前端切，不動 API。
+// 只有超過每頁筆數才會出現頁碼列——資料還少的時候，使用者完全不會看到這個功能。
+// 每頁筆數依單筆高度抓：表格列最矮所以放最多，會議卡片還能展開詳情所以放最少。
+const PAGE_SIZE = { tasks: 20, meetings: 10, reminders: 10 };
+const pageNo = { tasks: 1, meetings: 1, reminders: 1 };
+
+function paginate(kind, items) {
+  const size = PAGE_SIZE[kind];
+  const pages = Math.max(1, Math.ceil(items.length / size));
+  if (pageNo[kind] > pages) pageNo[kind] = pages;  // 刪到這一頁空了就自動往前收
+  const from = (pageNo[kind] - 1) * size;
+  return { items: items.slice(from, from + size), pages, current: pageNo[kind], total: items.length, from };
+}
+
+function renderPager(kind, p) {
+  const box = $(`${kind}Pager`);
+  if (p.pages <= 1) { box.innerHTML = ""; return; }
+  box.innerHTML =
+    `<button class="ghost" data-page="prev" ${p.current === 1 ? "disabled" : ""}>` +
+      `${icon("chevron-left", "i-sm")}上一頁</button>` +
+    `<span class="pager-info">${p.from + 1}–${p.from + p.items.length} / 共 ${p.total} 筆` +
+      `<span class="pager-sep">·</span>第 ${p.current} / ${p.pages} 頁</span>` +
+    `<button class="ghost" data-page="next" ${p.current === p.pages ? "disabled" : ""}>` +
+      `下一頁${icon("chevron-right", "i-sm")}</button>`;
+}
+
+document.addEventListener("click", e => {
+  const btn = e.target.closest(".pager [data-page]");
+  if (!btn) return;
+  const kind = btn.closest(".pager").dataset.pager;
+  pageNo[kind] += btn.dataset.page === "next" ? 1 : -1;
+  ({ tasks: renderTasks, meetings: renderMeetings, reminders: renderReminders })[kind]();
+  // 翻頁後要從新一頁的開頭看起，不然會停在上一頁的位置
+  $(`${kind}Pager`).closest(".panel").scrollIntoView({ behavior: "smooth", block: "start" });
+});
+
 function loadFail(kind) {
   return `<p class="load-fail">${icon("circle-alert", "i-sm")}載不到資料<button class="ghost" data-retry="${kind}">重試</button></p>`;
 }
@@ -720,9 +757,11 @@ function renderTasks() {
     (!st || t.status === st) &&
     (!q || `${t.task} ${t.owner || ""} ${t.meeting_id}`.toLowerCase().includes(q))
   );
-  $("taskRows").innerHTML = rows.length
-    ? rows.map(taskRowHtml).join("")
+  const p = paginate("tasks", rows);
+  $("taskRows").innerHTML = p.items.length
+    ? p.items.map(taskRowHtml).join("")
     : `<tr><td colspan="7" class="empty-note">${allTasks.length ? "沒有符合條件的任務" : "尚無任務"}</td></tr>`;
+  renderPager("tasks", p);
   renderHome();
 }
 
@@ -807,8 +846,10 @@ $("taskRows").addEventListener("keydown", e => {
   if (e.key === "Escape") { editingTaskId = null; renderTasks(); }
 });
 
-$("taskSearch").addEventListener("input", renderTasks);
-$("taskFilter").addEventListener("change", renderTasks);
+// 換了搜尋條件就回到第一頁，否則會停在一個超出新結果筆數的頁碼上
+const backToFirstTaskPage = () => { pageNo.tasks = 1; renderTasks(); };
+$("taskSearch").addEventListener("input", backToFirstTaskPage);
+$("taskFilter").addEventListener("change", backToFirstTaskPage);
 $("btnRefreshTasks").addEventListener("click", () => { refreshTasks(); refreshMeetings(); });
 
 // 手動新增任務（會議之外臨時想到的待辦）
@@ -964,12 +1005,23 @@ function renderTagFilter() {
     .join("");
 }
 
+const filteredMeetings = () => allMeetings.filter(m =>
+  !activeTag || m.kind === activeTag || (m.tags || []).includes(activeTag));
+
+// 從首頁或跨會議搜尋跳過來的會議，可能不在目前這一頁，甚至被標籤篩掉了。
+// 展開之前先把畫面帶到它所在的位置，不然點了會像沒反應。
+function focusMeetingPage(id) {
+  if (!allMeetings.some(m => m.id === id)) return;
+  if (!filteredMeetings().some(m => m.id === id)) activeTag = "";
+  const at = filteredMeetings().findIndex(m => m.id === id);
+  if (at >= 0) pageNo.meetings = Math.floor(at / PAGE_SIZE.meetings) + 1;
+}
+
 function renderMeetings() {
   renderTagFilter();
-  const shown = allMeetings.filter(m =>
-    !activeTag || m.kind === activeTag || (m.tags || []).includes(activeTag));
-  $("meetingRows").innerHTML = shown.length
-    ? shown.map(m => `<div class="meeting-item ${m.id === expandedMeetingId ? "expanded" : ""}">
+  const p = paginate("meetings", filteredMeetings());
+  $("meetingRows").innerHTML = p.items.length
+    ? p.items.map(m => `<div class="meeting-item ${m.id === expandedMeetingId ? "expanded" : ""}">
           <span class="meeting-info">
             <b>${esc(m.meeting.title)}</b>
             <span class="meeting-meta mono">${esc(m.meeting.date)}${m.kind ? ` · ${esc(m.kind)}` : ""} · ${esc(m.id)}</span>
@@ -982,6 +1034,7 @@ function renderMeetings() {
           </span>
         </div>` + (m.id === expandedMeetingId ? meetingDetailHtml(m.id) : "")).join("")
     : `<p class="empty-note">${allMeetings.length ? "沒有符合此標籤的會議" : "尚無會議紀錄"}</p>`;
+  renderPager("meetings", p);
   // 逐字稿要等 DOM 建立後渲染
   const view = document.getElementById("dTranscriptView");
   const d = meetingDetailCache[expandedMeetingId];
@@ -1006,6 +1059,7 @@ async function refreshMeetings() {
 }
 
 async function openMeetingDetail(id) {
+  focusMeetingPage(id);
   expandedMeetingId = id;
   detailEditing = false;
   renderMeetings();  // 先顯示「載入中」
@@ -1242,40 +1296,59 @@ const ALERT_LABEL = {
   unassigned: () => "未指派",
 };
 
-// 依目前畫面上還剩幾則提醒更新標題的數字（刪除單項後也會即時反映）
-function updateAlertCount() {
-  const n = $("reminderBody").querySelectorAll(".alert-item").length;
+// 使用者刪掉的提醒。分頁之後畫面會不斷重繪，光是把 DOM 節點移除撐不過翻頁，
+// 得記在資料層才不會翻回來又冒出來。按「重新掃描」照樣全部復原。
+const dismissedAlerts = new Set();
+
+// 目前該顯示的提醒（後端掃描結果扣掉使用者刪掉的），首頁與側欄徽章也用這一份
+function activeAlerts() {
+  if (!lastReminders) return null;
+  return [
+    ...lastReminders.reminders.map(x => ({
+      key: `r:${x.message}`, kind: x.kind, cls: `k-${x.kind}`, chip: ALERT_LABEL[x.kind](x), msg: x.message,
+    })),
+    ...lastReminders.followups.map(f => ({
+      key: `f:${f.message}`, kind: "follow", cls: "k-follow", chip: "追問", msg: f.message,
+    })),
+  ].filter(a => !dismissedAlerts.has(a.key));
+}
+
+function updateAlertCount(n) {
   const badge = $("alertCount");
   badge.textContent = n;
   badge.classList.toggle("has", n > 0);
 }
 
+function renderReminders() {
+  const alerts = activeAlerts();
+  if (!alerts) return;
+  const p = paginate("reminders", alerts);
+  $("reminderBody").innerHTML = p.items.length
+    ? p.items.map(a => `
+        <div class="alert-item ${a.cls}" data-key="${esc(a.key)}">
+          <span class="alert-chip">${esc(a.chip)}</span>
+          <div class="alert-msg">${esc(a.msg)}</div>
+          <button class="ghost copy-alert" data-copy="${esc(a.msg)}">複製</button>
+          <button class="del-btn del-alert" title="刪除此提醒（按「重新掃描」可全部復原）" aria-label="刪除">${icon("x", "i-sm")}</button>
+        </div>`).join("")
+    : `<div class="empty-alert">${icon("check")}<p>尚無提醒</p></div>`;
+  renderPager("reminders", p);
+  updateAlertCount(alerts.length);
+}
+
 async function refreshReminders() {
   try {
-    const r = await jsonOrThrow(await fetch("/api/reminders"));
-    const alertItem = (cls, chip, msg) => `
-        <div class="alert-item ${cls}">
-          <span class="alert-chip">${chip}</span>
-          <div class="alert-msg">${esc(msg)}</div>
-          <button class="ghost copy-alert" data-copy="${esc(msg)}">複製</button>
-          <button class="del-btn del-alert" title="刪除此提醒（按「重新掃描」可全部復原）" aria-label="刪除">${icon("x", "i-sm")}</button>
-        </div>`;
-    const items = [
-      ...r.reminders.map(x => alertItem(`k-${x.kind}`, ALERT_LABEL[x.kind](x), x.message)),
-      ...r.followups.map(f => alertItem("k-follow", "追問", f.message)),
-    ];
-    $("reminderBody").innerHTML = items.length
-      ? items.join("")
-      : `<div class="empty-alert">${icon("check")}<p>尚無提醒</p></div>`;
-    updateAlertCount();
+    lastReminders = await jsonOrThrow(await fetch("/api/reminders"));
+    dismissedAlerts.clear();  // 重新掃描＝把刪掉的那些全部找回來
     remindersLoaded = true;
-    lastReminders = r;
+    renderReminders();
     renderHome();
     maybeNotifyReminders(false);
   } catch (e) {
     remindersLoaded = true;
     $("reminderBody").innerHTML = loadFail("reminders");
-    updateAlertCount();
+    $("remindersPager").innerHTML = "";
+    updateAlertCount(0);
     renderHome();
   }
 }
@@ -1315,11 +1388,12 @@ $("btnNotifyToggle").addEventListener("click", async () => {
 updateNotifyBtn();
 
 $("reminderBody").addEventListener("click", async e => {
-  // 刪除單則：只移除畫面，不動後端；按「重新掃描」即可全部復原
+  // 刪除單則：只記在前端，不動後端；按「重新掃描」即可全部復原
   const del = e.target.closest(".del-alert");
   if (del) {
-    del.closest(".alert-item").remove();
-    updateAlertCount();
+    dismissedAlerts.add(del.closest(".alert-item").dataset.key);
+    renderReminders();
+    renderHome();
     return;
   }
   const btn = e.target.closest(".copy-alert");
@@ -1338,6 +1412,7 @@ $("tagFilter").addEventListener("click", e => {
   const chip = e.target.closest(".tag-chip");
   if (!chip) return;
   activeTag = chip.dataset.tag;
+  pageNo.meetings = 1;  // 換標籤等於換一份清單，從第一頁看起
   renderMeetings();
 });
 
@@ -1352,8 +1427,9 @@ let usageLoaded = false;
 
 function renderHome() {
   const open = allTasks.filter(t => t.status !== "done");
-  const urgent = lastReminders
-    ? lastReminders.reminders.filter(x => x.kind === "overdue" || x.kind === "due_soon").length
+  const alerts = activeAlerts();
+  const urgent = alerts
+    ? alerts.filter(a => a.kind === "overdue" || a.kind === "due_soon").length
     : null;
 
   // 還沒載完就放骨架，別先寫 0 再跳成真實數字——那會看起來像資料掉了又回來
@@ -1382,15 +1458,9 @@ function renderHome() {
         </div>`).join("")}</div>`
     : `<p class="empty-note">尚無會議紀錄，從「新會議」開始第一場。</p>`;
 
-  const alerts = lastReminders
-    ? [
-        ...lastReminders.reminders.map(x => ({ cls: `k-${x.kind}`, chip: ALERT_LABEL[x.kind](x), msg: x.message })),
-        ...lastReminders.followups.map(f => ({ cls: "k-follow", chip: "追問", msg: f.message })),
-      ]
-    : [];
   $("homeAlerts").innerHTML = !remindersLoaded
     ? skelBlocks(3)
-    : alerts.length
+    : (alerts || []).length
     ? alerts.slice(0, 4).map(a => `
         <div class="alert-item ${a.cls}">
           <span class="alert-chip">${esc(a.chip)}</span>

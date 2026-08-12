@@ -730,6 +730,25 @@
   #result.is-loading .draft-tools,
   #result.is-loading h3.sub .aux { display: none; }
 
+  /* ---- 清單分頁 ----
+     資料少於一頁時 renderPager 會把內容清空，:empty 讓整條連同間距一起消失 */
+  .pager {
+    display: flex; align-items: center; justify-content: center; gap: 14px; flex-wrap: wrap;
+    padding-top: 16px; border-top: 1px solid var(--border);
+  }
+  .pager:empty { display: none; }
+  .pager .ghost:disabled { opacity: .35; cursor: not-allowed; border-color: var(--border); color: var(--faint); }
+  .pager .ghost:disabled:hover { border-color: var(--border); color: var(--faint); background: transparent; }
+  .pager-info {
+    font-family: var(--label); font-size: .78rem; color: var(--faint);
+    font-variant-numeric: tabular-nums; text-align: center;
+  }
+  .pager-sep { margin: 0 7px; opacity: .6; }
+  @media (max-width: 640px) {
+    .pager { gap: 8px; }
+    .pager-info { order: 3; flex: 1 0 100%; }
+  }
+
   .load-fail {
     display: flex; align-items: center; gap: 9px; margin: 0;
     padding: 14px; font-size: .87rem; color: var(--muted);
