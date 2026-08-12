@@ -726,7 +726,7 @@ def test_index_stamps_css_and_js_with_a_version(client):
     新鮮、根本不回來問伺服器。標頭救不了已經存進去的那一份，只有換掉 URL 才行。"""
     html = client.get("/").text
     assert '"/static/style.css?v=' in html
-    assert '"/static/app.js?v=' in html
+    assert '"/static/js/main.js?v=' in html
     assert '"/static/style.css"' not in html
     # 雪碧圖是新檔、不可能有舊快取，且 app.js 在執行期也會組出同樣的網址，
     # 加了版本反而變成兩個 URL 各下載一次

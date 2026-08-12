@@ -69,9 +69,10 @@ def asset_version(static_dir: Path) -> str:
     一定跟得上。開發時改完 CSS 直接重新整理就生效，不必再硬重新整理。
     """
     stamps = []
-    for name in ("style.css", "app.js"):
+    # js/ 底下每一支模組都算：改到其中任一支都要能換掉舊快取
+    for path in [static_dir / "style.css", *sorted((static_dir / "js").glob("*.js"))]:
         try:
-            stamps.append((static_dir / name).stat().st_mtime_ns)
+            stamps.append(path.stat().st_mtime_ns)
         except OSError:
             pass  # 檔案不在（測試用的空目錄）就當作版本 0，不要讓首頁掛掉
     return format(max(stamps, default=0) // 1_000_000, "x")
@@ -392,7 +393,9 @@ def create_app(
         # 順手把 css/js 的網址蓋上版本（icons.svg 不用，見 asset_version）
         html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
         version = asset_version(STATIC_DIR)
-        for name in ("style.css", "app.js", "orb.js"):
+        # 注意：main.js 帶版本不會傳給它 import 的子模組，
+        # 那些靠 /static 的 Cache-Control: no-cache 每次重新驗證
+        for name in ("style.css", "js/main.js", "orb.js"):
             html = html.replace(f'"/static/{name}"', f'"/static/{name}?v={version}"')
         return HTMLResponse(html, headers={"Cache-Control": "no-cache"})
 
