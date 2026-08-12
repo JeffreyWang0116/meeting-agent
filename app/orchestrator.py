@@ -15,6 +15,8 @@ from __future__ import annotations
 
 from datetime import date
 
+from app.stores.base import DEFAULT_USER
+
 from app.agents.decision_agent import DecisionAgent
 from app.agents.executor_agent import ExecutorAgent
 from app.agents.notifier_agent import NotifierAgent
@@ -47,6 +49,7 @@ class Orchestrator:
         correct_typos: bool = False,
         name_speakers: bool = False,
         terms: list[dict] | None = None,
+        user: str = DEFAULT_USER,
     ) -> dict:
         text = self.parser.parse(raw_text)
         corrections: list[dict] = []
@@ -61,7 +64,7 @@ class Orchestrator:
             text, meeting_date=meeting_date, kind=kind, features=features, extra_terms=terms
         )
         meeting_id = self.executor.execute(
-            analysis, transcript=text, kind=kind, terms=terms
+            analysis, transcript=text, kind=kind, terms=terms, user=user
         )
         notifications = self.notifier.notify(meeting_id, analysis)
         return {

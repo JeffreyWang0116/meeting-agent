@@ -44,6 +44,7 @@ from app.jobs import MediaJobManager
 from app.orchestrator import Orchestrator
 from app.rag import AskAgent, GeminiEmbedder, RagIndex
 from app.stores import make_store
+from app.stores.base import DEFAULT_USER
 from app.transcription import media
 from app.transcription.segments import parse_time_label, replace_term_in_range
 from app.translate import TARGETS as TRANSLATE_TARGETS
@@ -222,6 +223,20 @@ class TranslateRequest(BaseModel):
     target: str
 
 
+def current_user(request: Request | None = None) -> str:
+    """這個請求屬於哪個使用者。
+
+    現在整站只有 DEFAULT_USER 一個。之後要做成 app 接真正的登入（Firebase Auth
+    最省事，因為 Firestore 已經在選項裡），改的就是這個函式：從 Authorization
+    header 驗 ID token、回傳 uid。
+
+    store 那一層已經是多租戶的（每筆寫入蓋 user、讀取照 user 過濾，兩種後端都有
+    測試釘住隔離性），所以屆時不需要遷移任何既有資料——舊資料沒有 user 欄位，
+    一律視為 DEFAULT_USER 的。
+    """
+    return DEFAULT_USER
+
+
 def create_app(
     settings: Settings | None = None,
     *,
@@ -372,6 +387,7 @@ def create_app(
                 correct_typos=correct_typos,
                 name_speakers=name_speakers,
                 terms=terms,
+                user=current_user(),
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc))
@@ -473,11 +489,11 @@ def create_app(
 
     @app.get("/api/meetings")
     def list_meetings():
-        return {"meetings": store.list_meetings()}
+        return {"meetings": store.list_meetings(user=current_user())}
 
     @app.get("/api/meetings/{meeting_id}")
     def get_meeting_detail(meeting_id: str):
-        record = store.get_meeting(meeting_id)
+        record = store.get_meeting(meeting_id, user=current_user())
         if record is None:
             raise HTTPException(status_code=404, detail=f"找不到會議：{meeting_id}")
         return record
@@ -506,7 +522,7 @@ def create_app(
         nested = {k: v for k, v in fields.items() if k in _MEETING_INFO_FIELDS}
         if nested:
             update["meeting"] = nested
-        updated = store.update_meeting(meeting_id, update)
+        updated = store.update_meeting(meeting_id, update, user=current_user())
         if updated is None:
             raise HTTPException(status_code=404, detail=f"找不到會議：{meeting_id}")
         drop_from_rag(meeting_id)
@@ -532,22 +548,22 @@ def create_app(
         start_sec, end_sec = _time_bound(req.start), _time_bound(req.end)
         if start_sec is not None and end_sec is not None and start_sec > end_sec:
             raise HTTPException(status_code=400, detail="起始時間不能晚於結束時間")
-        record = store.get_meeting(meeting_id)
+        record = store.get_meeting(meeting_id, user=current_user())
         if record is None:
             raise HTTPException(status_code=404, detail=f"找不到會議：{meeting_id}")
         transcript = record.get("transcript") or ""
         new_transcript, count = replace_term_in_range(transcript, old, new, start_sec, end_sec)
         updated = record
         if count:
-            updated = store.update_meeting(meeting_id, {"transcript": new_transcript})
+            updated = store.update_meeting(meeting_id, {"transcript": new_transcript}, user=current_user())
             drop_from_rag(meeting_id)  # 逐字稿變了，RAG 索引要作廢重建
         # 只有真的替換到、且新詞非空才動詞彙表；詞彙表滿了就靜默略過（替換本身已成功）
         added = False
         if req.add_to_glossary and new and count:
-            terms = glossary.terms()
+            terms = glossary.terms(current_user())
             if not any(t.get("term") == new for t in terms):
                 try:
-                    glossary.replace(terms + [{"term": new, "note": ""}])
+                    glossary.replace(terms + [{"term": new, "note": ""}], current_user())
                     added = True
                 except ValueError:
                     pass
@@ -555,7 +571,7 @@ def create_app(
 
     @app.delete("/api/meetings/{meeting_id}")
     def delete_meeting(meeting_id: str):
-        if not store.delete_meeting(meeting_id):
+        if not store.delete_meeting(meeting_id, user=current_user()):
             raise HTTPException(status_code=404, detail=f"找不到會議：{meeting_id}")
         drop_from_rag(meeting_id)
         return {"deleted": meeting_id}
@@ -563,7 +579,7 @@ def create_app(
     @app.post("/api/meetings/{meeting_id}/reanalyze")
     def reanalyze_meeting(meeting_id: str, req: Optional[ReanalyzeRequest] = None):
         """對（可能已編輯過的）逐字稿重跑 AI 分析：更新會議紀錄、整批換掉任務。"""
-        record = store.get_meeting(meeting_id)
+        record = store.get_meeting(meeting_id, user=current_user())
         if record is None:
             raise HTTPException(status_code=404, detail=f"找不到會議：{meeting_id}")
         transcript = (record.get("transcript") or "").strip()
@@ -613,8 +629,8 @@ def create_app(
         }
         if corrections or speaker_names:  # 逐字稿被改過才回寫，沒改就不動原紀錄
             updates["transcript"] = transcript
-        store.update_meeting(meeting_id, updates)
-        tasks = store.replace_tasks(meeting_id, dumped["todos"])
+        store.update_meeting(meeting_id, updates, user=current_user())
+        tasks = store.replace_tasks(meeting_id, dumped["todos"], user=current_user())
         notifications = orchestrator.notifier.notify(meeting_id, analysis)
         drop_from_rag(meeting_id)
         return {
@@ -629,7 +645,7 @@ def create_app(
 
     @app.get("/api/tasks")
     def list_tasks(meeting_id: Optional[str] = None):
-        return {"tasks": store.list_tasks(meeting_id=meeting_id)}
+        return {"tasks": store.list_tasks(meeting_id=meeting_id, user=current_user())}
 
     @app.get("/api/usage")
     def get_usage():
@@ -638,7 +654,7 @@ def create_app(
     @app.get("/api/reminders")
     def get_reminders(days: int = 2):
         """主動提醒：逾期/即將到期/未指派任務的催辦草稿＋未決事項追問。"""
-        return scan_reminders(store.list_tasks(), store.list_meetings(), due_soon_days=days)
+        return scan_reminders(store.list_tasks(user=current_user()), store.list_meetings(user=current_user()), due_soon_days=days)
 
     @app.get("/api/search")
     def keyword_search(q: str = ""):
@@ -648,8 +664,8 @@ def create_app(
             raise HTTPException(status_code=400, detail="請輸入要搜尋的關鍵字")
         kw = keyword.lower()
         hits = []
-        for meta in store.list_meetings():
-            record = store.get_meeting(meta["id"]) or meta
+        for meta in store.list_meetings(user=current_user()):
+            record = store.get_meeting(meta["id"], user=current_user()) or meta
             info = record.get("meeting", {})
             fields = [
                 ("標題", info.get("title") or ""),
@@ -715,12 +731,12 @@ def create_app(
 
     @app.get("/api/glossary")
     def get_glossary():
-        return {"terms": glossary.terms()}
+        return {"terms": glossary.terms(current_user())}
 
     @app.put("/api/glossary")
     def put_glossary(req: GlossaryRequest):
         try:
-            return {"terms": glossary.replace(req.terms)}
+            return {"terms": glossary.replace(req.terms, current_user())}
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc))
 
@@ -728,13 +744,13 @@ def create_app(
 
     @app.get("/api/speakers")
     def get_speakers():
-        return {"names": roster.names()}
+        return {"names": roster.names(current_user())}
 
     @app.put("/api/speakers")
     def put_speakers(req: SpeakerRosterRequest):
         """設定畫面整份取代：手動輸入的錯誤要讓使用者看見。"""
         try:
-            return {"names": roster.replace(req.names)}
+            return {"names": roster.replace(req.names, current_user())}
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc))
 
@@ -764,7 +780,7 @@ def create_app(
             "due_date": req.due_date or None,
             "priority": req.priority,
             "meeting_id": None,
-        })
+        }, user=current_user())
 
     @app.patch("/api/tasks/{task_id}")
     def patch_task(task_id: str, fields: dict):
@@ -781,14 +797,14 @@ def create_app(
             and not _is_iso_date(fields["due_date"])
         ):
             raise HTTPException(status_code=400, detail="due_date 必須是 YYYY-MM-DD 格式或留空")
-        updated = store.update_task(task_id, **fields)
+        updated = store.update_task(task_id, user=current_user(), **fields)
         if updated is None:
             raise HTTPException(status_code=404, detail=f"找不到任務：{task_id}")
         return updated
 
     @app.delete("/api/tasks/{task_id}")
     def delete_task(task_id: str):
-        if not store.delete_task(task_id):
+        if not store.delete_task(task_id, user=current_user()):
             raise HTTPException(status_code=404, detail=f"找不到任務：{task_id}")
         return {"deleted": task_id}
 
@@ -796,7 +812,7 @@ def create_app(
     def download_backup():
         """整份資料（會議＋任務＋詞彙）打包成 JSON 下載，供離線保存或搬移。"""
         return Response(
-            content=json.dumps(store.export_all(), ensure_ascii=False, indent=2),
+            content=json.dumps(store.export_all(user=current_user()), ensure_ascii=False, indent=2),
             media_type="application/json; charset=utf-8",
             headers={"Content-Disposition": 'attachment; filename="meeting-agent-backup.json"'},
         )
@@ -808,7 +824,7 @@ def create_app(
             raise HTTPException(
                 status_code=400, detail="備份格式不正確：需要 meetings 與 tasks 陣列"
             )
-        store.import_all(data)
+        store.import_all(data, user=current_user())
         if rag_index is not None:  # 舊向量已不對應新資料，整份作廢待重建
             rag_index.reset()
         return {
@@ -818,18 +834,18 @@ def create_app(
     @app.get("/api/export/tasks.csv")
     def export_tasks_csv():
         return Response(
-            content=tasks_to_csv(store.list_tasks()),
+            content=tasks_to_csv(store.list_tasks(user=current_user())),
             media_type="text/csv; charset=utf-8",
             headers={"Content-Disposition": 'attachment; filename="tasks.csv"'},
         )
 
     @app.get("/api/meetings/{meeting_id}/report.md")
     def meeting_report(meeting_id: str):
-        record = store.get_meeting(meeting_id)
+        record = store.get_meeting(meeting_id, user=current_user())
         if record is None:
             raise HTTPException(status_code=404, detail=f"找不到會議：{meeting_id}")
         return Response(
-            content=meeting_report_md(record, store.list_tasks(meeting_id=meeting_id)),
+            content=meeting_report_md(record, store.list_tasks(meeting_id=meeting_id, user=current_user())),
             media_type="text/markdown; charset=utf-8",
             headers={"Content-Disposition": f'attachment; filename="meeting-{meeting_id}.md"'},
         )
@@ -837,12 +853,12 @@ def create_app(
     @app.get("/api/meetings/{meeting_id}/events.ics")
     def meeting_events_ics(meeting_id: str):
         """把此會議含期限的任務匯出成 .ics，一鍵加入 Google/Apple 行事曆。"""
-        record = store.get_meeting(meeting_id)
+        record = store.get_meeting(meeting_id, user=current_user())
         if record is None:
             raise HTTPException(status_code=404, detail=f"找不到會議：{meeting_id}")
         content = tasks_to_ics(
             record.get("meeting", {}).get("title", ""),
-            store.list_tasks(meeting_id=meeting_id),
+            store.list_tasks(meeting_id=meeting_id, user=current_user()),
         )
         return Response(
             content=content,

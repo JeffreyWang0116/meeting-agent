@@ -16,6 +16,7 @@ from __future__ import annotations
 import threading
 
 from app.agents.speaker_namer_agent import is_safe_name
+from app.stores.base import DEFAULT_USER
 
 MAX_NAMES = 100
 
@@ -36,15 +37,15 @@ class SpeakerRoster:
         self._store = store
         self._lock = threading.Lock()
         # 每次講者辨識都要讀，快取避免頻繁打資料庫；寫入時同步更新
-        self._cache: list[str] | None = None
+        self._cache: dict[str, list[str]] = {}
 
-    def names(self) -> list[str]:
+    def names(self, user: str = DEFAULT_USER) -> list[str]:
         with self._lock:
-            if self._cache is None:
-                self._cache = self._store.get_speaker_roster()
-            return list(self._cache)
+            if user not in self._cache:
+                self._cache[user] = self._store.get_speaker_roster(user=user)
+            return list(self._cache[user])
 
-    def remember(self, names) -> list[str]:
+    def remember(self, names, user: str = DEFAULT_USER) -> list[str]:
         """把剛用到的姓名記進名冊（最近用到的排前面），回傳更新後的完整名冊。
 
         這是分析流程的副作用，**絕不拋例外**：名冊記不記得起來，都不該讓一場
@@ -52,16 +53,16 @@ class SpeakerRoster:
         """
         fresh = [n for n in _clean(names) if is_safe_name(n)]
         if not fresh:
-            return self.names()
+            return self.names(user)
         with self._lock:
-            if self._cache is None:
-                self._cache = self._store.get_speaker_roster()
-            merged = fresh + [n for n in self._cache if n not in set(fresh)]
-            self._cache = merged[:MAX_NAMES]
-            self._store.save_speaker_roster(self._cache)
-            return list(self._cache)
+            if user not in self._cache:
+                self._cache[user] = self._store.get_speaker_roster(user=user)
+            merged = fresh + [n for n in self._cache[user] if n not in set(fresh)]
+            self._cache[user] = merged[:MAX_NAMES]
+            self._store.save_speaker_roster(self._cache[user], user=user)
+            return list(self._cache[user])
 
-    def replace(self, names) -> list[str]:
+    def replace(self, names, user: str = DEFAULT_USER) -> list[str]:
         """整份取代（設定畫面每次送完整清單）。回傳清理後的結果。
 
         與 remember 相反，這裡的錯誤要讓使用者看見——手動輸入的東西默默消失
@@ -76,6 +77,6 @@ class SpeakerRoster:
         if len(cleaned) > MAX_NAMES:
             raise ValueError(f"講者名冊最多 {MAX_NAMES} 人")
         with self._lock:
-            self._store.save_speaker_roster(cleaned)
-            self._cache = cleaned
+            self._store.save_speaker_roster(cleaned, user=user)
+            self._cache[user] = cleaned
         return list(cleaned)

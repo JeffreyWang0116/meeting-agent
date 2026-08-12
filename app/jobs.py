@@ -10,6 +10,7 @@ import uuid
 from datetime import date
 from pathlib import Path
 
+from app.stores.base import DEFAULT_USER
 from app.transcription import media
 
 
@@ -34,6 +35,7 @@ class MediaJobManager:
         features: set[str] | None = None,
         correct_typos: bool = False,
         name_speakers: bool = False,
+        user: str = DEFAULT_USER,
     ) -> str:
         job_id = uuid.uuid4().hex[:12]
         with self._lock:
@@ -51,7 +53,7 @@ class MediaJobManager:
             target=self._run,
             args=(
                 job_id, Path(file_path), meeting_date, kind, features,
-                correct_typos, name_speakers, terms,
+                correct_typos, name_speakers, terms, user,
             ),
             daemon=True,
         )
@@ -95,6 +97,7 @@ class MediaJobManager:
         correct_typos: bool = False,
         name_speakers: bool = False,
         terms: list[dict] | None = None,
+        user: str = DEFAULT_USER,
     ) -> None:
         path = file_path
         try:
@@ -129,6 +132,8 @@ class MediaJobManager:
                 correct_typos=correct_typos,
                 name_speakers=name_speakers,
                 terms=terms,
+                # 背景執行緒沒有請求上下文，使用者在 submit 當下就捕捉好
+                user=user,
             )
             # 校正過的話逐字稿會變，job 要換成校正後的版本（前端顯示的就是這份）
             self._update(

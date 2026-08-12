@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import threading
 
+from app.stores.base import DEFAULT_USER
+
 MAX_TERMS = 200
 
 
@@ -46,19 +48,20 @@ class Glossary:
     def __init__(self, store):
         self._store = store
         self._lock = threading.Lock()
-        # 轉錄/分析每次都讀，快取避免頻繁打資料庫；replace 時同步更新
-        self._cache: list[dict] | None = None
+        # 轉錄與分析每次都讀，快取避免高頻打資料庫。
+        # 依使用者分開快取：未來多帳號時不能把 A 的詞彙餘給 B
+        self._cache: dict[str, list[dict]] = {}
 
-    def terms(self) -> list[dict]:
+    def terms(self, user: str = DEFAULT_USER) -> list[dict]:
         with self._lock:
-            if self._cache is None:
-                self._cache = self._store.get_glossary()
-            return [dict(t) for t in self._cache]
+            if user not in self._cache:
+                self._cache[user] = self._store.get_glossary(user=user)
+            return [dict(t) for t in self._cache[user]]
 
-    def replace(self, terms: list[dict]) -> list[dict]:
+    def replace(self, terms: list[dict], user: str = DEFAULT_USER) -> list[dict]:
         """整份取代（前端每次送完整清單，邏輯最單純）。回傳清理後的結果。"""
         cleaned = clean_terms(terms)
         with self._lock:
-            self._store.save_glossary(cleaned)
-            self._cache = cleaned
+            self._store.save_glossary(cleaned, user=user)
+            self._cache[user] = cleaned
         return [dict(t) for t in cleaned]

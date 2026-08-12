@@ -15,7 +15,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 from app.models import MeetingAnalysis
-from app.stores.base import TaskStore
+from app.stores.base import DEFAULT_USER, TaskStore, owns, scoped_read, scoped_write
 
 
 class FirestoreStore(TaskStore):
@@ -77,6 +77,7 @@ class FirestoreStore(TaskStore):
         transcript: str | None = None,
         kind: str | None = None,
         terms: list[dict] | None = None,
+        user: str = DEFAULT_USER,
     ) -> str:
         meeting_id = uuid.uuid4().hex[:12]
         dumped = analysis.model_dump(mode="json")
@@ -85,6 +86,7 @@ class FirestoreStore(TaskStore):
             self._db.collection(self._meetings).document(meeting_id).set({
                 "id": meeting_id,
                 "created_at": self._now(),
+                "user": user,
                 "meeting": dumped["meeting"],
                 "decisions": dumped["decisions"],
                 "pending_items": dumped["pending_items"],
@@ -102,28 +104,35 @@ class FirestoreStore(TaskStore):
                     "id": task_id,
                     "meeting_id": meeting_id,
                     "created_at": self._now(),
+                    "user": user,
                     "status": "todo",
                     **todo,
                 })
         return meeting_id
 
-    def get_meeting(self, meeting_id: str) -> dict | None:
+    def get_meeting(self, meeting_id: str, *, user: str = DEFAULT_USER) -> dict | None:
         snap = self._db.collection(self._meetings).document(meeting_id).get()
-        return snap.to_dict() if snap.exists else None
+        if not snap.exists:
+            return None
+        record = snap.to_dict()
+        return record if owns(record, user) else None
 
-    def list_meetings(self) -> list[dict]:
+    def list_meetings(self, *, user: str = DEFAULT_USER) -> list[dict]:
         docs = [s.to_dict() for s in self._db.collection(self._meetings).stream()]
+        docs = [m for m in docs if owns(m, user)]
         docs.sort(key=lambda m: m.get("created_at", ""), reverse=True)  # 新到舊
         # 逐字稿可能數十 KB，列表回應剔除全文保持輕量（get_meeting 才回傳）
         return [{k: v for k, v in m.items() if k != "transcript"} for m in docs]
 
-    def update_meeting(self, meeting_id: str, fields: dict) -> dict | None:
+    def update_meeting(self, meeting_id: str, fields: dict, *, user: str = DEFAULT_USER) -> dict | None:
         with self._lock:
             ref = self._db.collection(self._meetings).document(meeting_id)
             snap = ref.get()
             if not snap.exists:
                 return None
             merged = snap.to_dict()
+            if not owns(merged, user):
+                return None
             f = dict(fields)
             nested = f.pop("meeting", None)
             if nested:
@@ -132,10 +141,11 @@ class FirestoreStore(TaskStore):
             ref.set(merged)
             return merged
 
-    def delete_meeting(self, meeting_id: str) -> bool:
+    def delete_meeting(self, meeting_id: str, *, user: str = DEFAULT_USER) -> bool:
         with self._lock:
             ref = self._db.collection(self._meetings).document(meeting_id)
-            if not ref.get().exists:
+            snap = ref.get()
+            if not snap.exists or not owns(snap.to_dict(), user):
                 return False
             ref.delete()
             for snap in self._db.collection(self._tasks).stream():
@@ -144,8 +154,9 @@ class FirestoreStore(TaskStore):
                     self._db.collection(self._tasks).document(task["id"]).delete()
             return True
 
-    def list_tasks(self, meeting_id: str | None = None) -> list[dict]:
+    def list_tasks(self, meeting_id: str | None = None, *, user: str = DEFAULT_USER) -> list[dict]:
         docs = [s.to_dict() for s in self._db.collection(self._tasks).stream()]
+        docs = [t for t in docs if owns(t, user)]
         if meeting_id is not None:
             docs = [t for t in docs if t.get("meeting_id") == meeting_id]
         docs.sort(key=lambda t: t.get("created_at", ""))  # 建立順序
@@ -153,12 +164,13 @@ class FirestoreStore(TaskStore):
             t.setdefault("status", "todo")
         return docs
 
-    def add_task(self, task: dict) -> dict:
+    def add_task(self, task: dict, *, user: str = DEFAULT_USER) -> dict:
         task_id = uuid.uuid4().hex[:12]
         record = {
             "id": task_id,
             "meeting_id": task.get("meeting_id"),
             "created_at": self._now(),
+            "user": user,
             "status": task.get("status") or "todo",
             "priority": task.get("priority") or "medium",
         }
@@ -168,11 +180,11 @@ class FirestoreStore(TaskStore):
             self._db.collection(self._tasks).document(task_id).set(record)
         return record
 
-    def update_task(self, task_id: str, **fields) -> dict | None:
+    def update_task(self, task_id: str, *, user: str = DEFAULT_USER, **fields) -> dict | None:
         with self._lock:
             ref = self._db.collection(self._tasks).document(task_id)
             snap = ref.get()
-            if not snap.exists:
+            if not snap.exists or not owns(snap.to_dict(), user):
                 return None
             ref.update(fields)
             merged = snap.to_dict()
@@ -180,11 +192,11 @@ class FirestoreStore(TaskStore):
             merged.setdefault("status", "todo")
             return merged
 
-    def replace_tasks(self, meeting_id: str, todos: list[dict]) -> list[dict]:
+    def replace_tasks(self, meeting_id: str, todos: list[dict], *, user: str = DEFAULT_USER) -> list[dict]:
         with self._lock:
             for snap in self._db.collection(self._tasks).stream():
                 task = snap.to_dict()
-                if task.get("meeting_id") == meeting_id:
+                if task.get("meeting_id") == meeting_id and owns(task, user):
                     self._db.collection(self._tasks).document(task["id"]).delete()
             records = []
             for todo in todos:
@@ -193,6 +205,7 @@ class FirestoreStore(TaskStore):
                     "id": task_id,
                     "meeting_id": meeting_id,
                     "created_at": self._now(),
+                    "user": user,
                     "status": "todo",
                     **todo,
                 }
@@ -200,58 +213,65 @@ class FirestoreStore(TaskStore):
                 records.append(record)
             return records
 
-    def delete_task(self, task_id: str) -> bool:
+    def delete_task(self, task_id: str, *, user: str = DEFAULT_USER) -> bool:
         with self._lock:
             ref = self._db.collection(self._tasks).document(task_id)
-            if not ref.get().exists:
+            snap = ref.get()
+            if not snap.exists or not owns(snap.to_dict(), user):
                 return False
             ref.delete()
             return True
 
     # ---- 備份 / 還原 ----
 
-    def export_all(self) -> dict:
+    def export_all(self, *, user: str = DEFAULT_USER) -> dict:
         meetings = [s.to_dict() for s in self._db.collection(self._meetings).stream()]
         tasks = [s.to_dict() for s in self._db.collection(self._tasks).stream()]
         return {
-            "meetings": meetings,
-            "tasks": tasks,
-            "glossary": self.get_glossary(),
-            "speaker_roster": self.get_speaker_roster(),
+            "meetings": [m for m in meetings if owns(m, user)],
+            "tasks": [t for t in tasks if owns(t, user)],
+            "glossary": self.get_glossary(user=user),
+            "speaker_roster": self.get_speaker_roster(user=user),
         }
 
-    def import_all(self, data: dict) -> None:
+    def import_all(self, data: dict, *, user: str = DEFAULT_USER) -> None:
         with self._lock:
+            # 還原只能覆蓋自己的資料；別人的原封不動
             for coll in (self._meetings, self._tasks):
                 for snap in self._db.collection(coll).stream():
-                    self._db.collection(coll).document(snap.id).delete()
+                    if owns(snap.to_dict(), user):
+                        self._db.collection(coll).document(snap.id).delete()
             for m in data.get("meetings", []):
-                self._db.collection(self._meetings).document(m["id"]).set(dict(m))
+                self._db.collection(self._meetings).document(m["id"]).set({**dict(m), "user": user})
             for t in data.get("tasks", []):
-                t = dict(t)
+                t = {**dict(t), "user": user}
                 t.setdefault("status", "todo")
                 self._db.collection(self._tasks).document(t["id"]).set(t)
         if "glossary" in data:
-            self.save_glossary(data.get("glossary") or [])
+            self.save_glossary(data.get("glossary") or [], user=user)
         if "speaker_roster" in data:
-            self.save_speaker_roster(data.get("speaker_roster") or [])
+            self.save_speaker_roster(data.get("speaker_roster") or [], user=user)
 
     # ---- 自訂詞彙（meta collection 底下單一 glossary 文件） ----
 
-    def get_glossary(self) -> list[dict]:
-        snap = self._db.collection(self._meta).document("glossary").get()
-        return snap.to_dict().get("terms", []) if snap.exists else []
+    def _meta_doc(self, name: str) -> dict:
+        snap = self._db.collection(self._meta).document(name).get()
+        return snap.to_dict() if snap.exists else {}
 
-    def save_glossary(self, terms: list[dict]) -> None:
+    def get_glossary(self, *, user: str = DEFAULT_USER) -> list[dict]:
+        return scoped_read(self._meta_doc("glossary"), user, "terms")
+
+    def save_glossary(self, terms: list[dict], *, user: str = DEFAULT_USER) -> None:
         with self._lock:
-            self._db.collection(self._meta).document("glossary").set({"terms": terms})
+            doc = scoped_write(self._meta_doc("glossary"), user, "terms", terms)
+            self._db.collection(self._meta).document("glossary").set(doc)
 
     # ---- 講者名冊（meta collection 底下單一 speakers 文件） ----
 
-    def get_speaker_roster(self) -> list[str]:
-        snap = self._db.collection(self._meta).document("speakers").get()
-        return snap.to_dict().get("names", []) if snap.exists else []
+    def get_speaker_roster(self, *, user: str = DEFAULT_USER) -> list[str]:
+        return scoped_read(self._meta_doc("speakers"), user, "names")
 
-    def save_speaker_roster(self, names: list[str]) -> None:
+    def save_speaker_roster(self, names: list[str], *, user: str = DEFAULT_USER) -> None:
         with self._lock:
-            self._db.collection(self._meta).document("speakers").set({"names": names})
+            doc = scoped_write(self._meta_doc("speakers"), user, "names", names)
+            self._db.collection(self._meta).document("speakers").set(doc)

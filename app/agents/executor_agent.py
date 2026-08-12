@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 from app.models import MeetingAnalysis
+from app.stores.base import DEFAULT_USER
 from app.stores.base import TaskStore
 
 
@@ -19,7 +20,8 @@ class ExecutorAgent:
         transcript: str | None = None,
         kind: str | None = None,
         terms: list[dict] | None = None,
+        user: str = DEFAULT_USER,
     ) -> str:
         return self.store.save_meeting(
-            analysis, transcript=transcript, kind=kind, terms=terms
+            analysis, transcript=transcript, kind=kind, terms=terms, user=user
         )
