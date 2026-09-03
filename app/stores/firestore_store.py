@@ -5,8 +5,12 @@
 在 Render 重新部署時被清空。
 
 資料模型：兩個 collection——`meetings`（每場會議一份文件，含逐字稿全文）、
-`tasks`（每筆代辦一份文件，帶 meeting_id）。會議量是數十場等級，排序與
-過濾直接在 Python 做，不依賴 Firestore 複合索引（省去建索引的設定）。
+`tasks`（每筆代辦一份文件，帶 meeting_id）。
+
+使用者過濾在 Firestore 端做（where user == …），排序留在 Python：Firestore
+是按「讀取的文件數」計費，整份 collection 撈回來再過濾，等於為資料庫裡所有
+人的資料付費。只用單一欄位的等值條件、不加 order_by，就不必建複合索引，
+維持零設定即可部署。
 """
 from __future__ import annotations
 
@@ -16,6 +20,14 @@ from datetime import datetime, timedelta, timezone
 
 from app.models import MeetingAnalysis
 from app.stores.base import DEFAULT_USER, TaskStore, owns, scoped_read, scoped_write
+
+
+def _user_filter(user: str):
+    """where 用的等值條件。firestore SDK 的匯入維持延遲（見 stores/__init__），
+    本機沒裝 firebase-admin 也能正常走 JSON 分支。"""
+    from google.cloud.firestore_v1.base_query import FieldFilter
+
+    return FieldFilter("user", "==", user)
 
 
 class FirestoreStore(TaskStore):
@@ -34,6 +46,8 @@ class FirestoreStore(TaskStore):
         self._tasks = tasks
         self._meta = meta
         self._lock = threading.Lock()
+        self._backfill_lock = threading.Lock()  # 與 _lock 分開，才能在鎖內安全呼叫
+        self._backfilled = False
         self._last_ts: datetime | None = None
 
     # ---- 建構：從金鑰初始化真正的 Firestore client ----
@@ -68,6 +82,44 @@ class FirestoreStore(TaskStore):
             ts = self._last_ts + timedelta(microseconds=1)
         self._last_ts = ts
         return ts.isoformat()
+
+    # 一次性資料補齊的旗標（存在 meta/migrations）
+    _MIGRATION_DOC = "migrations"
+    _BACKFILL_FLAG = "user_backfill"
+
+    def _ensure_user_field(self) -> None:
+        """把沒有 user 欄位的舊文件補成 DEFAULT_USER。
+
+        where("user","==",x) 查不到「根本沒有這個欄位」的文件——所以改用
+        伺服器端過濾的同時一定要補齊舊資料，否則改版前存的會議會整批查不到。
+        那比慢更糟：是無聲的資料消失。
+
+        補完在 meta/migrations 記旗標，換 process／重新部署都不再全表掃描；
+        每個 process 也只讀一次旗標。
+        """
+        if self._backfilled:
+            return
+        with self._backfill_lock:
+            if self._backfilled:
+                return
+            ref = self._db.collection(self._meta).document(self._MIGRATION_DOC)
+            snap = ref.get()
+            flags = snap.to_dict() if snap.exists else {}
+            if not flags.get(self._BACKFILL_FLAG):
+                for coll in (self._meetings, self._tasks):
+                    for doc in self._db.collection(coll).stream():
+                        if not doc.to_dict().get("user"):
+                            self._db.collection(coll).document(doc.id).update(
+                                {"user": DEFAULT_USER}
+                            )
+                ref.set({**flags, self._BACKFILL_FLAG: True})
+            self._backfilled = True
+
+    def _user_docs(self, collection: str, user: str) -> list[dict]:
+        """這個使用者的文件，過濾在 Firestore 端完成（見模組 docstring）。"""
+        self._ensure_user_field()
+        query = self._db.collection(collection).where(filter=_user_filter(user))
+        return [doc.to_dict() for doc in query.stream()]
 
     # ---- TaskStore 介面 ----
 
@@ -118,8 +170,7 @@ class FirestoreStore(TaskStore):
         return record if owns(record, user) else None
 
     def list_meetings(self, *, user: str = DEFAULT_USER) -> list[dict]:
-        docs = [s.to_dict() for s in self._db.collection(self._meetings).stream()]
-        docs = [m for m in docs if owns(m, user)]
+        docs = self._user_docs(self._meetings, user)
         docs.sort(key=lambda m: m.get("created_at", ""), reverse=True)  # 新到舊
         # 逐字稿可能數十 KB，列表回應剔除全文保持輕量（get_meeting 才回傳）
         return [{k: v for k, v in m.items() if k != "transcript"} for m in docs]
@@ -148,15 +199,13 @@ class FirestoreStore(TaskStore):
             if not snap.exists or not owns(snap.to_dict(), user):
                 return False
             ref.delete()
-            for snap in self._db.collection(self._tasks).stream():
-                task = snap.to_dict()
+            for task in self._user_docs(self._tasks, user):
                 if task.get("meeting_id") == meeting_id:
                     self._db.collection(self._tasks).document(task["id"]).delete()
             return True
 
     def list_tasks(self, meeting_id: str | None = None, *, user: str = DEFAULT_USER) -> list[dict]:
-        docs = [s.to_dict() for s in self._db.collection(self._tasks).stream()]
-        docs = [t for t in docs if owns(t, user)]
+        docs = self._user_docs(self._tasks, user)
         if meeting_id is not None:
             docs = [t for t in docs if t.get("meeting_id") == meeting_id]
         docs.sort(key=lambda t: t.get("created_at", ""))  # 建立順序
@@ -194,9 +243,8 @@ class FirestoreStore(TaskStore):
 
     def replace_tasks(self, meeting_id: str, todos: list[dict], *, user: str = DEFAULT_USER) -> list[dict]:
         with self._lock:
-            for snap in self._db.collection(self._tasks).stream():
-                task = snap.to_dict()
-                if task.get("meeting_id") == meeting_id and owns(task, user):
+            for task in self._user_docs(self._tasks, user):
+                if task.get("meeting_id") == meeting_id:
                     self._db.collection(self._tasks).document(task["id"]).delete()
             records = []
             for todo in todos:
@@ -225,11 +273,9 @@ class FirestoreStore(TaskStore):
     # ---- 備份 / 還原 ----
 
     def export_all(self, *, user: str = DEFAULT_USER) -> dict:
-        meetings = [s.to_dict() for s in self._db.collection(self._meetings).stream()]
-        tasks = [s.to_dict() for s in self._db.collection(self._tasks).stream()]
         return {
-            "meetings": [m for m in meetings if owns(m, user)],
-            "tasks": [t for t in tasks if owns(t, user)],
+            "meetings": self._user_docs(self._meetings, user),
+            "tasks": self._user_docs(self._tasks, user),
             "glossary": self.get_glossary(user=user),
             "speaker_roster": self.get_speaker_roster(user=user),
         }
@@ -238,9 +284,9 @@ class FirestoreStore(TaskStore):
         with self._lock:
             # 還原只能覆蓋自己的資料；別人的原封不動
             for coll in (self._meetings, self._tasks):
-                for snap in self._db.collection(coll).stream():
-                    if owns(snap.to_dict(), user):
-                        self._db.collection(coll).document(snap.id).delete()
+                for record in self._user_docs(coll, user):
+                    if record.get("id"):
+                        self._db.collection(coll).document(record["id"]).delete()
             for m in data.get("meetings", []):
                 self._db.collection(self._meetings).document(m["id"]).set({**dict(m), "user": user})
             for t in data.get("tasks", []):

@@ -48,14 +48,36 @@ class _FakeDocRef:
         self._col._docs.pop(self.id, None)
 
 
+class _FakeQuery:
+    """where() 的結果。只支援等值過濾——store 刻意不用 order_by 或第二個
+    條件欄位，才不必為了部署去建 Firestore 複合索引。"""
+
+    def __init__(self, col, field_filter):
+        self._col = col
+        self._filter = field_filter
+
+    def stream(self):
+        assert self._filter.op_string == "==", "假件只實作等值過濾"
+        return [
+            _FakeSnapshot(k, v)
+            for k, v in self._col._docs.items()
+            if v.get(self._filter.field_path) == self._filter.value
+        ]
+
+
 class _FakeCollection:
     def __init__(self):
         self._docs = {}
+        self.scans = 0  # 整份 collection 掃描的次數（＝Firestore 會計費的讀取）
 
     def document(self, doc_id):
         return _FakeDocRef(self, doc_id)
 
+    def where(self, filter):
+        return _FakeQuery(self, filter)
+
     def stream(self):
+        self.scans += 1
         return [_FakeSnapshot(k, v) for k, v in self._docs.items()]
 
 
@@ -273,3 +295,82 @@ def test_task_without_status_backfilled_to_todo():
     tasks_col._docs[doc_id].pop("status", None)
 
     assert make_store(db).list_tasks()[0]["status"] == "todo"
+
+
+# ---- 讀取成本：伺服器端過濾，不整份 collection 掃回來 ----
+# Firestore 按「讀取的文件數」計費。原本是 stream() 整份撈回來再用 Python
+# 過濾，代表自己只有 5 場會議，也要為資料庫裡所有人的 500 場付費。
+
+def test_list_meetings_does_not_scan_the_whole_collection():
+    db = FakeFirestore()
+    store = make_store(db)
+    store.save_meeting(make_analysis(), user="me")
+    for _ in range(3):
+        store.save_meeting(make_analysis(), user="other")
+
+    store.list_meetings(user="me")  # 第一次會做一次性的舊資料欄位補齊
+    db.collection("meetings").scans = 0
+
+    mine = store.list_meetings(user="me")
+
+    assert len(mine) == 1
+    assert db.collection("meetings").scans == 0
+
+
+def test_list_tasks_does_not_scan_the_whole_collection():
+    db = FakeFirestore()
+    store = make_store(db)
+    store.save_meeting(make_analysis(), user="me")
+    store.save_meeting(make_analysis(), user="other")
+
+    store.list_tasks(user="me")
+    db.collection("tasks").scans = 0
+
+    assert len(store.list_tasks(user="me")) == 1
+    assert db.collection("tasks").scans == 0
+
+
+def test_legacy_documents_without_user_field_are_backfilled():
+    """where("user","==",x) 查不到「根本沒有 user 欄位」的文件，所以改用
+    伺服器端過濾之前必須先把舊資料補上欄位，否則改版前的會議會整批消失。"""
+    db = FakeFirestore()
+    db.collection("meetings").document("old").set({
+        "id": "old",
+        "created_at": "2026-01-01T00:00:00+00:00",
+        "meeting": {"title": "改版前的會議"},
+    })
+    db.collection("tasks").document("oldtask").set({
+        "id": "oldtask",
+        "meeting_id": "old",
+        "created_at": "2026-01-01T00:00:00+00:00",
+        "task": "改版前的任務",
+    })
+    store = make_store(db)
+
+    assert [m["meeting"]["title"] for m in store.list_meetings()] == ["改版前的會議"]
+    assert [t["task"] for t in store.list_tasks()] == ["改版前的任務"]
+    assert db.collection("meetings")._docs["old"]["user"] == "local"
+
+
+def test_backfill_runs_once_per_collection():
+    db = FakeFirestore()
+    store = make_store(db)
+    store.save_meeting(make_analysis())
+
+    store.list_meetings()
+    scans_after_first = db.collection("meetings").scans
+    for _ in range(5):
+        store.list_meetings()
+
+    assert db.collection("meetings").scans == scans_after_first
+
+
+def test_backfill_not_repeated_by_a_new_store_instance():
+    """補齊完成的旗標記在 meta 文件裡，重新部署／換 process 也不必再掃一次。"""
+    db = FakeFirestore()
+    make_store(db).list_meetings()
+    scans_after_first = db.collection("meetings").scans
+
+    make_store(db).list_meetings()
+
+    assert db.collection("meetings").scans == scans_after_first
