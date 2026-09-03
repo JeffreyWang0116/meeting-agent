@@ -10,6 +10,20 @@ from dotenv import load_dotenv
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 
+def _under_base(value: str | None) -> Path | None:
+    """把 .env 裡的相對路徑接到專案根目錄底下。
+
+    .env 就放在專案根目錄，使用者寫 ./firebase-service-account.json 時指的是
+    那裡。但相對路徑實際上是對「啟動時的工作目錄」解析的——從上層目錄、IDE
+    或預覽工具啟動就會找不到檔案，而且錯誤看起來像是金鑰根本沒下載。
+    絕對路徑原樣放行。
+    """
+    if not value:
+        return None
+    path = Path(value)
+    return path if path.is_absolute() else BASE_DIR / path
+
+
 @dataclass(frozen=True)
 class Settings:
     gemini_api_key: str | None = None
@@ -120,12 +134,15 @@ def get_settings() -> Settings:
         transcribe_long_file_threshold_seconds=int(
             os.environ.get("TRANSCRIBE_LONG_FILE_THRESHOLD_SECONDS", "600")
         ),
-        data_dir=Path(os.environ.get("DATA_DIR", BASE_DIR / "data")),
+        data_dir=_under_base(os.environ.get("DATA_DIR")) or BASE_DIR / "data",
         firebase_credentials_json=os.environ.get("FIREBASE_CREDENTIALS_JSON") or None,
         firebase_credentials_file=(
-            os.environ.get("FIREBASE_CREDENTIALS_FILE")
-            or os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
-            or None
+            str(resolved)
+            if (resolved := _under_base(
+                os.environ.get("FIREBASE_CREDENTIALS_FILE")
+                or os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
+            ))
+            else None
         ),
         api_token=os.environ.get("API_TOKEN") or None,
         max_upload_mb=int(os.environ.get("MAX_UPLOAD_MB", "500")),

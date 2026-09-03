@@ -40,3 +40,38 @@ def test_dataclass_defaults_match_env_defaults():
 def test_env_var_still_wins(monkeypatch):
     monkeypatch.setenv("GEMINI_MODEL", "gemini-3.5-flash")
     assert get_settings().gemini_model == "gemini-3.5-flash"
+
+
+# ---- .env 裡的相對路徑 ----
+
+def test_relative_credential_path_resolves_against_the_project_root(monkeypatch):
+    """.env 就放在專案根目錄，使用者寫 ./firebase-service-account.json 時，
+    指的顯然是那裡。
+
+    但相對路徑實際上是對「啟動時的工作目錄」解析的——從上層目錄、IDE 或
+    預覽工具啟動時就會找不到檔案，而且錯誤看起來像是金鑰沒下載。
+    """
+    from pathlib import Path
+
+    from app.config import BASE_DIR
+
+    monkeypatch.setenv("FIREBASE_CREDENTIALS_FILE", "./firebase-service-account.json")
+    resolved = Path(get_settings().firebase_credentials_file)
+
+    assert resolved.is_absolute()
+    assert resolved == BASE_DIR / "firebase-service-account.json"
+
+
+def test_absolute_credential_path_left_alone(monkeypatch, tmp_path):
+    key = tmp_path / "elsewhere.json"
+    monkeypatch.setenv("FIREBASE_CREDENTIALS_FILE", str(key))
+
+    from pathlib import Path
+
+    assert Path(get_settings().firebase_credentials_file) == key
+
+
+def test_relative_data_dir_also_resolves_against_the_project_root(monkeypatch):
+    """DATA_DIR 有同樣的陷阱：相對路徑會讓資料落在啟動目錄底下。"""
+    monkeypatch.setenv("DATA_DIR", "./data")
+    assert get_settings().data_dir.is_absolute()
