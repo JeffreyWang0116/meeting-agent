@@ -9,22 +9,22 @@
 from __future__ import annotations
 
 
-def ensure_app(*, cred_json: str | None = None, cred_file: str | None = None):
-    """確保 firebase-admin 已初始化，回傳那個 app。已經初始化過就直接沿用。"""
+def build_credential(*, cred_json: str | None = None, cred_file: str | None = None):
+    """把設定變成 firebase-admin 的憑證物件。
+
+    金鑰設定填錯是部署時最容易犯的錯，訊息要直接指向「是哪個環境變數、錯在
+    哪」——讓 firebase_admin 從深處丟 FileNotFoundError / JSONDecodeError 的話，
+    看到的人完全聯想不到是自己的設定有問題。
+
+    刻意與 ensure_app 分開：ensure_app 有「已經初始化過就直接沿用」的捷徑，
+    驗證邏輯若埋在那條捷徑後面，只要 process 裡已經有 app 就整組空轉，測試
+    也會隨執行順序時綠時紅。這個函式沒有任何全域狀態。
+    """
     import json
     import pathlib
 
-    import firebase_admin
     from firebase_admin import credentials
 
-    try:
-        return firebase_admin.get_app()
-    except ValueError:
-        pass
-
-    # 金鑰設定填錯是部署時最容易犯的錯。訊息要直接指向「是哪個環境變數、
-    # 錯在哪」——讓 firebase_admin 從深處丟 FileNotFoundError / JSONDecodeError
-    # 的話，看到的人完全聯想不到是自己的設定有問題
     if cred_file:
         path = pathlib.Path(cred_file)
         if not path.is_file():
@@ -33,8 +33,9 @@ def ensure_app(*, cred_json: str | None = None, cred_file: str | None = None):
                 f"（FIREBASE_CREDENTIALS_FILE 指到這裡，目前工作目錄是 {pathlib.Path.cwd()}）。"
                 "請確認金鑰已下載並放到這個路徑，或改用 FIREBASE_CREDENTIALS_JSON。"
             )
-        cred = credentials.Certificate(str(path))
-    elif cred_json:
+        return credentials.Certificate(str(path))
+
+    if cred_json:
         try:
             parsed = json.loads(cred_json)
         except ValueError as exc:
@@ -42,7 +43,19 @@ def ensure_app(*, cred_json: str | None = None, cred_file: str | None = None):
                 f"FIREBASE_CREDENTIALS_JSON 不是合法的 JSON（{exc}）。"
                 "貼進環境變數時要整份、單行、含頭尾大括號——夾到換行或只貼半截都會這樣。"
             ) from exc
-        cred = credentials.Certificate(parsed)
-    else:
-        raise ValueError("需要 FIREBASE_CREDENTIALS_FILE 或 FIREBASE_CREDENTIALS_JSON")
-    return firebase_admin.initialize_app(cred)
+        return credentials.Certificate(parsed)
+
+    raise ValueError("需要 FIREBASE_CREDENTIALS_FILE 或 FIREBASE_CREDENTIALS_JSON")
+
+
+def ensure_app(*, cred_json: str | None = None, cred_file: str | None = None):
+    """確保 firebase-admin 已初始化，回傳那個 app。已經初始化過就直接沿用。"""
+    import firebase_admin
+
+    try:
+        return firebase_admin.get_app()
+    except ValueError:
+        pass
+    return firebase_admin.initialize_app(
+        build_credential(cred_json=cred_json, cred_file=cred_file)
+    )
