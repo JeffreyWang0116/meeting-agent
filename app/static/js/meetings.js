@@ -2,11 +2,11 @@ import { api } from "./api.js";
 import { renderAskScope } from "./ask.js";
 import { $, PAGE_SIZE, esc, icon, loadFail, pageNo, paginate, registerPager, registerRefresher, renderPager, showError, showNotice } from "./core.js";
 import { renderHome } from "./home.js";
-import { refreshReminders } from "./reminders.js";
+import { refreshReminders, remindersLoaded, renderReminders } from "./reminders.js";
 import { copyWithFeedback } from "./result.js";
 import { rememberSpeaker } from "./settings.js";
 import { correctTypos, nameSpeakers } from "./setup.js";
-import { allTasks, refreshTasks } from "./tasks.js";
+import { allTasks, refreshTasks, renderTasks, tasksLoaded } from "./tasks.js";
 import { SPEAKER_RE, TIME_RE, jumpToTranscript, renderChat } from "./transcript.js";
 
 let meetingsLoaded = false;
@@ -19,6 +19,16 @@ let allMeetings = [];
 let expandedMeetingId = null;      // 展開詳情中的會議
 let detailEditing = false;
 const meetingDetailCache = {};     // id -> 完整紀錄（含逐字稿）
+
+// 任務庫、主動提醒都要把資料依會議分組，需要把 meeting_id 換成看得懂的標題。
+// 集中在這裡，兩邊查同一份 allMeetings（ES module 的 live binding，讀到的永遠
+// 是最新載入的清單）。查不到（會議還沒載完、或已被刪）回 null，由呼叫端決定
+// 顯示什麼備援文字。
+function meetingLabel(id) {
+  const m = allMeetings.find(x => x.id === id);
+  if (!m) return null;
+  return { title: m.meeting?.title || "（未命名會議）", date: m.meeting?.date || "" };
+}
 
 function detectSpeakers(text) {
   const found = new Set();
@@ -183,6 +193,11 @@ async function refreshMeetings() {
     meetingsLoaded = true;
     renderMeetings();
     renderAskScope();
+    // 任務庫與主動提醒是依會議標題分組的——它們可能在 allMeetings 載進來之前
+    // 就先畫過一輪（群組只顯示 id 備援文字），這裡拿到標題後重畫一次補上。
+    // 只重繪、不重新請求。
+    if (tasksLoaded) renderTasks();
+    if (remindersLoaded) renderReminders();
   } catch (e) {
     meetingsLoaded = true;
     $("meetingRows").innerHTML = loadFail("meetings");
@@ -407,4 +422,4 @@ $("tagFilter").addEventListener("click", e => {
 registerRefresher("meetings", refreshMeetings);
 registerPager("meetings", renderMeetings);  // 讓 core 的翻頁按鈕知道要重繪誰
 
-export { TAG_FILTER_LIMIT, activeTag, allMeetings, detailEditing, detectSpeakers, expandedMeetingId, filteredMeetings, focusMeetingPage, meetingDetailCache, meetingDetailHtml, meetingShareText, meetingsLoaded, openMeetingDetail, refreshMeetings, renderMeetings, renderTagFilter, tagsExpanded };
+export { TAG_FILTER_LIMIT, activeTag, allMeetings, detailEditing, detectSpeakers, expandedMeetingId, filteredMeetings, focusMeetingPage, meetingDetailCache, meetingDetailHtml, meetingLabel, meetingShareText, meetingsLoaded, openMeetingDetail, refreshMeetings, renderMeetings, renderTagFilter, tagsExpanded };

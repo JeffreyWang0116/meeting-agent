@@ -1,19 +1,26 @@
 import { api } from "./api.js";
 import { $, PRIORITY_ZH, esc, icon, loadFail, pageNo, paginate, registerPager, registerRefresher, renderPager, showError } from "./core.js";
 import { renderHome } from "./home.js";
-import { refreshMeetings } from "./meetings.js";
+import { allMeetings, meetingLabel, refreshMeetings } from "./meetings.js";
 import { refreshReminders } from "./reminders.js";
 
 let tasksLoaded = false;
 
 /* ==================================================================
-   5. 任務庫：清單、搜尋篩選、列內編輯、手動新增
+   5. 任務庫：依會議分組（可摺疊）、搜尋篩選、列內編輯、手動新增
+   ------------------------------------------------------------------
+   同一場會議產生的任務收在一格裡，點會議標題旁的三角形展開看全部。分組
+   之後每格內的「會議」欄就多餘了（標題已在群組表頭），所以列少一欄。
    ================================================================== */
 // ---- 資料庫 ----
 const STATUS_ZH = { todo: "待辦", doing: "進行中", done: "完成" };
+const MANUAL_KEY = "__manual__";  // meeting_id 為 null 的手動任務歸這一組
 let allTasks = [];
 
-let editingTaskId = null;  // 目前列內編輯中的任務
+let editingTaskId = null;         // 目前列內編輯中的任務
+// 使用者手動展開的群組。預設全部收合，只有點開的留著——狀態改動會整個重繪，
+// 用原生 <details open> 撐不過重繪，得記在資料層。搜尋時另外強制全開（見 renderTasks）
+const openTaskGroups = new Set();
 
 function taskRowHtml(t) {
   if (t.id === editingTaskId) {
@@ -23,7 +30,6 @@ function taskRowHtml(t) {
         <td><input class="cell-input" id="editDue" type="date" value="${esc(t.due_date || "")}"></td>
         <td><span class="pr-dot ${t.priority}"></span>${PRIORITY_ZH[t.priority] || esc(t.priority)}</td>
         <td>${STATUS_ZH[t.status] || esc(t.status)}</td>
-        <td class="mono">${esc(t.meeting_id)}</td>
         <td><div class="row-ops">
           <button class="edit-btn save save-edit" data-id="${esc(t.id)}" title="儲存" aria-label="儲存">✓</button>
           <button class="del-btn cancel-edit" title="取消" aria-label="取消">${icon("x", "i-sm")}</button>
@@ -39,7 +45,6 @@ function taskRowHtml(t) {
           ${Object.entries(STATUS_ZH).map(([v, zh]) =>
             `<option value="${v}" ${v === t.status ? "selected" : ""}>${zh}</option>`).join("")}
         </select></td>
-        <td class="mono">${esc(t.meeting_id)}</td>
         <td><div class="row-ops">
           <button class="edit-btn start-edit" data-id="${esc(t.id)}" title="編輯名稱、負責人、期限" aria-label="編輯">
             ${icon("square-pen", "i-sm")}
@@ -49,6 +54,44 @@ function taskRowHtml(t) {
       </tr>`;
 }
 
+// 依會議把任務分組並排序：會議照 allMeetings 的新到舊，接著放 allMeetings 裡
+// 找不到的會議（剛好還沒載入），手動任務永遠墊底。
+function groupTasks(rows) {
+  const byKey = new Map();
+  for (const t of rows) {
+    const key = t.meeting_id || MANUAL_KEY;
+    (byKey.get(key) || byKey.set(key, []).get(key)).push(t);
+  }
+  const order = [];
+  for (const m of allMeetings) if (byKey.has(m.id)) order.push(m.id);
+  for (const key of byKey.keys())
+    if (key !== MANUAL_KEY && !order.includes(key)) order.push(key);
+  if (byKey.has(MANUAL_KEY)) order.push(MANUAL_KEY);
+  return order.map(key => ({ key, tasks: byKey.get(key) }));
+}
+
+function groupHeadHtml(g, open) {
+  const label = g.key === MANUAL_KEY ? null : meetingLabel(g.key);
+  const title = g.key === MANUAL_KEY
+    ? "手動新增"
+    : (label ? esc(label.title) : "（找不到的會議）");
+  const date = label && label.date ? `<span class="mtg-date mono">${esc(label.date)}</span>` : "";
+  const done = g.tasks.filter(t => t.status === "done").length;
+  const total = g.tasks.length;
+  const allDone = done === total;
+  return `<details class="mtg-group" data-key="${esc(g.key)}" ${open ? "open" : ""}>
+      <summary class="mtg-summary">
+        ${icon("chevron-right", "i-sm mtg-chevron")}
+        <span class="mtg-title">${title}</span>
+        ${date}
+        <span class="mtg-count ${allDone ? "all-done" : ""}">${allDone ? "全部完成" : `${total - done}/${total}`}</span>
+      </summary>
+      <div class="table-wrap">
+        <table class="mtg-table"><tbody>${g.tasks.map(taskRowHtml).join("")}</tbody></table>
+      </div>
+    </details>`;
+}
+
 function renderTasks() {
   const q = $("taskSearch").value.trim().toLowerCase();
   const st = $("taskFilter").value;
@@ -56,10 +99,14 @@ function renderTasks() {
     (!st || t.status === st) &&
     (!q || `${t.task} ${t.owner || ""} ${t.meeting_id}`.toLowerCase().includes(q))
   );
-  const p = paginate("tasks", rows);
-  $("taskRows").innerHTML = p.items.length
-    ? p.items.map(taskRowHtml).join("")
-    : `<tr><td colspan="7" class="empty-note">${allTasks.length ? "沒有符合條件的任務" : "尚無任務"}</td></tr>`;
+  const groups = groupTasks(rows);
+  const searching = !!(q || st);  // 搜尋/篩選時全部展開，讓命中直接看得到
+  const soloGroup = groups.length === 1;
+
+  const p = paginate("tasks", groups);
+  $("taskGroups").innerHTML = p.items.length
+    ? p.items.map(g => groupHeadHtml(g, searching || soloGroup || openTaskGroups.has(g.key))).join("")
+    : `<p class="empty-note tasks-empty">${allTasks.length ? "沒有符合條件的任務" : "尚無任務"}</p>`;
   renderPager("tasks", p);
   renderHome();
 }
@@ -71,12 +118,23 @@ async function refreshTasks() {
     renderTasks();
   } catch (e) {
     tasksLoaded = true;  // 骨架不能一直閃：載不到就明講，並留一個重試入口
-    $("taskRows").innerHTML = `<tr><td colspan="7">${loadFail("tasks")}</td></tr>`;
+    $("taskGroups").innerHTML = loadFail("tasks");
     renderHome();
   }
 }
 
-$("taskRows").addEventListener("change", async e => {
+const groups = $("taskGroups");
+
+// 記住哪些群組被展開／收合，重繪後才能還原（原生 <details> 的狀態撐不過 innerHTML 重設）。
+// toggle 不冒泡，父層要用捕捉階段才收得到
+groups.addEventListener("toggle", e => {
+  const d = e.target.closest(".mtg-group");
+  if (!d) return;
+  if (d.open) openTaskGroups.add(d.dataset.key);
+  else openTaskGroups.delete(d.dataset.key);
+}, true);
+
+groups.addEventListener("change", async e => {
   const sel = e.target.closest(".status-sel");
   if (!sel) return;
   try {
@@ -88,7 +146,7 @@ $("taskRows").addEventListener("change", async e => {
   } catch (err) { showError("更新任務狀態失敗：" + err.message); refreshTasks(); }
 });
 
-$("taskRows").addEventListener("click", async e => {
+groups.addEventListener("click", async e => {
   const start = e.target.closest(".start-edit");
   if (start) {
     editingTaskId = start.dataset.id;
@@ -131,9 +189,9 @@ $("taskRows").addEventListener("click", async e => {
 });
 
 // 編輯列快捷鍵：Enter 儲存、Esc 取消
-$("taskRows").addEventListener("keydown", e => {
+groups.addEventListener("keydown", e => {
   if (!e.target.closest(".cell-input")) return;
-  if (e.key === "Enter") $("taskRows").querySelector(".save-edit")?.click();
+  if (e.key === "Enter") groups.querySelector(".save-edit")?.click();
   if (e.key === "Escape") { editingTaskId = null; renderTasks(); }
 });
 
@@ -164,6 +222,7 @@ async function submitNewTask() {
     $("newTaskName").value = ""; $("newTaskOwner").value = ""; $("newTaskDue").value = "";
     $("newTaskPriority").value = "medium";
     $("taskAddRow").style.display = "none";
+    openTaskGroups.add(MANUAL_KEY);  // 新增後直接把「手動新增」那格展開，看得到剛加的
     refreshTasks(); refreshReminders();
   } catch (err) { showError("新增任務失敗：" + err.message); }
 }

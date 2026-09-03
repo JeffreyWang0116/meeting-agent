@@ -584,16 +584,12 @@
             <button class="primary" id="btnAddTaskSave">新增</button>
             <button class="ghost" id="btnAddTaskCancel">取消</button>
           </div>
-          <div class="table-wrap">
-            <table>
-              <thead><tr><th>任務</th><th>負責人</th><th class="mono">期限</th><th>優先級</th><th>狀態</th><th class="mono">會議</th><th></th></tr></thead>
-              <tbody id="taskRows">
-                <tr class="skel-row"><td><span class="skel" style="width:72%"></span></td><td><span class="skel" style="width:60%"></span></td><td><span class="skel" style="width:70%"></span></td><td><span class="skel" style="width:50%"></span></td><td><span class="skel" style="width:64%"></span></td><td><span class="skel" style="width:70%"></span></td><td></td></tr>
-                <tr class="skel-row"><td><span class="skel" style="width:64%"></span></td><td><span class="skel" style="width:52%"></span></td><td><span class="skel" style="width:70%"></span></td><td><span class="skel" style="width:50%"></span></td><td><span class="skel" style="width:64%"></span></td><td><span class="skel" style="width:62%"></span></td><td></td></tr>
-                <tr class="skel-row"><td><span class="skel" style="width:80%"></span></td><td><span class="skel" style="width:58%"></span></td><td><span class="skel" style="width:70%"></span></td><td><span class="skel" style="width:50%"></span></td><td><span class="skel" style="width:64%"></span></td><td><span class="skel" style="width:74%"></span></td><td></td></tr>
-                <tr class="skel-row"><td><span class="skel" style="width:56%"></span></td><td><span class="skel" style="width:64%"></span></td><td><span class="skel" style="width:70%"></span></td><td><span class="skel" style="width:50%"></span></td><td><span class="skel" style="width:64%"></span></td><td><span class="skel" style="width:66%"></span></td><td></td></tr>
-              </tbody>
-            </table>
+          <div class="mtg-groups" id="taskGroups">
+            <div class="skel-list">
+              <div class="skel-block"><span class="skel" style="width:44%"></span><span class="skel" style="width:22%"></span></div>
+              <div class="skel-block"><span class="skel" style="width:38%"></span><span class="skel" style="width:22%"></span></div>
+              <div class="skel-block"><span class="skel" style="width:50%"></span><span class="skel" style="width:22%"></span></div>
+            </div>
           </div>
           <div class="pager" id="tasksPager" data-pager="tasks"></div>
         </div>

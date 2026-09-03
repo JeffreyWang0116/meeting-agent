@@ -936,6 +936,53 @@
   .pr-dot.low { background: var(--low); }
   .unassigned { color: var(--high); font-weight: 500; }
 
+  /* ---- 依會議摺疊的分組（任務庫 / 主動提醒共用） ---- */
+  /* 同一場會議產生的任務或提醒收在一格，點標題旁的三角形展開看全部。 */
+  .mtg-groups { display: flex; flex-direction: column; gap: 8px; }
+  .mtg-group {
+    border: 1px solid var(--border); border-radius: var(--radius-md);
+    background: var(--card-2); overflow: hidden;
+  }
+  /* 提醒群組的左緣顏色＝該組最緊急的一項，逾期的一眼就看得到 */
+  .mtg-group.k-overdue { border-left: 3px solid var(--high); }
+  .mtg-group.k-due_soon { border-left: 3px solid var(--medium); }
+  .mtg-group.k-follow { border-left: 3px solid var(--accent); }
+  .mtg-group.k-unassigned { border-left: 3px solid var(--faint); }
+  .mtg-summary {
+    display: flex; align-items: center; gap: 10px; padding: 11px 14px;
+    cursor: pointer; user-select: none; list-style: none;
+  }
+  .mtg-summary::-webkit-details-marker { display: none; }  /* 隱藏原生三角，用自訂 chevron */
+  .mtg-summary:hover { background: var(--card-3); }
+  .mtg-chevron { color: var(--faint); flex: none; transition: transform .18s ease; }
+  .mtg-group[open] > .mtg-summary .mtg-chevron { transform: rotate(90deg); }  /* → 轉成 ↓ */
+  .mtg-title {
+    font-weight: 500; color: var(--ink); font-size: .9rem;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0;
+  }
+  .mtg-date { color: var(--faint); font-size: .76rem; flex: none; }
+  .mtg-count {
+    margin-left: auto; flex: none; font-size: .74rem; color: var(--muted);
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 999px; padding: 2px 9px; font-variant-numeric: tabular-nums;
+  }
+  .mtg-count.all-done { color: var(--low); border-color: var(--low); }
+  .mtg-group[open] > .table-wrap, .mtg-group[open] > .alert-list {
+    border-top: 1px solid var(--border);
+  }
+  .mtg-group .alert-list { padding: 10px 12px; }
+  /* 群組表格：固定欄寬讓每格對齊，任務名佔剩餘空間 */
+  .mtg-table { table-layout: fixed; }
+  .mtg-table td { padding: 9px 12px; }
+  .mtg-table tr:last-child td { border-bottom: none; }
+  .mtg-table td:nth-child(2) { width: 15%; }
+  .mtg-table td:nth-child(3) { width: 116px; }
+  .mtg-table td:nth-child(4) { width: 11%; }
+  .mtg-table td:nth-child(5) { width: 15%; }
+  .mtg-table td:nth-child(6) { width: 78px; }
+  .mtg-table td.mono { white-space: nowrap; }  /* 期限 ISO 日期不要斷成兩行 */
+  .tasks-empty { padding: 20px 4px; }
+
   .panel-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
   .panel-head h2 {
     margin: 0; font-size: 1.1rem; font-weight: 600; letter-spacing: -.01em; display: flex; align-items: center; gap: 11px;
