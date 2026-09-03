@@ -54,22 +54,11 @@ class FirestoreStore(TaskStore):
 
     @classmethod
     def from_credentials(cls, *, cred_json: str | None = None, cred_file: str | None = None):
-        import json
+        from firebase_admin import firestore
 
-        import firebase_admin
-        from firebase_admin import credentials, firestore
+        from app.firebase import ensure_app
 
-        if cred_file:
-            cred = credentials.Certificate(cred_file)
-        elif cred_json:
-            cred = credentials.Certificate(json.loads(cred_json))
-        else:
-            raise ValueError("需要 FIREBASE_CREDENTIALS_FILE 或 FIREBASE_CREDENTIALS_JSON")
-
-        try:
-            firebase_admin.get_app()  # 一個 process 只能 initialize 一次
-        except ValueError:
-            firebase_admin.initialize_app(cred)
+        ensure_app(cred_json=cred_json, cred_file=cred_file)
         return cls(firestore.client())
 
     # ---- 內部 ----

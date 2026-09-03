@@ -35,6 +35,7 @@ from app.agents.executor_agent import ExecutorAgent
 from app.agents.notifier_agent import NotifierAgent
 from app.agents.parser_agent import ParserAgent
 from app.agents.reminder_agent import scan as scan_reminders
+from app.auth import CURRENT_USER, AuthError, bearer_token, verify_firebase_id_token
 from app.config import Settings, get_settings
 from app.export import meeting_report_md, tasks_to_csv, tasks_to_ics
 from app.glossary import Glossary, clean_terms
@@ -43,7 +44,6 @@ from app.jobs import MediaJobManager
 from app.orchestrator import Orchestrator
 from app.rag import AskAgent, GeminiEmbedder, RagIndex
 from app.stores import make_store
-from app.stores.base import DEFAULT_USER
 from app.transcription import media
 from app.transcription.segments import parse_time_label, replace_term_in_range
 from app.translate import TARGETS as TRANSLATE_TARGETS
@@ -86,6 +86,52 @@ class NoCacheStatic(StaticFiles):
         resp = super().file_response(*args, **kwargs)
         resp.headers["Cache-Control"] = "no-cache"
         return resp
+
+
+# 不需要登入的 API：健康檢查（外部監控要打得到）與登入設定本身
+# （還沒登入的人正是要靠它才知道怎麼登入）
+PUBLIC_API_PATHS = {"/api/health", "/api/auth/config"}
+
+
+class RequireFirebaseLogin:
+    """驗 ID token，並把 uid 放進 CURRENT_USER 供 current_user() 讀取。
+
+    刻意寫成純 ASGI 中介層而不是 @app.middleware("http")：後者會把下游應用丟到
+    另一個 task 執行，contextvar 傳不傳得過去得看 Starlette 版本臉色。純 ASGI
+    中介層與端點在同一個 task 內，設進去的值必定讀得到。
+    """
+
+    def __init__(self, app, verify):
+        self.app = app
+        self._verify = verify
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            return await self.app(scope, receive, send)
+        path = scope.get("path", "")
+        if not path.startswith("/api/") or path in PUBLIC_API_PATHS:
+            return await self.app(scope, receive, send)
+
+        raw = dict(scope.get("headers") or [])
+        token = bearer_token(
+            (raw.get(b"authorization") or b"").decode("latin-1") or None
+        )
+        if token is None:
+            return await self._deny(scope, receive, send, "未登入：請先用 Google 登入")
+        try:
+            uid = self._verify(token)
+        except AuthError as exc:
+            return await self._deny(scope, receive, send, str(exc))
+
+        reset = CURRENT_USER.set(uid)
+        try:
+            await self.app(scope, receive, send)
+        finally:
+            CURRENT_USER.reset(reset)
+
+    @staticmethod
+    async def _deny(scope, receive, send, detail: str):
+        await JSONResponse({"detail": detail}, status_code=401)(scope, receive, send)
 
 
 # 會議種類與各自的預設區塊都定義在 decision_agent（單一來源），這裡只負責驗證與對外暴露
@@ -283,17 +329,16 @@ class TranslateRequest(BaseModel):
 
 
 def current_user(request: Request | None = None) -> str:
-    """這個請求屬於哪個使用者。
+    """這個請求屬於誰。
 
-    現在整站只有 DEFAULT_USER 一個。之後要做成 app 接真正的登入（Firebase Auth
-    最省事，因為 Firestore 已經在選項裡），改的就是這個函式：從 Authorization
-    header 驗 ID token、回傳 uid。
+    啟用 Firebase Auth 時，中介層驗完 ID token 就把 uid 放進 CURRENT_USER，
+    這裡讀出來；沒啟用（本機開發、或只設了共用 API_TOKEN）時是 DEFAULT_USER，
+    行為與帳號制上線前完全一樣。
 
-    store 那一層已經是多租戶的（每筆寫入蓋 user、讀取照 user 過濾，兩種後端都有
-    測試釘住隔離性），所以屆時不需要遷移任何既有資料——舊資料沒有 user 欄位，
-    一律視為 DEFAULT_USER 的。
+    舊資料沒有 user 欄位，store 一律視為 DEFAULT_USER 的——所以本機既有的
+    會議在啟用登入後不會消失，只是歸在單人模式那一格。
     """
-    return DEFAULT_USER
+    return CURRENT_USER.get()
 
 
 def create_app(
@@ -306,6 +351,7 @@ def create_app(
     job_manager=None,
     ask_agent=None,
     translator=None,
+    verify_token=None,
 ) -> FastAPI:
     settings = settings or get_settings()
     store = store or make_store(settings)
@@ -401,18 +447,43 @@ def create_app(
 
     app = FastAPI(title="會議助手")
 
-    # 設了 API_TOKEN 才驗證：本機開發預設不擋，部署到公開網址時務必設定，
-    # 否則 /api/backup、/api/restore 等端點任何人都能直接讀寫全部資料
-    if settings.api_token:
+    if settings.auth_enabled:
+        # Firebase Auth：一人一份資料。優先於共用 API_TOKEN——兩個都設的時候，
+        # 共用鑰匙不該還能繞過帳號制
+        verify = verify_token or verify_firebase_id_token
+        if verify is verify_firebase_id_token:
+            from app.firebase import ensure_app  # 驗簽需要已初始化的 firebase app
+
+            ensure_app(
+                cred_json=settings.firebase_credentials_json,
+                cred_file=settings.firebase_credentials_file,
+            )
+
+        app.add_middleware(RequireFirebaseLogin, verify=verify)
+    elif settings.api_token:
+        # 沒接登入時的退路：一把共用鑰匙。部署到公開網址至少要設這個，
+        # 否則 /api/backup、/api/restore 等端點任何人都能直接讀寫全部資料
         expected = f"Bearer {settings.api_token}"
 
         @app.middleware("http")
         async def require_bearer_token(request: Request, call_next):
             path = request.url.path
-            if path.startswith("/api/") and path != "/api/health":
+            if path.startswith("/api/") and path not in PUBLIC_API_PATHS:
                 if request.headers.get("authorization") != expected:
                     return JSONResponse({"detail": "未授權：缺少或錯誤的 API token"}, status_code=401)
             return await call_next(request)
+
+    @app.get("/api/auth/config")
+    def auth_config():
+        """前端登入需要的設定。這幾個值本來就是公開的（Firebase 的安全性靠
+        Auth 規則與後端驗簽，不靠把 apiKey 藏起來），所以不需要認證——何況
+        沒登入的人正是要靠它才知道怎麼登入。"""
+        return {
+            "enabled": settings.auth_enabled,
+            "apiKey": settings.firebase_web_api_key,
+            "authDomain": settings.firebase_auth_domain,
+            "projectId": settings.firebase_project_id,
+        }
 
     def validate_kind(kind: str | None) -> str | None:
         # LEGACY_KINDS 一併放行：改版前存下來的會議帶的是舊的錄音種類值，

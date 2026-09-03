@@ -70,6 +70,18 @@ class Settings:
     # 連 db.json 都存不進去，整個服務跟著停擺。2 小時的單聲道會議錄音約
     # 60~120MB，500 已經很寬鬆；磁碟更小的方案就往下調
     max_upload_mb: int = 500
+    # Firebase Auth（Google 登入）。填了 web 金鑰就啟用真正的帳號制：前端用
+    # 這組公開設定跑登入流程，後端驗 ID token 取 uid 當使用者，資料一人一份。
+    # 不填＝維持單人模式（見 app/auth.py）
+    firebase_web_api_key: str | None = None
+    firebase_auth_domain: str | None = None
+    firebase_project_id: str | None = None
+
+    @property
+    def auth_enabled(self) -> bool:
+        """前端跑得動登入流程才算啟用：少了 authDomain，Google 登入視窗
+        根本開不起來，那時要求 ID token 只會把所有人擋在門外。"""
+        return bool(self.firebase_web_api_key and self.firebase_auth_domain)
 
 
 def get_settings() -> Settings:
@@ -117,4 +129,7 @@ def get_settings() -> Settings:
         ),
         api_token=os.environ.get("API_TOKEN") or None,
         max_upload_mb=int(os.environ.get("MAX_UPLOAD_MB", "500")),
+        firebase_web_api_key=os.environ.get("FIREBASE_WEB_API_KEY") or None,
+        firebase_auth_domain=os.environ.get("FIREBASE_AUTH_DOMAIN") or None,
+        firebase_project_id=os.environ.get("FIREBASE_PROJECT_ID") or None,
     )
