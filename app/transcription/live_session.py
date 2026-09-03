@@ -10,15 +10,21 @@
 跨段講者一致性：每段獨立轉錄時，Gemini 會把講者重新從「講者A」編號，導致
 多人會議被壓縮成兩三個講者。把先前已出現的講者清單當提示帶進下一段轉錄，
 引導模型沿用同一組標籤、只有新聲音才加新標籤。
+
+回收：使用者關掉分頁不見得會按「結束」，那種 session 的逐字稿會一直留在
+記憶體、音檔一直留在磁碟。閒置超過 TTL 的一律清掉——雲端免費層的磁碟與
+記憶體都很小，沒有上界的累積遲早把服務拖垮。
 """
 from __future__ import annotations
 
 import inspect
 import shutil
 import threading
+import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Callable
 
 from app.transcription.segments import (
     TIME_PREFIX_RE,
@@ -41,13 +47,24 @@ class LiveSession:
     closed: bool = False
     speakers: list[str] = field(default_factory=list)  # 已出現的講者標籤（依出場序）
     translate_to: str | None = None  # "en" / "zh"：逐段即時翻譯的目標語言
+    last_active: float = 0.0  # 單調時鐘：最後一次收到音訊段（或結束）的時間
 
 
 class LiveSessionManager:
-    def __init__(self, transcriber, work_dir: Path | str, translator=None):
+    # 閒置多久算被遺棄。比任何一場真實會議都長，但仍有上界
+    SESSION_TTL_SECONDS = 2 * 60 * 60
+
+    def __init__(
+        self,
+        transcriber,
+        work_dir: Path | str,
+        translator=None,
+        now: Callable[[], float] = time.monotonic,
+    ):
         self._transcriber = transcriber
         self._translator = translator
         self._work_dir = Path(work_dir)
+        self._now = now  # 單調時鐘；可注入，測試不必真的等兩小時
         self._sessions: dict[str, LiveSession] = {}
         self._lock = threading.Lock()
 
@@ -56,13 +73,27 @@ class LiveSessionManager:
         session_dir = self._work_dir / session_id
         session_dir.mkdir(parents=True, exist_ok=True)
         with self._lock:
+            self._prune_locked()
             self._sessions[session_id] = LiveSession(
-                id=session_id, dir=session_dir, translate_to=translate_to
+                id=session_id,
+                dir=session_dir,
+                translate_to=translate_to,
+                last_active=self._now(),
             )
         return session_id
 
+    def _prune_locked(self) -> None:
+        """清掉閒置超過 TTL 的 session。這是沒按「結束」的那些 session
+        唯一會被放掉的時機——逐字稿佔的記憶體與音檔佔的磁碟一起還回去。"""
+        cutoff = self._now() - self.SESSION_TTL_SECONDS
+        for sid in [
+            sid for sid, s in self._sessions.items() if s.last_active < cutoff
+        ]:
+            shutil.rmtree(self._sessions.pop(sid).dir, ignore_errors=True)
+
     def _get(self, session_id: str) -> LiveSession:
         with self._lock:
+            self._prune_locked()
             session = self._sessions.get(session_id)
         if session is None:
             raise SessionNotFound(f"找不到聆聽 session：{session_id}")
@@ -80,6 +111,7 @@ class LiveSessionManager:
         with self._lock:
             if session.closed:
                 raise ValueError("此聆聽 session 已結束，無法再加入音訊")
+            session.last_active = self._now()  # 長會議不能被自己的 TTL 清掉
             index = session.chunk_count
             session.chunk_count += 1
             session.parts.append(None)
@@ -126,6 +158,7 @@ class LiveSessionManager:
 
     def transcript(self, session_id: str) -> str:
         with self._lock:
+            self._prune_locked()
             return _join(self._get_locked(session_id).parts)
 
     def _get_locked(self, session_id: str) -> LiveSession:
@@ -138,6 +171,9 @@ class LiveSessionManager:
         session = self._get(session_id)
         with self._lock:
             session.closed = True
+            # 不立刻移除：剛結束時遲到的音訊段要拿到「已結束」的明確訊息，
+            # 而不是查無此 session。這筆殘留由 TTL 回收
+            session.last_active = self._now()
             transcript = _join(session.parts)
         # 錄音段檔案不再需要，刪掉整個 session 目錄釋放磁碟（雲端暫時性磁碟很小）
         shutil.rmtree(session.dir, ignore_errors=True)

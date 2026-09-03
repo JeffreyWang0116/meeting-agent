@@ -246,3 +246,57 @@ def test_translation_receives_text_without_timestamps(tmp_path):
     r = mgr.add_chunk(sid, b"a", offset_seconds=0)
     assert captured["text"] == "講者A：哈囉"
     assert r["translation"] == "hello"
+
+
+# ---- 閒置 session 的回收 ----
+# MediaJobManager 有 _prune_locked 保留最近 100 筆，這裡原本沒有對等機制：
+# _sessions 只增不減、使用者關掉分頁沒按結束的 session 音檔也永遠留在磁碟上。
+
+def make_clocked_manager(tmp_path, texts, clock):
+    return LiveSessionManager(FakeTranscriber(texts), tmp_path, now=lambda: clock["t"])
+
+
+def test_idle_session_pruned_after_ttl(tmp_path):
+    clock = {"t": 0.0}
+    mgr = make_clocked_manager(tmp_path, ["a", "b"], clock)
+    abandoned = mgr.start()
+    mgr.add_chunk(abandoned, b"x")
+    assert (tmp_path / abandoned).exists()
+
+    clock["t"] = LiveSessionManager.SESSION_TTL_SECONDS + 1
+    mgr.start()  # 任何一次操作都順手回收過期的
+
+    assert not (tmp_path / abandoned).exists()  # 音檔不再佔磁碟
+    with pytest.raises(SessionNotFound):
+        mgr.transcript(abandoned)  # 記憶體也放掉了
+
+
+def test_active_session_survives_long_meeting(tmp_path):
+    """兩小時的會議：每段音訊都刷新活躍時間，不能被自己的 TTL 清掉。"""
+    clock = {"t": 0.0}
+    mgr = make_clocked_manager(tmp_path, ["一", "二", "三"], clock)
+    sid = mgr.start()
+
+    for text in ("一", "二", "三"):
+        clock["t"] += LiveSessionManager.SESSION_TTL_SECONDS * 0.9
+        assert mgr.add_chunk(sid, b"x")["text"] == text
+
+    assert mgr.transcript(sid) == "一\n二\n三"
+
+
+def test_finished_session_reports_closed_then_is_released(tmp_path):
+    """剛結束時遲到的音訊段要拿到「已結束」的明確訊息（不是 404），
+    TTL 過後才把整筆放掉。"""
+    clock = {"t": 0.0}
+    mgr = make_clocked_manager(tmp_path, ["內容"], clock)
+    sid = mgr.start()
+    mgr.add_chunk(sid, b"a")
+    mgr.finish(sid)
+
+    with pytest.raises(ValueError):
+        mgr.add_chunk(sid, b"late-chunk")
+
+    clock["t"] += LiveSessionManager.SESSION_TTL_SECONDS + 1
+    mgr.start()
+    with pytest.raises(SessionNotFound):
+        mgr.add_chunk(sid, b"much-later-chunk")
