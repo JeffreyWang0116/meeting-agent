@@ -26,6 +26,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
 
+from app.stores.base import DEFAULT_USER
 from app.transcription.segments import (
     TIME_PREFIX_RE,
     collect_speakers,
@@ -48,6 +49,7 @@ class LiveSession:
     speakers: list[str] = field(default_factory=list)  # 已出現的講者標籤（依出場序）
     translate_to: str | None = None  # "en" / "zh"：逐段即時翻譯的目標語言
     last_active: float = 0.0  # 單調時鐘：最後一次收到音訊段（或結束）的時間
+    user: str = DEFAULT_USER  # 誰開的這場聆聽
 
 
 class LiveSessionManager:
@@ -68,7 +70,9 @@ class LiveSessionManager:
         self._sessions: dict[str, LiveSession] = {}
         self._lock = threading.Lock()
 
-    def start(self, translate_to: str | None = None) -> str:
+    def start(
+        self, translate_to: str | None = None, user: str = DEFAULT_USER
+    ) -> str:
         session_id = uuid.uuid4().hex[:12]
         session_dir = self._work_dir / session_id
         session_dir.mkdir(parents=True, exist_ok=True)
@@ -79,6 +83,7 @@ class LiveSessionManager:
                 dir=session_dir,
                 translate_to=translate_to,
                 last_active=self._now(),
+                user=user,
             )
         return session_id
 
@@ -91,11 +96,12 @@ class LiveSessionManager:
         ]:
             shutil.rmtree(self._sessions.pop(sid).dir, ignore_errors=True)
 
-    def _get(self, session_id: str) -> LiveSession:
+    def _get(self, session_id: str, user: str = DEFAULT_USER) -> LiveSession:
         with self._lock:
             self._prune_locked()
             session = self._sessions.get(session_id)
-        if session is None:
+        # 別人的 session 一律當作不存在：回 403 等於承認「這個 id 有效」
+        if session is None or session.user != user:
             raise SessionNotFound(f"找不到聆聽 session：{session_id}")
         return session
 
@@ -105,8 +111,9 @@ class LiveSessionManager:
         data: bytes,
         suffix: str = ".webm",
         offset_seconds: float | None = None,
+        user: str = DEFAULT_USER,
     ) -> dict:
-        session = self._get(session_id)
+        session = self._get(session_id, user)
         # 配位＋佔槽＋算提示，全在鎖內完成，避免多段並發時互相踩踏
         with self._lock:
             if session.closed:
@@ -156,19 +163,19 @@ class LiveSessionManager:
                 pass
         return fn(path)
 
-    def transcript(self, session_id: str) -> str:
+    def transcript(self, session_id: str, user: str = DEFAULT_USER) -> str:
         with self._lock:
             self._prune_locked()
-            return _join(self._get_locked(session_id).parts)
+            return _join(self._get_locked(session_id, user).parts)
 
-    def _get_locked(self, session_id: str) -> LiveSession:
+    def _get_locked(self, session_id: str, user: str = DEFAULT_USER) -> LiveSession:
         session = self._sessions.get(session_id)
-        if session is None:
+        if session is None or session.user != user:
             raise SessionNotFound(f"找不到聆聽 session：{session_id}")
         return session
 
-    def finish(self, session_id: str) -> str:
-        session = self._get(session_id)
+    def finish(self, session_id: str, user: str = DEFAULT_USER) -> str:
+        session = self._get(session_id, user)
         with self._lock:
             session.closed = True
             # 不立刻移除：剛結束時遲到的音訊段要拿到「已結束」的明確訊息，

@@ -966,6 +966,7 @@ def create_app(
         return {
             "job_id": job_manager.submit(
                 dest,
+                user=current_user(),  # 背景執行緒沒有請求上下文，現在就捕捉
                 meeting_date=parsed_date,
                 kind=kind,
                 features=resolved_features,
@@ -977,7 +978,7 @@ def create_app(
 
     @app.get("/api/media/{job_id}")
     def media_status(job_id: str):
-        job = job_manager.get(job_id)
+        job = job_manager.get(job_id, user=current_user())
         if job is None:
             raise HTTPException(status_code=404, detail=f"找不到工作：{job_id}")
         return job
@@ -992,7 +993,11 @@ def create_app(
                 status_code=400,
                 detail=f"translate_to 只支援：{'、'.join(sorted(TRANSLATE_TARGETS))}",
             )
-        return {"session_id": live_manager.start(translate_to=translate_to)}
+        return {
+            "session_id": live_manager.start(
+                translate_to=translate_to, user=current_user()
+            )
+        }
 
     @app.post("/api/live/{session_id}/chunk")
     def live_chunk(
@@ -1005,7 +1010,11 @@ def create_app(
         usage.record("live_chunk")
         try:
             return live_manager.add_chunk(
-                session_id, data, suffix=suffix, offset_seconds=offset
+                session_id,
+                data,
+                suffix=suffix,
+                offset_seconds=offset,
+                user=current_user(),
             )
         except SessionNotFound as exc:
             raise HTTPException(status_code=404, detail=str(exc))
@@ -1017,7 +1026,7 @@ def create_app(
     @app.post("/api/live/{session_id}/finish")
     def live_finish(session_id: str, req: Optional[FinishRequest] = None):
         try:
-            transcript = live_manager.finish(session_id)
+            transcript = live_manager.finish(session_id, user=current_user())
         except SessionNotFound as exc:
             raise HTTPException(status_code=404, detail=str(exc))
         if not transcript.strip():

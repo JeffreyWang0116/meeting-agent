@@ -42,6 +42,9 @@ class MediaJobManager:
             self._prune_locked()
             self._jobs[job_id] = {
                 "id": job_id,
+                # 誰送出的。背景執行緒沒有請求上下文，所以在 submit 當下
+                # 就把 user 捕捉進工作紀錄，之後轉錄與輪詢都靠它
+                "user": user,
                 "status": "queued",
                 "progress": 0.0,
                 "transcript": "",
@@ -61,10 +64,14 @@ class MediaJobManager:
         thread.start()
         return job_id
 
-    def get(self, job_id: str) -> dict | None:
+    def get(self, job_id: str, *, user: str = DEFAULT_USER) -> dict | None:
+        """查工作進度。別人的工作一律當作不存在——逐字稿與分析結果都在裡面，
+        知道 job_id 就看得到等於沒有隔離。"""
         with self._lock:
             job = self._jobs.get(job_id)
-            return dict(job) if job else None
+            if job is None or job.get("user", DEFAULT_USER) != user:
+                return None
+            return dict(job)
 
     def wait(self, job_id: str, timeout: float | None = None) -> None:
         """等待工作結束（測試與除錯用）。"""
