@@ -66,6 +66,10 @@ class Settings:
     firebase_credentials_file: str | None = None  # service account JSON 檔路徑（本機用）
     # 有設就要求所有 /api/* 請求帶 Authorization: Bearer <token>；不設 = 不驗證（本機開發預設）
     api_token: str | None = None
+    # 單次上傳的大小上限（MB）。免費層雲端只有幾百 MB 的暫時性磁碟，寫爆之後
+    # 連 db.json 都存不進去，整個服務跟著停擺。2 小時的單聲道會議錄音約
+    # 60~120MB，500 已經很寬鬆；磁碟更小的方案就往下調
+    max_upload_mb: int = 500
 
 
 def get_settings() -> Settings:
@@ -112,4 +116,5 @@ def get_settings() -> Settings:
             or None
         ),
         api_token=os.environ.get("API_TOKEN") or None,
+        max_upload_mb=int(os.environ.get("MAX_UPLOAD_MB", "500")),
     )

@@ -7,7 +7,6 @@ from __future__ import annotations
 import json
 import logging
 import re
-import shutil
 import uuid
 from datetime import date
 from pathlib import Path
@@ -108,6 +107,66 @@ def validate_features(raw) -> set[str] | None:
 
 # 本次專用詞彙的上限：比全域詞彙表短很多，擋掉「整份貼上來」的誤用
 MAX_MEETING_TERMS = 50
+
+# 可以轉錄的副檔名。白名單而非黑名單：轉錄後端只吃得下音影格式，其餘的檔案
+# 落地也只是白佔磁碟，不如在寫入前就擋掉
+MEDIA_SUFFIXES = {
+    ".mp3", ".wav", ".m4a", ".aac", ".ogg", ".oga", ".opus", ".flac", ".wma", ".amr",
+    ".webm", ".mp4", ".m4v", ".mov", ".mkv", ".avi", ".wmv", ".flv", ".3gp",
+    ".mpeg", ".mpg", ".ts",
+}
+
+_UPLOAD_READ_SIZE = 1024 * 1024
+
+
+def validate_media_suffix(filename: str | None) -> str:
+    suffix = Path(filename or "").suffix.lower()
+    if suffix not in MEDIA_SUFFIXES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"不支援的檔案格式：{suffix or '（無副檔名）'}，請上傳音訊或影片檔",
+        )
+    return suffix
+
+
+def read_capped(src, max_bytes: int) -> bytes:
+    """整段讀進記憶體的上傳（即時聆聽的音訊段）同樣要有上限。落地的檔案至少
+    只佔磁碟，這裡佔的是行程記憶體——免費層更禁不起。多讀一個位元組就能分辨
+    「剛好等於上限」與「超過」，不必先把整份收下來才知道太大。"""
+    data = src.read(max_bytes + 1)
+    if len(data) > max_bytes:
+        raise HTTPException(
+            status_code=413,
+            detail=f"這段音訊超過 {max_bytes // (1024 * 1024)}MB 上限",
+        )
+    return data
+
+
+def save_upload(src, dest: Path, max_bytes: int) -> int:
+    """把上傳串流寫進 dest，超過上限就中止。回傳實際寫入的位元組數。
+
+    上限必須「邊寫邊檢查」：等檔案整份落地再看大小已經沒有意義，磁碟那時
+    早就被吃掉了。中途放棄時要把半截檔案刪掉，否則失敗的上傳反而變成
+    清不掉的垃圾。
+    """
+    written = 0
+    try:
+        with dest.open("wb") as out:
+            while chunk := src.read(_UPLOAD_READ_SIZE):
+                written += len(chunk)
+                if written > max_bytes:
+                    raise HTTPException(
+                        status_code=413,
+                        detail=f"檔案超過 {max_bytes // (1024 * 1024)}MB 上限，"
+                               "請先剪短或轉成音訊檔再上傳",
+                    )
+                out.write(chunk)
+        if written == 0:
+            raise HTTPException(status_code=400, detail="上傳的檔案是空的")
+    except BaseException:
+        dest.unlink(missing_ok=True)
+        raise
+    return written
 
 
 def validate_terms(raw) -> list[dict] | None:
@@ -337,6 +396,7 @@ def create_app(
         if rag_index is not None:
             rag_index.drop_meeting(meeting_id)
     uploads_dir = settings.data_dir / "tmp" / "uploads"
+    max_upload_bytes = settings.max_upload_mb * 1024 * 1024
     usage = UsageTracker(settings.data_dir / "output" / "usage.json")
 
     app = FastAPI(title="會議助手")
@@ -892,11 +952,11 @@ def create_app(
         correct = str(correct_typos or "").lower() in _truthy
         name_speakers_on = str(name_speakers or "").lower() in _truthy
 
-        suffix = Path(file.filename or "upload.bin").suffix or ".bin"
+        suffix = validate_media_suffix(file.filename)
         uploads_dir.mkdir(parents=True, exist_ok=True)
         dest = uploads_dir / f"{uuid.uuid4().hex[:12]}{suffix}"
-        with dest.open("wb") as out:  # 2 小時的影片可能數 GB，串流寫入不佔記憶體
-            shutil.copyfileobj(file.file, out)
+        # 2 小時的影片可能數 GB，串流寫入不佔記憶體；同時守住大小上限
+        save_upload(file.file, dest, max_upload_bytes)
 
         usage.record("media_upload")
         if correct:
@@ -941,10 +1001,11 @@ def create_app(
         offset: Optional[float] = Form(None),  # 本段在整場會議中的開始秒數
     ):
         suffix = Path(file.filename or "chunk.webm").suffix or ".webm"
+        data = read_capped(file.file, max_upload_bytes)
         usage.record("live_chunk")
         try:
             return live_manager.add_chunk(
-                session_id, file.file.read(), suffix=suffix, offset_seconds=offset
+                session_id, data, suffix=suffix, offset_seconds=offset
             )
         except SessionNotFound as exc:
             raise HTTPException(status_code=404, detail=str(exc))

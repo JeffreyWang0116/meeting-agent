@@ -798,3 +798,76 @@ def test_unexpected_analysis_failure_returns_clean_502(tmp_path):
     resp = TestClient(app).post("/api/meetings", json={"text": "測試"})
     assert resp.status_code == 502
     assert "ModuleNotFoundError" in resp.json()["detail"]
+
+
+# ---- 上傳防護：大小上限與檔案型別 ----
+# 原本 /api/media 直接把上傳串進磁碟，沒有任何上限。免費層雲端磁碟只有幾百 MB，
+# 一個手滑的大檔就能寫爆——寫爆之後連 db.json 都存不進去，整個服務停擺。
+
+@pytest.fixture
+def tiny_limit_client(tmp_path):
+    """上限縮到 1MB 的用戶端：測試不必真的產生 500MB 資料。"""
+    settings = Settings(gemini_api_key=None, data_dir=tmp_path, max_upload_mb=1)
+    store = LocalJsonStore(tmp_path / "db.json")
+    orchestrator = Orchestrator(
+        parser=ParserAgent(),
+        decision=DecisionAgent(generate=lambda prompt: valid_json()),
+        executor=ExecutorAgent(store),
+        notifier=NotifierAgent(tmp_path / "notifications"),
+    )
+    app = create_app(
+        settings, store=store, orchestrator=orchestrator, transcriber=FakeTranscriber()
+    )
+    return TestClient(app), tmp_path
+
+
+def test_media_upload_rejects_file_over_limit(tiny_limit_client):
+    client, tmp_path = tiny_limit_client
+    oversized = io.BytesIO(b"0" * (2 * 1024 * 1024))
+
+    resp = client.post(
+        "/api/media", files={"file": ("huge.wav", oversized, "audio/wav")}
+    )
+
+    assert resp.status_code == 413
+    assert "MB" in resp.json()["detail"]
+    # 半截檔案不能留在磁碟上——那正是要防的事
+    assert list((tmp_path / "tmp" / "uploads").glob("*")) == []
+
+
+def test_media_upload_accepts_file_within_limit(tiny_limit_client):
+    client, _ = tiny_limit_client
+    resp = client.post(
+        "/api/media",
+        files={"file": ("ok.wav", io.BytesIO(b"0" * 1024), "audio/wav")},
+    )
+    assert resp.status_code == 200
+    assert wait_for_job(client, resp.json()["job_id"])["status"] == "done"
+
+
+def test_media_upload_rejects_non_media_file(client):
+    resp = client.post(
+        "/api/media", files={"file": ("payload.exe", io.BytesIO(b"MZ"), "application/octet-stream")}
+    )
+    assert resp.status_code == 400
+    assert "格式" in resp.json()["detail"]
+
+
+def test_media_upload_rejects_empty_file(client):
+    resp = client.post(
+        "/api/media", files={"file": ("empty.wav", io.BytesIO(b""), "audio/wav")}
+    )
+    assert resp.status_code == 400
+
+
+def test_live_chunk_rejects_oversized_chunk(tiny_limit_client):
+    """即時聆聽的每段音訊是整段讀進記憶體的，上限比落地檔案更該守。"""
+    client, _ = tiny_limit_client
+    sid = client.post("/api/live/start").json()["session_id"]
+
+    resp = client.post(
+        f"/api/live/{sid}/chunk",
+        files={"file": ("c.webm", io.BytesIO(b"0" * (2 * 1024 * 1024)), "audio/webm")},
+    )
+
+    assert resp.status_code == 413

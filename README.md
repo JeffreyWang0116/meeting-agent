@@ -142,6 +142,10 @@ repo 已附 `Dockerfile`（含 ffmpeg）、`requirements-cloud.txt`（精簡依�
 
 本機開發預設不設 `API_TOKEN`，不會要求登入。
 
+#### 上傳大小上限
+
+`/api/media` 的單檔上限預設 500MB，`/api/live/*/chunk` 的每段音訊也套同一個上限；超過回 `413` 並且不留下半截檔案。免費方案的暫時性磁碟只有幾百 MB，寫爆之後連 `db.json` 都存不進去、整個服務跟著停擺，所以這是硬性的門檻而非建議值。磁碟更小的方案設 `MAX_UPLOAD_MB` 往下調即可（2 小時的單聲道會議錄音約 60~120MB）。
+
 #### （選填）用 Firestore 永久保存資料
 
 不設定就是本地 JSON，Render 重啟會清空；設定後所有會議與代辦改存 Google Firestore，重新部署也不會遺失。
