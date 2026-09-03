@@ -248,3 +248,100 @@ def test_ask_agent_empty_store_answers_without_llm(tmp_path):
     result = agent.ask("上次開會說什麼？")
     assert "沒有" in result["answer"]
     assert result["sources"] == []
+
+
+# ---- 多租戶隔離 ----
+# store 層每筆讀寫都帶 user，但 RAG 索引原本完全沒有 user 概念：sync 呼叫
+# store 時不帶 user、記錄裡也不存 user。接上真正的登入之後，A 問問題會檢索到
+# B 的會議內容——這是整條資料流唯一一個「加登入時不會自動安全」的破口。
+
+def make_two_user_store(tmp_path):
+    store = LocalJsonStore(tmp_path / "db.json")
+    mine = store.save_meeting(
+        make_analysis(), transcript="Kevin：API 由小明負責。", user="me"
+    )
+    theirs = store.save_meeting(
+        make_analysis(), transcript="Amy：資料庫下週遷移。", user="other"
+    )
+    return store, mine, theirs
+
+
+def test_sync_indexes_only_the_requesting_user(tmp_path):
+    store, mine, theirs = make_two_user_store(tmp_path)
+    index = RagIndex(tmp_path / "rag.json", embedder=FakeEmbedder())
+
+    index.sync(store, user="me")
+
+    found = {h["meeting_id"] for h in index.search("API 資料庫", k=50, user="me")}
+    assert found == {mine}
+    assert theirs not in found
+
+
+def test_search_never_returns_another_users_records(tmp_path):
+    store, mine, theirs = make_two_user_store(tmp_path)
+    index = RagIndex(tmp_path / "rag.json", embedder=FakeEmbedder())
+    index.sync(store, user="me")
+    index.sync(store, user="other")
+
+    # 兩人的向量存在同一份索引檔裡，但彼此看不到對方的
+    assert all(h["meeting_id"] == mine for h in index.search("資料庫", k=50, user="me"))
+    assert all(
+        h["meeting_id"] == theirs for h in index.search("API", k=50, user="other")
+    )
+    # 連指名對方的 meeting_id 也檢索不到
+    assert index.search("資料庫", k=50, meeting_ids=[theirs], user="me") == []
+
+
+def test_ask_agent_scopes_retrieval_to_the_user(tmp_path):
+    store, mine, theirs = make_two_user_store(tmp_path)
+    index = RagIndex(tmp_path / "rag.json", embedder=FakeEmbedder())
+    captured = {}
+
+    def fake_generate(prompt):
+        captured["prompt"] = prompt
+        return "答案"
+
+    agent = AskAgent(index=index, store=store, generate=fake_generate)
+    result = agent.ask("資料庫什麼時候遷移？", user="me")
+
+    assert "資料庫下週遷移" not in captured.get("prompt", "")
+    assert all(s["meeting_id"] == mine for s in result["sources"])
+
+
+def test_legacy_index_records_belong_to_default_user(tmp_path):
+    """改版前存下來的索引記錄沒有 user 欄位，要視為 DEFAULT_USER 的，
+    不能因為欄位不存在就整份查不到（等同無聲失效）。"""
+    import json
+
+    from app.stores.base import DEFAULT_USER
+
+    emb = FakeEmbedder()
+    (tmp_path / "rag.json").write_text(
+        json.dumps({
+            "dim": None,
+            "records": [{
+                "meeting_id": "old1",
+                "title": "舊會議",
+                "date": "2026-01-01",
+                "text": "API 由小明負責",
+                "vector": emb.embed(["API 由小明負責"])[0],
+            }],
+        }),
+        encoding="utf-8",
+    )
+    index = RagIndex(tmp_path / "rag.json", embedder=emb)
+
+    assert index.search("API", k=5, user=DEFAULT_USER)
+    assert index.search("API", k=5, user="someone-else") == []
+
+
+def test_reset_can_clear_only_one_user(tmp_path):
+    store, mine, theirs = make_two_user_store(tmp_path)
+    index = RagIndex(tmp_path / "rag.json", embedder=FakeEmbedder())
+    index.sync(store, user="me")
+    index.sync(store, user="other")
+
+    index.reset(user="me")  # 還原備份是單一使用者的事，不該炸掉別人的索引
+
+    assert index.search("API", k=50, user="me") == []
+    assert index.search("資料庫", k=50, user="other")

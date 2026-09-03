@@ -701,7 +701,9 @@ def create_app(
         """RAG 跨會議問答：檢索歷史會議片段，交給 Gemini 依據回答。"""
         usage.record("ask")
         try:
-            return ask_agent.ask(req.question, meeting_ids=req.meeting_ids)
+            return ask_agent.ask(
+                req.question, meeting_ids=req.meeting_ids, user=current_user()
+            )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc))
         except Exception as exc:  # 金鑰未設、配額爆掉…原因要透明
@@ -825,8 +827,8 @@ def create_app(
                 status_code=400, detail="備份格式不正確：需要 meetings 與 tasks 陣列"
             )
         store.import_all(data, user=current_user())
-        if rag_index is not None:  # 舊向量已不對應新資料，整份作廢待重建
-            rag_index.reset()
+        if rag_index is not None:  # 舊向量已不對應新資料，作廢待重建
+            rag_index.reset(current_user())
         return {
             "restored": {"meetings": len(data["meetings"]), "tasks": len(data["tasks"])}
         }

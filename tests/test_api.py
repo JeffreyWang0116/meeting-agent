@@ -17,6 +17,7 @@ from app.agents.parser_agent import ParserAgent
 from app.config import Settings
 from app.main import asset_version, create_app
 from app.orchestrator import Orchestrator
+from app.stores.base import DEFAULT_USER
 from app.stores.local_store import LocalJsonStore
 from tests.test_decision import valid_json
 
@@ -520,8 +521,9 @@ def test_ask_passes_meeting_ids_scope(tmp_path):
     captured = {}
 
     class ScopeAsk:
-        def ask(self, question, meeting_ids=None):
+        def ask(self, question, meeting_ids=None, user=DEFAULT_USER):
             captured["meeting_ids"] = meeting_ids
+            captured["user"] = user
             return {"answer": "ok", "sources": []}
 
     settings = Settings(gemini_api_key=None, data_dir=tmp_path)
@@ -531,11 +533,13 @@ def test_ask_passes_meeting_ids_scope(tmp_path):
     assert captured["meeting_ids"] == ["m1", "m2"]
     c.post("/api/ask", json={"question": "誰負責？"})
     assert captured["meeting_ids"] is None
+    # 檢索範圍必須綁在使用者身上，否則接上登入後會問到別人的會議
+    assert captured["user"] == DEFAULT_USER
 
 
 def test_ask_with_fake_agent_returns_answer_and_counts_usage(tmp_path):
     class FakeAsk:
-        def ask(self, question, meeting_ids=None):
+        def ask(self, question, meeting_ids=None, user=DEFAULT_USER):
             return {"answer": f"回答：{question}", "sources": [{"meeting_id": "m1"}]}
 
     settings = Settings(gemini_api_key=None, data_dir=tmp_path)
@@ -549,7 +553,7 @@ def test_ask_with_fake_agent_returns_answer_and_counts_usage(tmp_path):
 
 def test_ask_backend_failure_returns_502(tmp_path):
     class BrokenAsk:
-        def ask(self, question, meeting_ids=None):
+        def ask(self, question, meeting_ids=None, user=DEFAULT_USER):
             raise RuntimeError("429 RESOURCE_EXHAUSTED")
 
     settings = Settings(gemini_api_key=None, data_dir=tmp_path)

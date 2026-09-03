@@ -6,6 +6,10 @@
 
 向量索引存本地 JSON（會議量是數十場等級，暴力餘弦相似即可，
 不需要向量資料庫；8 月換 Firestore 時同介面替換）。
+
+多租戶：索引檔是全站共用的一份，所以每筆記錄都要蓋上 user，sync 讀 store
+時也要帶 user。少了這一層，接上登入之後 A 的問題會檢索到 B 的會議內容——
+store 那一層已經隔離了，這裡是整條資料流唯一會漏的地方。
 """
 from __future__ import annotations
 
@@ -16,6 +20,7 @@ from pathlib import Path
 
 from app.atomicio import atomic_write_text
 from app.gemini_keys import KeyPool, call_with_rotation
+from app.stores.base import DEFAULT_USER
 
 # 向量維度：gemini-embedding-001 預設 3072 維，每場會議的索引 JSON 會膨脹到
 # 數 MB。降到 768 維品質幾乎不變，索引小 4 倍、cosine 也快 4 倍。改這個值會
@@ -35,6 +40,12 @@ def chunk_text(text: str, size: int = 400, overlap: int = 80) -> list[str]:
         return [text]
     step = size - overlap
     return [text[i : i + size] for i in range(0, len(text), step)]
+
+
+def _record_user(record: dict) -> str:
+    """索引記錄的歸屬。改版前存下來的記錄沒有 user 欄位，與 store 的 owns()
+    一致視為 DEFAULT_USER 的——否則舊索引會整份無聲失效。"""
+    return record.get("user", DEFAULT_USER)
 
 
 def cosine(a: list[float], b: list[float]) -> float:
@@ -116,23 +127,25 @@ class RagIndex:
             ),
         )
 
-    def sync(self, store) -> int:
-        """把還沒索引的會議切塊向量化，回傳新增的片段數。"""
+    def sync(self, store, user: str = DEFAULT_USER) -> int:
+        """把這位使用者還沒索引的會議切塊向量化，回傳新增的片段數。"""
         with self._lock:
             indexed = {r["meeting_id"] for r in self._records}
             added = 0
-            for meeting in store.list_meetings():
+            for meeting in store.list_meetings(user=user):
                 if meeting["id"] in indexed:
                     continue
-                full = store.get_meeting(meeting["id"]) or meeting
+                full = store.get_meeting(meeting["id"], user=user) or meeting
                 info = meeting.get("meeting", {})
-                texts = [_summary_card(full, store.list_tasks(meeting_id=meeting["id"]))]
+                tasks = store.list_tasks(meeting_id=meeting["id"], user=user)
+                texts = [_summary_card(full, tasks)]
                 texts += chunk_text(full.get("transcript") or "")
                 vectors = self._embedder.embed(texts)
                 for text, vector in zip(texts, vectors):
                     self._records.append(
                         {
                             "meeting_id": meeting["id"],
+                            "user": user,
                             "title": info.get("title", ""),
                             "date": info.get("date", ""),
                             "text": text,
@@ -144,10 +157,17 @@ class RagIndex:
                 self._flush()
             return added
 
-    def reset(self) -> None:
-        """清空整份索引（還原備份後呼叫：舊會議的向量已不再對應現有資料）。"""
+    def reset(self, user: str | None = None) -> None:
+        """清空索引（還原備份後呼叫：舊會議的向量已不再對應現有資料）。
+
+        還原是單一使用者的動作，所以預設只清那個人的；user=None 才是整份清空。
+        """
         with self._lock:
-            self._records = []
+            self._records = (
+                []
+                if user is None
+                else [r for r in self._records if _record_user(r) != user]
+            )
             self._flush()
 
     def drop_meeting(self, meeting_id: str) -> int:
@@ -162,10 +182,16 @@ class RagIndex:
             return removed
 
     def search(
-        self, query: str, k: int = 4, meeting_ids: list[str] | None = None
+        self,
+        query: str,
+        k: int = 4,
+        meeting_ids: list[str] | None = None,
+        user: str = DEFAULT_USER,
     ) -> list[dict]:
         with self._lock:
-            records = list(self._records)
+            # 先擋掉別人的記錄，再套 meeting_ids——順序不能反過來，否則指名
+            # 別人的 meeting_id 就能把對方的片段撈出來
+            records = [r for r in self._records if _record_user(r) == user]
         if meeting_ids is not None:  # 限定檢索範圍（詢問時複選會議）
             allowed = set(meeting_ids)
             records = [r for r in records if r["meeting_id"] in allowed]
@@ -216,12 +242,19 @@ class AskAgent:
         self.top_k = top_k
         self._generate = generate or self._generate_with_gemini
 
-    def ask(self, question: str, meeting_ids: list[str] | None = None) -> dict:
+    def ask(
+        self,
+        question: str,
+        meeting_ids: list[str] | None = None,
+        user: str = DEFAULT_USER,
+    ) -> dict:
         question = question.strip()
         if not question:
             raise ValueError("問題不可為空")
-        self._index.sync(self._store)
-        hits = self._index.search(question, k=self.top_k, meeting_ids=meeting_ids)
+        self._index.sync(self._store, user=user)
+        hits = self._index.search(
+            question, k=self.top_k, meeting_ids=meeting_ids, user=user
+        )
         if not hits:
             message = (
                 "所選會議中沒有可檢索的內容，換個範圍或先分析一場會議吧。"
