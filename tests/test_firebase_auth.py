@@ -191,3 +191,29 @@ def test_bearer_token_parsing():
     assert bearer_token("abc") is None  # 少了 scheme
     assert bearer_token("Bearer   ") is None
     assert bearer_token(None) is None
+
+
+# ---- 半套設定 ----
+
+def test_login_without_admin_credentials_fails_loudly(tmp_path):
+    """只設了前端那組、沒給 service account 金鑰＝半套：驗 ID token 需要金鑰。
+
+    這時候絕對不能悄悄退回單人模式——那會讓人以為網站已經上鎖，實際上是全開
+    的，而且完全沒有徵兆。寧可啟動就失敗，訊息直接說少了哪個環境變數。
+    """
+    settings = Settings(
+        gemini_api_key=None,
+        data_dir=tmp_path,
+        firebase_web_api_key="web-key-123",
+        firebase_auth_domain="demo.firebaseapp.com",
+    )
+    store = LocalJsonStore(tmp_path / "db.json")
+    orchestrator = Orchestrator(
+        parser=ParserAgent(),
+        decision=DecisionAgent(generate=lambda p: valid_json()),
+        executor=ExecutorAgent(store),
+        notifier=NotifierAgent(tmp_path / "notifications"),
+    )
+
+    with pytest.raises(RuntimeError, match="FIREBASE_CREDENTIALS"):
+        create_app(settings, store=store, orchestrator=orchestrator)

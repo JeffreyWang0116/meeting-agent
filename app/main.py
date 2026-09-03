@@ -454,6 +454,14 @@ def create_app(
         if verify is verify_firebase_id_token:
             from app.firebase import ensure_app  # 驗簽需要已初始化的 firebase app
 
+            if not (settings.firebase_credentials_json or settings.firebase_credentials_file):
+                raise RuntimeError(
+                    "設了 Firebase 登入（FIREBASE_WEB_API_KEY / FIREBASE_AUTH_DOMAIN）"
+                    "卻少了 FIREBASE_CREDENTIALS_JSON 或 FIREBASE_CREDENTIALS_FILE："
+                    "驗證 ID token 需要 service account 金鑰。"
+                    "這裡刻意讓啟動失敗，而不是悄悄退回單人模式——後者會讓人"
+                    "以為網站已經上鎖，實際上是全開的，而且完全沒有徵兆。"
+                )
             ensure_app(
                 cred_json=settings.firebase_credentials_json,
                 cred_file=settings.firebase_credentials_file,

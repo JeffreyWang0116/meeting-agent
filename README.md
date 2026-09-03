@@ -146,6 +146,28 @@ repo 已附 `Dockerfile`（含 ffmpeg）、`requirements-cloud.txt`（精簡依�
 
 `/api/media` 的單檔上限預設 500MB，`/api/live/*/chunk` 的每段音訊也套同一個上限；超過回 `413` 並且不留下半截檔案。免費方案的暫時性磁碟只有幾百 MB，寫爆之後連 `db.json` 都存不進去、整個服務跟著停擺，所以這是硬性的門檻而非建議值。磁碟更小的方案設 `MAX_UPLOAD_MB` 往下調即可（2 小時的單聲道會議錄音約 60~120MB）。
 
+#### （選填）Google 登入：每個人一份自己的資料
+
+不開登入的話，這個網址是**單人模式**——所有人上傳的錄音、產生的任務、加的自訂詞彙都寫進同一份資料，彼此看得到。`API_TOKEN` 擋得住陌生人，但擋不住「拿到 token 的人互相看到對方的會議」，因為它是一把共用鑰匙，只分「進不進得來」，不分「你是誰」。
+
+要給多個人用（老師、同學各自試），就開 Google 登入：
+
+1. 到 [Firebase Console](https://console.firebase.google.com) 的專案 → **Authentication → 開始使用 → Sign-in method → 啟用 Google**
+2. **專案設定 → 一般設定 → 你的應用程式**，沒有網頁應用程式就新增一個，記下 `apiKey`、`authDomain`、`projectId`
+3. 在 Render 環境變數新增 `FIREBASE_WEB_API_KEY`、`FIREBASE_AUTH_DOMAIN`、`FIREBASE_PROJECT_ID`
+4. **同時確認 `FIREBASE_CREDENTIALS_JSON` 也有設**（見下一節）——驗證 ID token 需要 service account 金鑰
+5. **Authentication → Settings → 授權網域**加入你的 Render 網址，否則登入視窗會被擋下
+6. 重新部署。開啟網頁會先看到登入畫面，登入後右上角「設定」裡會顯示帳號與登出
+
+開啟後的行為：
+
+- 會議、任務、自訂詞彙、講者名冊、跨會議問答**全部依帳號分開**，A 問問題不會檢索到 B 的會議
+- 轉錄工作與即時聆聽 session 也綁帳號：知道別人的 id 也看不到內容
+- 換裝置、換瀏覽器都是同一份資料，不必手動保管任何鑰匙
+- 設了登入之後 `API_TOKEN` 就不再生效——共用鑰匙不該還能繞過帳號制
+
+> 只設前三個、忘了 `FIREBASE_CREDENTIALS_JSON` 的話，服務會**啟動失敗並說明少了什麼**。這是刻意的：悄悄退回單人模式會讓人以為網站已經上鎖，實際上是全開的，而且完全沒有徵兆。
+
 #### （選填）用 Firestore 永久保存資料
 
 不設定就是本地 JSON，Render 重啟會清空；設定後所有會議與代辦改存 Google Firestore，重新部署也不會遺失。

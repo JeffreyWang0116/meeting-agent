@@ -4,17 +4,32 @@ const PRIORITY_ZH = { high: "高", medium: "中", low: "低" };
 /* ==================================================================
    1. 共用基礎：API 認證、圖示、esc／錯誤橫幅等小工具
    ================================================================== */
-// ---- API 認證：伺服器設了 API_TOKEN 時，所有 /api/* 請求要帶 Authorization ----
+// ---- API 認證：所有 /api/* 請求要帶 Authorization ----
+// 兩種模式都走同一條路，差別只在憑證從哪來（見下面的 credentialSource）：
+//   Firebase 登入 — 每次請求取最新的 ID token（快過期時 SDK 會自動換新）
+//   共用 API Token — localStorage 裡使用者手動輸入的那串
 const API_TOKEN_KEY = "apiToken";
 const nativeFetch = window.fetch.bind(window);
+
+// 憑證來源。auth.js 必須在「模組求值當下」就裝上——其餘十二支模組一載入
+// 就開始抓資料，供應者若要等非同步初始化才裝好，第一輪請求會整批 401。
+// 回傳 { token, firebase }：token 是要帶的憑證，firebase 表示這是登入模式
+// （那時候的 401 是憑證過期，該重新登入，而不是跳出另一種模式的輸入框）。
+// 供應者可以慢慢 resolve，請求會排隊等它，不會先撞 401 讓畫面閃過「載不到資料」
+let credentialSource = null;
+function setCredentialSource(fn) { credentialSource = fn; }
+
 window.fetch = async (input, init = {}) => {
   const url = typeof input === "string" ? input : input.url;
+  let cred = null;
   if (url.startsWith("/api/")) {
-    const token = localStorage.getItem(API_TOKEN_KEY);
-    if (token) init = { ...init, headers: { ...(init.headers || {}), Authorization: `Bearer ${token}` } };
+    cred = credentialSource
+      ? await credentialSource()
+      : { token: localStorage.getItem(API_TOKEN_KEY) };
+    if (cred?.token) init = { ...init, headers: { ...(init.headers || {}), Authorization: `Bearer ${cred.token}` } };
   }
   const resp = await nativeFetch(input, init);
-  if (resp.status === 401 && url.startsWith("/api/")) {
+  if (resp.status === 401 && url.startsWith("/api/") && !cred?.firebase) {
     const entered = window.prompt("此伺服器需要 API Token 才能使用，請輸入：");
     if (entered) {
       localStorage.setItem(API_TOKEN_KEY, entered.trim());
@@ -23,6 +38,32 @@ window.fetch = async (input, init = {}) => {
   }
   return resp;
 };
+
+// ---- 受保護的下載 ----
+// <a href="/api/…" download> 是瀏覽器直接送出的，帶不到 Authorization——只要
+// 伺服器有任何一種認證，那幾個下載鍵就只會拿到 401。改成走上面的 fetch（會
+// 補上憑證）再把回應存成檔案，使用者感覺不出差別。
+document.addEventListener("click", async e => {
+  const link = e.target.closest('a[download][href^="/api/"]');
+  if (!link) return;
+  e.preventDefault();
+  const href = link.getAttribute("href");
+  try {
+    const resp = await fetch(href);
+    if (!resp.ok) throw new Error(`伺服器回應 ${resp.status}`);
+    const blob = await resp.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    // 檔名以伺服器給的 Content-Disposition 為準，沒有就退回網址最後一段
+    a.download = /filename="([^"]+)"/.exec(resp.headers.get("content-disposition") || "")?.[1]
+      || href.split("/").pop();
+    a.click();
+    URL.revokeObjectURL(url);
+  } catch (err) {
+    showError(`下載失敗：${err.message}`);
+  }
+});
 
 // ---- 圖示：Lucide，全部收在 /static/icons.svg 雪碧圖（授權說明見該檔開頭） ----
 // 用 <use> 引用 symbol：路徑資料只存一份，樣式（大小、stroke-width、顏色）
@@ -130,4 +171,4 @@ async function jsonOrThrow(resp) {
   return body;
 }
 
-export { $, API_TOKEN_KEY, PAGERS, PAGE_SIZE, PRIORITY_ZH, REFRESHERS, clearError, esc, icon, jsonOrThrow, loadFail, nativeFetch, pageNo, paginate, registerPager, registerRefresher, renderPager, showError, showNotice, skelBlocks, skelLine, skelRows };
+export { $, API_TOKEN_KEY, PAGERS, PAGE_SIZE, PRIORITY_ZH, REFRESHERS, clearError, esc, icon, jsonOrThrow, loadFail, nativeFetch, pageNo, paginate, registerPager, registerRefresher, renderPager, setCredentialSource, showError, showNotice, skelBlocks, skelLine, skelRows };

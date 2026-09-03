@@ -1018,3 +1018,26 @@
   .section-card .empty-note { font-size: .82rem; }
   /* 摘要之後多了一節，圖示配色的 nth-of-type 要跟著補一個 */
   #result h3.sub:nth-of-type(7) > svg { color: var(--faint); }
+
+  /* ---- 登入閘門（伺服器啟用 Firebase Auth 時） ---- */
+  /* 蓋滿整個畫面而不是做成彈窗：在確定「你是誰」之前，底下那些會議紀錄
+     連一眼都不該露出來。沒接登入的部署永遠不會看到這一層。 */
+  .login-gate {
+    position: fixed; inset: 0; z-index: 200;
+    display: flex; align-items: center; justify-content: center; padding: 24px;
+    background: var(--bg);
+  }
+  .login-gate[hidden] { display: none; }
+  .login-card {
+    display: flex; flex-direction: column; align-items: center; gap: 14px;
+    width: min(380px, 100%); text-align: center;
+    background: var(--card-2); border: 1px solid var(--border-strong);
+    border-radius: var(--radius); padding: 34px 28px;
+  }
+  .login-card > svg:first-child { width: 30px; height: 30px; color: var(--accent); }
+  .login-card h2 {
+    margin: 0; font-size: 1.3rem; font-weight: 300;
+    letter-spacing: -.02em; color: var(--ink);
+  }
+  .login-hint { margin: 0; font-size: .86rem; line-height: 1.7; color: var(--muted); }
+  .login-error { margin: 0; font-size: .82rem; color: var(--high); min-height: 1.2em; }

@@ -19,6 +19,21 @@
 <!-- 版面：左側固定導覽（app shell）＋右側單一工作區。
      每個 .view 是一個獨立畫面，同時只顯示一個，由 app.js 的 showView() 切換。
      圖示一律用 <use> 引 /static/icons.svg 的 Lucide symbol，不再內嵌 path。 -->
+<!-- 登入閘門：伺服器啟用 Firebase Auth 時才會由 js/auth.js 打開。
+     沒接登入的部署（本機開發、共用 API Token）永遠看不到它。 -->
+<div class="login-gate" id="loginGate" hidden>
+  <div class="login-card">
+    <svg class="i-lg" aria-hidden="true"><use href="/static/icons.svg#mic"/></svg>
+    <h2>會議助手</h2>
+    <p class="login-hint">用 Google 帳號登入。你的會議紀錄、任務、詞彙表與講者名冊只有你看得到。</p>
+    <button class="primary" id="loginBtn">
+      <svg class="i-sm" aria-hidden="true"><use href="/static/icons.svg#user"/></svg>
+      用 Google 登入
+    </button>
+    <p class="login-error" id="loginError" role="alert"></p>
+  </div>
+</div>
+
 <div class="app">
   <aside class="sidebar">
     <div class="side-brand">
@@ -69,6 +84,14 @@
             設定
           </button>
           <div class="settings-menu" id="settingsMenu">
+            <div class="set-row" id="accountRow" hidden>
+              <span class="set-label">
+                <svg class="i-sm" aria-hidden="true"><use href="/static/icons.svg#user"/></svg>
+                <span id="accountName">—</span>
+              </span>
+              <button class="ghost" id="signOutBtn">登出</button>
+            </div>
+            <hr class="set-sep" id="accountSep" hidden>
             <div class="set-row">
               <span class="set-label">
                 <svg class="i-sm" aria-hidden="true"><use href="/static/icons.svg#moon"/></svg>

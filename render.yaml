@@ -26,5 +26,17 @@ services:
         sync: false
       # 強烈建議設定：不設的話這個公開網址任何人都能讀寫/刪除全部資料
       # （例如 /api/backup、/api/restore）。填一串隨機字串即可。
+      # 若改用下面的 Google 登入，這把共用鑰匙就會被登入取代（不再生效）。
       - key: API_TOKEN
+        sync: false
+      # Google 登入（選填，但要給別人試用就該開）：填了這三個就啟用帳號制，
+      # 每個人只看得到自己的會議與任務。值在 Firebase Console →
+      # 專案設定 → 一般設定 → 你的應用程式；都是公開值。
+      # 啟用時 FIREBASE_CREDENTIALS_JSON 也必須一起填（驗 ID token 要用），
+      # 少了會直接啟動失敗，不會悄悄退回單人模式。
+      - key: FIREBASE_WEB_API_KEY
+        sync: false
+      - key: FIREBASE_AUTH_DOMAIN
+        sync: false
+      - key: FIREBASE_PROJECT_ID
         sync: false
