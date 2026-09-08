@@ -118,11 +118,48 @@ let liveSegIndex = 0, liveSentCount = 0, liveWakeLock = null, liveStarting = fal
 // 和麥克風混成一條軌一起錄。音源來源由 sysSourceValue() 決定：
 //   deviceId → 直接用 getUserMedia 錄該回放裝置（立體聲混音等），免跳分享視窗；
 //   "display" → 用 getDisplayMedia 分享畫面擷取（相容性最高，但每次會跳分享視窗）。
+// 常見「App 內建瀏覽器」的 UA 特徵。這些 webview（Android 上尤其）多半直接封鎖
+// 麥克風、連權限詢問都不跳，症狀就是「按了開始聆聽卻什麼都沒發生」。要引導使用者
+// 改用系統瀏覽器（Chrome / Safari）開啟才拿得到麥克風。
+function inAppBrowserName() {
+  const ua = navigator.userAgent || "";
+  if (/\bLine\//i.test(ua)) return "LINE";
+  if (/FBAN|FBAV|FB_IAB/i.test(ua)) return "Facebook";
+  if (/Instagram/i.test(ua)) return "Instagram";
+  if (/\bMessenger\b/i.test(ua)) return "Messenger";
+  if (/MicroMessenger/i.test(ua)) return "WeChat";
+  return null;
+}
+
+function openInBrowserHint() {
+  const app = inAppBrowserName();
+  if (!app) return "";
+  return `你正在 ${app} 的內建瀏覽器裡開啟，這類瀏覽器通常直接封鎖麥克風（所以不會跳出權限詢問）。`
+    + "請點畫面右上角的「⋯」選單，選「用其他瀏覽器開啟」，或把網址複製到 Chrome 再試。";
+}
+
+// getUserMedia 的錯誤依類型給可操作說明。內建瀏覽器是根因就先講它；否則手機上
+// 最常見的是「之前拒絕過就不再自動跳詢問」，只回一句籠統的話會讓人不知道去哪開。
+function micPermissionMessage(e) {
+  const inApp = openInBrowserHint();
+  if (inApp) return inApp;
+  const name = (e && e.name) || "";
+  if (name === "NotAllowedError" || name === "SecurityError")
+    return "麥克風權限被拒或尚未允許。手機一旦拒絕過就不會再自動跳出詢問，要手動開："
+      + "iPhone 到「設定 → Safari → 麥克風」或點網址列左側的「ㄗA」圖示改成允許；"
+      + "Android Chrome 點網址列的鎖頭 → 權限 → 麥克風，改成允許後重新整理，再按一次「開始聆聽」。";
+  if (name === "NotFoundError" || name === "OverconstrainedError")
+    return "找不到可用的麥克風。請確認手機麥克風沒有被停用或被系統佔用。";
+  if (name === "NotReadableError")
+    return "麥克風正被其他 App 佔用（通話、錄音、相機等）。關掉那個 App 再回來重試。";
+  return "無法取得麥克風：" + ((e && e.message) || e) + "（請在瀏覽器／系統設定允許此網站使用麥克風）";
+}
+
 async function buildLiveStream(withSystemAudio) {
   try {
     liveMicStream = await navigator.mediaDevices.getUserMedia({ audio: true });
   } catch (e) {
-    throw new Error("無法取得麥克風權限：" + e.message + "（請到瀏覽器設定允許此網站使用麥克風）");
+    throw new Error(micPermissionMessage(e));
   }
   if (!withSystemAudio) return liveMicStream;
 
@@ -550,8 +587,16 @@ $("btnLiveStart").addEventListener("click", async () => {
     showError("聲音樣本還在錄製中，請等這一段錄完再開始聆聽。");
     return;
   }
+  // App 內建瀏覽器（LINE/FB/IG…）通常直接封鎖麥克風、連詢問都不跳——先擋下並
+  // 引導改用系統瀏覽器，免得使用者按了「開始聆聽」卻毫無反應、不知所措
+  const inAppMsg = openInBrowserHint();
+  if (inAppMsg) { showError(inAppMsg); return; }
+  if (!window.isSecureContext) {
+    showError("麥克風只在 https:// 加密連線（或 localhost）下可用。請用 https:// 開頭的網址開啟再試。");
+    return;
+  }
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-    showError("此瀏覽器無法使用麥克風：麥克風只在 https:// 加密連線（或 localhost）下可用，請確認網址是 https 開頭");
+    showError("這個環境取不到麥克風。iPhone 請直接用 Safari 開啟網址（有些情況下從主畫面捷徑／內嵌瀏覽器開啟會擋掉麥克風），Android 請用 Chrome 開啟。");
     return;
   }
   try {
