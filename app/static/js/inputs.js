@@ -419,7 +419,10 @@ $("btnLiveStart").addEventListener("click", async () => {
     liveStream = await buildLiveStream(wantSystemAudio());
   } catch (e) { releaseLiveStreams(); showError(e.message); return; }
   try {
-    liveSessionId = (await api.liveStart({ translate_to: $("liveTranslate").value || null })).session_id;
+    liveSessionId = (await api.liveStart({
+      translate_to: $("liveTranslate").value || null,
+      terms: meetingTerms(),  // 會前打的詞彙要進每段轉錄，不是只進最後的分析
+    })).session_id;
   } catch (e) { releaseLiveStreams(); showError(e.message); return; }
 
   liveRecording = true;

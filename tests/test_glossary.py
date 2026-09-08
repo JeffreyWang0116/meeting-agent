@@ -1,7 +1,7 @@
 """自訂詞彙表：驗證、prompt 片段產生，以及透過 store 持久化。"""
 import pytest
 
-from app.glossary import Glossary, glossary_prompt_line
+from app.glossary import Glossary, glossary_prompt_line, terms_hint_line
 from app.stores.local_store import LocalJsonStore
 
 
@@ -46,6 +46,22 @@ def test_prompt_line_formats_terms_with_notes():
     )
     assert line == "王霖翔（人名）、TaskHub"
     assert glossary_prompt_line([]) == ""
+
+
+def test_terms_hint_line_is_a_full_sentence_for_the_transcriber():
+    """轉錄用的詞彙提示。措辭與 GeminiTranscriber.build_prompt 裡那句一致，
+    因為兩邊講的是同一件事——只是一個走全域詞彙表、一個走本次專用詞彙。"""
+    line = terms_hint_line([{"term": "Kessel 專案", "note": ""}])
+    assert "Kessel 專案" in line
+    assert "相近發音" in line
+    # 詞彙表不可以影響講者標籤：轉錄階段一律輸出代號
+    assert "代號" in line
+
+
+def test_terms_hint_line_is_empty_without_terms():
+    """沒有詞彙就不要往 prompt 塞空句子——多一句廢話就多一分干擾。"""
+    assert terms_hint_line([]) == ""
+    assert terms_hint_line(None) == ""
 
 
 # ---- 人名合併：講者名冊歸入詞彙表 ----

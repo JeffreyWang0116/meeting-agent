@@ -15,7 +15,7 @@ import time
 from pathlib import Path
 
 from app.gemini_keys import KeyPool, call_with_rotation
-from app.glossary import glossary_prompt_line
+from app.glossary import terms_hint_line
 from app.transcription import media
 from app.transcription.segments import (
     chunk_hint,
@@ -137,15 +137,12 @@ class GeminiTranscriber:
         self.strong_whole_threshold = strong_whole_threshold
 
     def build_prompt(self, hint: str | None = None) -> str:
-        prompt = _TRANSCRIBE_PROMPT
-        terms = glossary_prompt_line(self._glossary() if self._glossary else [])
-        if terms:
-            # 詞彙表含人名，要明講它只管內文用字，否則模型會拿它當講者標籤用
-            prompt += (
-                f"已知詞彙表（聽到相近發音時，人名與專有名詞一律採用以下寫法）：{terms}。"
-                "詞彙表只影響內文用字，講者標籤仍一律使用代號。"
-            )
-        if hint:  # 跨段講者一致性提示（即時聆聽逐段轉錄時帶入）
+        # 詞彙表含人名，措辭要明講它只管內文用字，否則模型會拿它當講者標籤用；
+        # 那句話與「本次專用詞彙」共用，集中在 terms_hint_line
+        prompt = _TRANSCRIBE_PROMPT + terms_hint_line(
+            self._glossary() if self._glossary else []
+        )
+        if hint:  # 跨段講者一致性提示＋本次專用詞彙（即時聆聽逐段轉錄時帶入）
             prompt += hint
         return prompt
 

@@ -144,6 +144,43 @@ def test_known_speakers_passed_as_hint_to_next_chunk(tmp_path):
     assert tr.hints[1] and "講者A" in tr.hints[1]  # 第二段帶入已知講者
 
 
+# ---- 本次專用詞彙：會前打的詞要進轉錄，不能只進分析 ----
+
+def test_meeting_terms_reach_the_transcriber_from_the_first_chunk(tmp_path):
+    """會前打的專案代號要在「聽」的當下就生效。
+
+    只餵給分析的話，逐字稿裡已經是聽錯的字，分析階段再統一寫法也救不回來——
+    使用者看到的逐字稿仍然是錯的。
+    """
+    tr = HintRecordingTranscriber(["講者A：大家好"])
+    mgr = LiveSessionManager(tr, tmp_path)
+    sid = mgr.start(terms=[{"term": "Kessel 專案", "note": ""}])
+    mgr.add_chunk(sid, b"a")
+    assert tr.hints[0] and "Kessel 專案" in tr.hints[0]
+
+
+def test_meeting_terms_and_speaker_hint_coexist(tmp_path):
+    """兩種提示是不同面向（用字 vs 講者標籤），第二段起要同時帶上。"""
+    tr = HintRecordingTranscriber(["講者A：大家好", "講者B：你好"])
+    mgr = LiveSessionManager(tr, tmp_path)
+    sid = mgr.start(terms=[{"term": "Kessel 專案", "note": ""}])
+    mgr.add_chunk(sid, b"a")
+    mgr.add_chunk(sid, b"b")
+    assert "講者A" in tr.hints[1] and "Kessel 專案" in tr.hints[1]
+
+
+def test_terms_are_scoped_to_their_own_session(tmp_path):
+    """詞彙跟著 session 走：A 的專案代號不可以混進 B 那場的轉錄提示。"""
+    tr = HintRecordingTranscriber(["x", "y"])
+    mgr = LiveSessionManager(tr, tmp_path)
+    with_terms = mgr.start(terms=[{"term": "Kessel 專案", "note": ""}])
+    without = mgr.start()
+    mgr.add_chunk(without, b"a")
+    assert tr.hints[0] is None
+    mgr.add_chunk(with_terms, b"b")
+    assert "Kessel 專案" in tr.hints[1]
+
+
 class GatedTranscriber:
     """轉錄結果＝檔案內容；每段先等對應的閘門開啟，好在測試裡控制完成順序。"""
 

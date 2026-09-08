@@ -25,6 +25,24 @@ def glossary_prompt_line(terms: list[dict]) -> str:
     )
 
 
+def terms_hint_line(terms: list[dict] | None, label: str = "已知詞彙表") -> str:
+    """給轉錄 prompt 用的完整句子（空表回傳空字串）。
+
+    全域詞彙表由 build_prompt 直接帶上，本次專用詞彙則走 transcribe() 的 hint
+    參數——兩條路徑講的是同一件事，措辭集中在這裡，才不會改了一邊忘了另一邊。
+
+    「只影響內文用字，講者標籤仍用代號」這句不能省：詞彙表裡有人名，模型看到
+    人名就會想拿它當講者標籤用，而轉錄階段一律只輸出代號（見 _TRANSCRIBE_PROMPT）。
+    """
+    line = glossary_prompt_line(terms or [])
+    if not line:
+        return ""
+    return (
+        f"{label}（聽到相近發音時，人名與專有名詞一律採用以下寫法）：{line}。"
+        "詞彙表只影響內文用字，講者標籤仍一律使用代號。"
+    )
+
+
 def clean_terms(terms: list[dict], max_terms: int = MAX_TERMS) -> list[dict]:
     """歸一化詞彙清單：去空白、去重、擋掉過長。
     全域詞彙表與「本次專用詞彙」共用同一套規則，只是上限不同。"""

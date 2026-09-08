@@ -320,6 +320,7 @@ class TaskCreateRequest(BaseModel):
 
 class LiveStartRequest(BaseModel):
     translate_to: Optional[str] = None  # "en" / "zh"：逐段即時翻譯
+    terms: Optional[list[dict]] = None  # 本次專用詞彙：進每段轉錄的提示
 
 
 class TranslateRequest(BaseModel):
@@ -1101,7 +1102,10 @@ def create_app(
             )
         return {
             "session_id": live_manager.start(
-                translate_to=translate_to, user=current_user()
+                translate_to=translate_to,
+                user=current_user(),
+                # 會前打的詞彙要在「聽」的當下就生效，不能只留給事後分析
+                terms=validate_terms(req.terms if req else None),
             )
         }
 

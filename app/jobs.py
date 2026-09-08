@@ -11,6 +11,7 @@ import uuid
 from datetime import date
 from pathlib import Path
 
+from app.glossary import terms_hint_line
 from app.stores.base import DEFAULT_USER
 from app.transcription import media
 
@@ -123,7 +124,14 @@ class MediaJobManager:
                 parts.append(text)
                 self._update(job_id, progress=fraction, transcript="".join(parts).strip())
 
-            transcript = self._transcriber.transcribe(path, on_progress=on_progress)
+            # 本次專用詞彙走 hint 送進轉錄，「聽」的當下就用對的寫法；
+            # 沒有詞彙時不帶這個參數，呼叫形狀與加這個功能之前一模一樣
+            hint = terms_hint_line(terms, "本次會議專用詞彙")
+            transcript = (
+                self._transcriber.transcribe(path, on_progress=on_progress, hint=hint)
+                if hint
+                else self._transcriber.transcribe(path, on_progress=on_progress)
+            )
             if not transcript.strip():
                 self._update(
                     job_id,

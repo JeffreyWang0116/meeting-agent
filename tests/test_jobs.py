@@ -39,6 +39,18 @@ class FakeOrchestrator:
         }
 
 
+class HintRecordingTranscriber(FakeTranscriber):
+    """記下轉錄時收到的 hint，驗證本次專用詞彙有沒有真的送到轉錄那一層。"""
+
+    def __init__(self, text="轉錄結果"):
+        super().__init__(text)
+        self.hints = []
+
+    def transcribe(self, path, on_progress=None, hint=None):
+        self.hints.append(hint)
+        return super().transcribe(path, on_progress)
+
+
 @pytest.fixture
 def audio_file(tmp_path):
     f = tmp_path / "meeting.wav"
@@ -248,3 +260,24 @@ def test_job_failure_writes_a_traceback_to_the_log(tmp_path, audio_file, caplog)
     record = next(r for r in caplog.records if r.name == "app.jobs")
     assert record.exc_info is not None, "要留 traceback，只記一行訊息查不出是哪裡爆的"
     assert job_id in record.getMessage()
+
+
+# ---- 本次專用詞彙要進轉錄，不能只進分析 ----
+
+def test_meeting_terms_reach_the_transcriber(tmp_path, audio_file):
+    """上傳檔案時打的專用詞彙，要在轉錄當下就生效。
+
+    terms 本來就一路傳到 submit 了，但只餵給分析——逐字稿裡的字仍然是聽錯的。
+    """
+    tr = HintRecordingTranscriber()
+    mgr = MediaJobManager(tr, FakeOrchestrator(), tmp_path)
+    mgr.wait(mgr.submit(audio_file, terms=[{"term": "Kessel 專案", "note": ""}]), timeout=5)
+    assert tr.hints and "Kessel 專案" in tr.hints[0]
+
+
+def test_no_terms_means_no_hint_at_all(tmp_path, audio_file):
+    """沒打詞彙就別多送一個空提示——維持與加這個功能之前完全一樣的呼叫。"""
+    tr = HintRecordingTranscriber()
+    mgr = MediaJobManager(tr, FakeOrchestrator(), tmp_path)
+    mgr.wait(mgr.submit(audio_file), timeout=5)
+    assert tr.hints == [None]

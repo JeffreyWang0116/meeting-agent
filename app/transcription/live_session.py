@@ -26,6 +26,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
 
+from app.glossary import terms_hint_line
 from app.stores.base import DEFAULT_USER
 from app.transcription.segments import (
     TIME_PREFIX_RE,
@@ -50,6 +51,7 @@ class LiveSession:
     translate_to: str | None = None  # "en" / "zh"：逐段即時翻譯的目標語言
     last_active: float = 0.0  # 單調時鐘：最後一次收到音訊段（或結束）的時間
     user: str = DEFAULT_USER  # 誰開的這場聆聽
+    terms: list[dict] = field(default_factory=list)  # 本次專用詞彙（進轉錄提示）
 
 
 class LiveSessionManager:
@@ -71,7 +73,10 @@ class LiveSessionManager:
         self._lock = threading.Lock()
 
     def start(
-        self, translate_to: str | None = None, user: str = DEFAULT_USER
+        self,
+        translate_to: str | None = None,
+        user: str = DEFAULT_USER,
+        terms: list[dict] | None = None,
     ) -> str:
         session_id = uuid.uuid4().hex[:12]
         session_dir = self._work_dir / session_id
@@ -84,6 +89,7 @@ class LiveSessionManager:
                 translate_to=translate_to,
                 last_active=self._now(),
                 user=user,
+                terms=list(terms or []),
             )
         return session_id
 
@@ -122,7 +128,7 @@ class LiveSessionManager:
             index = session.chunk_count
             session.chunk_count += 1
             session.parts.append(None)
-            hint = speaker_hint(session.speakers)
+            hint = _chunk_hint(session)
 
         chunk_path = session.dir / f"chunk_{index:03d}{suffix}"
         chunk_path.write_bytes(data)
@@ -185,6 +191,19 @@ class LiveSessionManager:
         # 錄音段檔案不再需要，刪掉整個 session 目錄釋放磁碟（雲端暫時性磁碟很小）
         shutil.rmtree(session.dir, ignore_errors=True)
         return transcript
+
+
+def _chunk_hint(session: LiveSession) -> str | None:
+    """這一段轉錄要帶的提示：跨段講者一致性 ＋ 本次專用詞彙。
+
+    兩者是不同面向——前者管講者標籤別重新編號，後者管內文用字別聽錯——所以
+    併著送。都沒有時回 None（而不是空字串），_transcribe 才會走「不帶 hint」
+    那條路，行為與加詞彙功能之前完全一致。
+    """
+    combined = (speaker_hint(session.speakers) or "") + terms_hint_line(
+        session.terms, "本次會議專用詞彙"
+    )
+    return combined or None
 
 
 def _join(parts: list[str | None]) -> str:
