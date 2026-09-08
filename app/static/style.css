@@ -256,6 +256,8 @@
   }
   .enroll-row .enroll-state { color: var(--faint); font-size: .8rem; flex: none; min-width: 4.5em; text-align: right; }
   .enroll-row.done .enroll-state { color: var(--accent); }
+  /* 錄到的樣本幾乎沒有聲音：紅字明講，否則使用者要等整場開完、分析不出名字才發現 */
+  .enroll-row.silent .enroll-state { color: var(--danger, #d9534f); }
 
   /* ---- 訊息橫幅（錯誤／一般提示） ---- */
   .banner {

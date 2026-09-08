@@ -489,10 +489,51 @@ function syncEnrollPeople() {
   enrollPeople.length = n;  // 人數調少時，多出來的樣本一併丟掉
 }
 
+// 樣本幾乎沒有聲音時要當場擋下來。收到靜音（裝置選錯、麥克風被靜音、離太遠）
+// 的樣本一樣有檔案大小，光看 blob.size 看不出來；使用者會一路開完整場會，
+// 直到分析結果沒有半個名字才發現白錄。RMS 0.01 約 -40dBFS，正常說話遠高於此。
+const ENROLL_SILENT_RMS = 0.01;
+
+async function isTooQuiet(blob) {
+  try {
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    if (!Ctx) return false;  // 測不了就別擋人，交給後端比對去判斷
+    const ctx = new Ctx();
+    const buf = await ctx.decodeAudioData(await blob.arrayBuffer());
+    const data = buf.getChannelData(0);
+    let sum = 0;
+    for (let i = 0; i < data.length; i++) sum += data[i] * data[i];
+    ctx.close();
+    return Math.sqrt(sum / data.length) < ENROLL_SILENT_RMS;
+  } catch {
+    return false;  // 這個瀏覽器解不了這個編碼就不擋
+  }
+}
+
+// 試聽：錄完只寫「已錄好」的話，使用者沒辦法確認到底錄到了什麼
+function playEnrollment(index) {
+  const p = enrollPeople[index];
+  if (!p || !p.blob) return;
+  const url = URL.createObjectURL(p.blob);
+  const audio = new Audio(url);
+  const cleanup = () => URL.revokeObjectURL(url);
+  audio.onended = cleanup;
+  audio.onerror = () => { cleanup(); showError("無法播放這段樣本，建議重錄。"); };
+  audio.play().catch(() => { cleanup(); showError("無法播放這段樣本，建議重錄。"); });
+}
+
+function clearEnrollment(index) {
+  const p = enrollPeople[index];
+  if (!p) return;
+  p.blob = null;
+  p.silent = false;
+  renderEnrollRows();
+}
+
 function renderEnrollRows() {
   syncEnrollPeople();
   $("liveEnrollList").innerHTML = enrollPeople.map((p, i) => `
-    <div class="enroll-row${p.blob ? " done" : ""}">
+    <div class="enroll-row${p.blob ? " done" : ""}${p.silent ? " silent" : ""}">
       <span class="enroll-no">${i + 1}.</span>
       <input type="text" id="enrollName${i}" maxlength="20"
              placeholder="第 ${i + 1} 位的姓名" value="${esc(p.name)}">
@@ -500,18 +541,29 @@ function renderEnrollRows() {
         <svg class="i-sm" aria-hidden="true"><use href="/static/icons.svg#mic"/></svg>
         ${p.blob ? "重錄" : "錄音"}
       </button>
-      <span class="enroll-state" id="enrollState${i}">${p.blob ? "已錄好" : "未錄"}</span>
+      ${p.blob ? `
+      <button class="ghost" type="button" id="enrollPlay${i}" title="試聽這段樣本">試聽</button>
+      <button class="ghost" type="button" id="enrollDel${i}" title="刪掉這段樣本">清除</button>` : ""}
+      <span class="enroll-state" id="enrollState${i}">${
+        p.silent ? "幾乎沒聲音" : p.blob ? "已錄好" : "未錄"
+      }</span>
     </div>`).join("");
   enrollPeople.forEach((p, i) => {
     // 姓名寫回資料模型，重繪（換人數、錄完音）時才不會把使用者打的字弄丟
     $(`enrollName${i}`).addEventListener("input", e => { p.name = e.target.value; });
     $(`enrollRec${i}`).addEventListener("click", () => recordEnrollment(i));
+    if (p.blob) {
+      $(`enrollPlay${i}`).addEventListener("click", () => playEnrollment(i));
+      $(`enrollDel${i}`).addEventListener("click", () => clearEnrollment(i));
+    }
   });
   const ready = enrollPeople.filter(p => p.name.trim() && p.blob).length;
+  const silent = enrollPeople.filter(p => p.blob && p.silent).length;
   $("liveEnrollHint").textContent =
     `每人錄約 ${ENROLL_SECONDS} 秒，說一兩句話即可（例如自我介紹）。`
     + `目前 ${ready} / ${enrollPeople.length} 位已備妥；`
-    + "沒填姓名或沒錄音的人會被略過，那些人在逐字稿中維持講者代號。";
+    + "沒填姓名或沒錄音的人會被略過，那些人在逐字稿中維持講者代號。"
+    + (silent ? `　⚠ 有 ${silent} 位錄到的內容幾乎沒有聲音，建議按「試聽」確認後重錄。` : "");
 }
 
 // 固定錄 ENROLL_SECONDS 秒後自動停止：比「按開始再按停止」少一半操作，
@@ -541,10 +593,14 @@ async function recordEnrollment(index) {
     showError("錄製聲音樣本時發生錯誤，請再試一次。");
     if (rec.state !== "inactive") rec.stop();  // 觸發 onstop 收尾，別卡在錄音中
   };
-  rec.onstop = () => {
+  rec.onstop = async () => {
     stream.getTracks().forEach(t => t.stop());  // 立刻還回麥克風，別佔著
     const blob = new Blob(chunks, { type: rec.mimeType });
-    if (blob.size && enrollPeople[index]) enrollPeople[index].blob = blob;
+    if (blob.size && enrollPeople[index]) {
+      enrollPeople[index].blob = blob;
+      // 靜音樣本一樣有檔案大小，不當場驗就會一路錯到會議結束
+      enrollPeople[index].silent = await isTooQuiet(blob);
+    }
     $("liveEnrollCount").disabled = false;
     enrollBusy = false;
     renderEnrollRows();
@@ -572,6 +628,14 @@ async function uploadEnrollments(sessionId) {
   if (!ready.length) {
     showNotice("預錄聲音辨識人已勾選，但沒有任何一位同時填了姓名並錄好音，這場會維持講者代號。");
     return 0;
+  }
+  // 開始聆聽前最後一次提醒：靜音的樣本比對不出東西，那個人等於白錄
+  const silent = ready.filter(p => p.silent).map(p => p.name.trim());
+  if (silent.length) {
+    showNotice(
+      `「${silent.join("」「")}」的樣本幾乎沒有聲音，很可能比對不出來（那些人會維持講者代號）。`
+      + "如果不是故意的，建議先按「結束會議」重錄再開始。"
+    );
   }
   let done = 0;
   for (const p of ready) {
