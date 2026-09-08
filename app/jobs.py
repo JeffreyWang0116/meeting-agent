@@ -5,6 +5,7 @@
 """
 from __future__ import annotations
 
+import logging
 import threading
 import uuid
 from datetime import date
@@ -12,6 +13,8 @@ from pathlib import Path
 
 from app.stores.base import DEFAULT_USER
 from app.transcription import media
+
+logger = logging.getLogger(__name__)
 
 
 class MediaJobManager:
@@ -149,8 +152,13 @@ class MediaJobManager:
                 result=result,
                 transcript=result.get("transcript") or transcript,
             )
-        except Exception as exc:  # 背景執行緒的例外必須被記錄，否則前端永遠在等
-            self._update(job_id, status="error", error=str(exc))
+        except Exception as exc:
+            # 背景執行緒的例外沒有人會看到 traceback，這裡是唯一的記錄點；
+            # 少了它，雲端 Logs 一片空白，遠端只能靠猜
+            logger.exception("背景轉錄工作失敗：%s", job_id)
+            # MemoryError、OSError、TimeoutError 等的 str() 是空字串，只記訊息
+            # 會讓前端退回顯示無資訊的「轉錄失敗」。型別名稱是這時唯一的線索
+            self._update(job_id, status="error", error=str(exc) or type(exc).__name__)
         finally:
             # 轉錄後原始上傳檔與抽出的音軌都不再需要，刪掉釋放磁碟
             for p in {file_path, path}:

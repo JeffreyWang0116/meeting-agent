@@ -203,3 +203,48 @@ def test_job_transcript_untouched_when_correction_off(tmp_path, audio_file):
     job_id = mgr.submit(audio_file)
     mgr.wait(job_id, timeout=5)
     assert mgr.get(job_id)["transcript"] == "轉錄結果"
+
+
+# ---- 失敗時要留下足以查明原因的線索 ----
+
+def test_error_without_message_still_names_the_exception_type(tmp_path, audio_file):
+    """訊息為空的例外不能讓前端只剩一句「轉錄失敗」。
+
+    MemoryError、OSError、TimeoutError、ConnectionResetError 的 str() 都是空
+    字串。原本只記 str(exc)，前端拿到空字串就退回顯示無資訊的後備文字——雲端
+    免費層 512MB 撞 OOM 時看到的正是那句，等於什麼都沒說。
+    型別名稱是這種情況下唯一的線索，不能跟著訊息一起被丟掉。
+    """
+    mgr = MediaJobManager(FakeTranscriber(error=MemoryError()), FakeOrchestrator(), tmp_path)
+    job_id = mgr.submit(audio_file)
+    mgr.wait(job_id, timeout=5)
+
+    assert mgr.get(job_id)["error"] == "MemoryError"
+
+
+def test_message_is_kept_when_the_exception_has_one(tmp_path, audio_file):
+    """有訊息的例外照舊只顯示訊息：使用者看到的是「請換一個檔案再試」這種
+    可行動的句子，不該被加上一層型別名稱變成雜訊。"""
+    mgr = MediaJobManager(
+        FakeTranscriber(error=RuntimeError("模型爆炸")), FakeOrchestrator(), tmp_path
+    )
+    job_id = mgr.submit(audio_file)
+    mgr.wait(job_id, timeout=5)
+
+    assert mgr.get(job_id)["error"] == "模型爆炸"
+
+
+def test_job_failure_writes_a_traceback_to_the_log(tmp_path, audio_file, caplog):
+    """背景執行緒的例外必須真的進 log。
+
+    原本那行的註解就寫著「例外必須被記錄」，但實作只更新了 job 狀態，整個
+    模組沒有任何 logging——雲端 Logs 分頁因此一片空白，遠端除錯無從下手。
+    """
+    mgr = MediaJobManager(FakeTranscriber(error=MemoryError()), FakeOrchestrator(), tmp_path)
+    with caplog.at_level("ERROR", logger="app.jobs"):
+        job_id = mgr.submit(audio_file)
+        mgr.wait(job_id, timeout=5)
+
+    record = next(r for r in caplog.records if r.name == "app.jobs")
+    assert record.exc_info is not None, "要留 traceback，只記一行訊息查不出是哪裡爆的"
+    assert job_id in record.getMessage()
