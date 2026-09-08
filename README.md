@@ -63,7 +63,8 @@
 | 音訊轉錄 | `TRANSCRIBE_MODEL` | `gemini-flash-lite-latest` | 500 次/日、15 次/分 |
 | 長音檔分段秒數 | `TRANSCRIBE_CHUNK_SECONDS` | `240`（0＝不分段） | 每段各算一次轉錄請求 |
 | 標註率不足時的 Lite 重試次數 | `TRANSCRIBE_LABEL_RETRIES` | `2` | 每次僅佔每日額度 0.2% |
-| 長檔／講者標註備援的強模型 | `TRANSCRIBE_FALLBACK_MODEL` | `gemini-3.5-flash`（空＝關閉） | 比 lite 分講者好，額度較低 |
+| 長檔／講者標註備援的強模型 | `TRANSCRIBE_FALLBACK_MODEL` | `gemini-3.5-flash`（空＝關閉） | 比 lite 分講者好，但每日僅 20 次且常 503 |
+| 長檔改用強模型的門檻（秒）| `TRANSCRIBE_LONG_FILE_THRESHOLD_SECONDS` | `0`（停用，長檔一律 lite 分段）| 設 600 即恢復長檔用強模型 |
 | 每個檔案最多幾段可用備援模型 | `TRANSCRIBE_MAX_FALLBACK_CHUNKS` | `1`（0＝不用備援） | 框住單一檔案的 Flash 花費 |
 | 會議分析、跨會議問答 | `GEMINI_MODEL` | `gemini-flash-lite-latest` | 同上 |
 | 錯字校正（選用） | `CORRECT_MODEL` | `gemini-flash-lite-latest` | 同上 |
