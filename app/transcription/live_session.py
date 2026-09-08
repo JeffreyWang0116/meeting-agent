@@ -26,11 +26,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
 
+from app.agents.speaker_namer_agent import is_safe_name
 from app.glossary import terms_hint_line
 from app.stores.base import DEFAULT_USER
 from app.transcription.segments import (
     TIME_PREFIX_RE,
     collect_speakers,
+    pick_evidence_chunks,
     shift_timestamps,
     speaker_hint,
 )
@@ -52,11 +54,22 @@ class LiveSession:
     last_active: float = 0.0  # 單調時鐘：最後一次收到音訊段（或結束）的時間
     user: str = DEFAULT_USER  # 誰開的這場聆聽
     terms: list[dict] = field(default_factory=list)  # 本次專用詞彙（進轉錄提示）
+    # 會前錄的聲音樣本：[{"name": 姓名, "path": 檔案}]，依錄製順序
+    enrollments: list[dict] = field(default_factory=list)
+    # index → 該段音檔路徑。副檔名由上傳決定，所以要記下來而不是事後拼字串
+    chunk_paths: dict[int, Path] = field(default_factory=dict)
 
 
 class LiveSessionManager:
     # 閒置多久算被遺棄。比任何一場真實會議都長，但仍有上界
     SESSION_TTL_SECONDS = 2 * 60 * 60
+
+    # 最多幾個人可以錄聲音樣本。上限存在是為了讓送進比對的音訊量有界；
+    # 人再多時嗓音相近的機率也上升，比對本來就不該當唯一依據
+    MAX_ENROLLMENTS = 4
+
+    # 最多拿幾段會議錄音當比對證據（見 pick_evidence_chunks）
+    MAX_EVIDENCE_CHUNKS = 4
 
     def __init__(
         self,
@@ -64,9 +77,13 @@ class LiveSessionManager:
         work_dir: Path | str,
         translator=None,
         now: Callable[[], float] = time.monotonic,
+        voice_matcher=None,
     ):
         self._transcriber = transcriber
         self._translator = translator
+        # 聲紋比對器（鴨子型別，需有 match(enrollments, evidence)）。
+        # 沒注入就等同這個功能不存在
+        self._voice_matcher = voice_matcher
         self._work_dir = Path(work_dir)
         self._now = now  # 單調時鐘；可注入，測試不必真的等兩小時
         self._sessions: dict[str, LiveSession] = {}
@@ -132,6 +149,9 @@ class LiveSessionManager:
 
         chunk_path = session.dir / f"chunk_{index:03d}{suffix}"
         chunk_path.write_bytes(data)
+        with self._lock:
+            # 聲紋比對要回頭取這段音檔，副檔名依上傳而異，記下來才找得到
+            session.chunk_paths[index] = chunk_path
 
         text = self._transcribe(chunk_path, hint).strip()
         if text:
@@ -180,6 +200,69 @@ class LiveSessionManager:
             raise SessionNotFound(f"找不到聆聽 session：{session_id}")
         return session
 
+    def enroll(
+        self,
+        session_id: str,
+        name: str,
+        data: bytes,
+        suffix: str = ".webm",
+        user: str = DEFAULT_USER,
+    ) -> int:
+        """存一段「這是誰的聲音」的樣本，回傳目前已註冊人數。
+
+        姓名在這裡就驗證：它最後會被寫進逐字稿的講者欄，含冒號或換行的名字
+        會造出假標籤、破壞時間軸。擋在入口比等到下游 apply_speaker_names
+        整批放棄好——使用者當下就知道名字要改。
+        """
+        session = self._get(session_id, user)
+        name = (name or "").strip()
+        if not is_safe_name(name):
+            raise ValueError("姓名不可為空、不可含冒號或換行，且不宜過長")
+        with self._lock:
+            if session.closed:
+                raise ValueError("此聆聽 session 已結束，無法再註冊聲音樣本")
+            if len(session.enrollments) >= self.MAX_ENROLLMENTS:
+                raise ValueError(f"最多只能註冊 {self.MAX_ENROLLMENTS} 個人的聲音")
+            # 兩份樣本掛同一個名字，比對只會更混亂；而下游 apply_speaker_names
+            # 遇到重複姓名會整批放棄，當場擋下來比事後才無聲失效好
+            if any(e["name"] == name for e in session.enrollments):
+                raise ValueError(f"「{name}」已經註冊過聲音樣本了")
+            session.last_active = self._now()
+            index = len(session.enrollments)
+            path = session.dir / f"enroll_{index:02d}{suffix}"
+            session.enrollments.append({"name": name, "path": path})
+            count = len(session.enrollments)
+        path.write_bytes(data)
+        return count
+
+    def voice_mapping(
+        self, session_id: str, user: str = DEFAULT_USER
+    ) -> dict[str, str]:
+        """依會前錄的樣本比對出 {講者代號: 姓名}。沒註冊樣本就回 {}。
+
+        **務必在 finish() 之前呼叫**：finish() 會刪掉整個 session 目錄，樣本與
+        會議音檔都在裡面。比對需要「聽得到聲音」，所以只有這個時機做得到。
+
+        比對是加分項，任何一步出錯都回 {}——代號本身可用，不該讓一場已經開完
+        的會議分析失敗。
+        """
+        session = self._get(session_id, user)
+        with self._lock:
+            enrollments = list(session.enrollments)
+            if not enrollments or not self._voice_matcher:
+                return {}
+            evidence = [
+                {"path": session.chunk_paths[i], "transcript": session.parts[i]}
+                for i in pick_evidence_chunks(session.parts, self.MAX_EVIDENCE_CHUNKS)
+                if i in session.chunk_paths and session.parts[i]
+            ]
+        if not evidence:
+            return {}
+        try:
+            return self._voice_matcher.match(enrollments, evidence) or {}
+        except Exception:
+            return {}
+
     def finish(self, session_id: str, user: str = DEFAULT_USER) -> str:
         session = self._get(session_id, user)
         with self._lock:
@@ -188,7 +271,8 @@ class LiveSessionManager:
             # 而不是查無此 session。這筆殘留由 TTL 回收
             session.last_active = self._now()
             transcript = _join(session.parts)
-        # 錄音段檔案不再需要，刪掉整個 session 目錄釋放磁碟（雲端暫時性磁碟很小）
+        # 錄音段與聲音樣本都不再需要，刪掉整個 session 目錄釋放磁碟（雲端暫時性
+        # 磁碟很小）。聲紋是生物特徵資料，不落地保存也省掉一整類隱私問題
         shutil.rmtree(session.dir, ignore_errors=True)
         return transcript
 

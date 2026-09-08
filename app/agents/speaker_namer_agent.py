@@ -30,7 +30,7 @@ _TIME_MARKER = re.compile(r"\[\d{1,2}(?::\d{2}){1,2}\]")
 MAX_NAME_LEN = 20
 
 PROMPT_TEMPLATE = """你是會議逐字稿的講者辨識模組。以下逐字稿的講者以「講者A」「講者B」等代號標示，請根據對話內容判斷每個代號實際上是誰。
-{roster_line}
+{roster_line}{prior_line}
 務必遵守的規則：
 1. 只輸出一個 JSON 物件。不要 markdown 圍欄、不要任何額外說明文字。
 2. 只在逐字稿裡有明確依據時才對應。可用的依據例如：有人喊「請王委員發言」，則下一位發言者就是王委員；或某人自我介紹、被點名、被稱呼職稱。
@@ -62,6 +62,14 @@ _ROSTER_LINE = """
 """
 
 
+# 已由聲紋比對確定的代號。寫進提示有兩個作用：模型不會再把別人指給同一個
+# 名字（違反規則 6），而且知道剩下哪些代號才是它要判斷的。
+_PRIOR_LINE = """
+以下代號已由會前錄製的聲音樣本比對確定，是既定事實，不必也不可以更動：{pairs}。
+請只判斷其餘尚未確定的代號，且不可以把它們對應到上列已被指定的人。
+"""
+
+
 class SpeakerNamerAgent:
     def __init__(
         self,
@@ -87,18 +95,33 @@ class SpeakerNamerAgent:
 
     # ---- 對外介面 ----
 
-    def name_speakers(self, transcript: str, user: str = DEFAULT_USER) -> tuple[str, list[dict]]:
+    def name_speakers(
+        self,
+        transcript: str,
+        user: str = DEFAULT_USER,
+        prior: dict[str, str] | None = None,
+    ) -> tuple[str, list[dict]]:
         """回傳 (換上姓名的逐字稿, 實際套用的對應清單)。
+
+        prior：聲紋比對（VoiceMatcher）已經確定的 {代號: 姓名}。它勝過模型從
+        上下文推斷的結果——使用者會前親自錄樣本並標名字，那是第一手資訊，而
+        文字線索是推論。prior 為空時走的路徑與這個參數存在之前完全相同。
 
         任何一步出錯都回傳原文＋空清單：代號本身是可用的，補姓名是加分項，
         不該擋住整個分析流程。
         """
         if not transcript or not transcript.strip():
             return transcript, []
+        # prior 來自另一個模組，一樣要過安全檢查——來源不同不是跳過驗證的理由
+        prior = {k: v for k, v in (prior or {}).items() if is_safe_name(v)}
         try:
-            raw = self._generate(self.build_prompt(transcript, user))
+            raw = self._generate(self.build_prompt(transcript, user, prior))
             mapping = _parse_mapping(raw)
         except Exception:
+            # 模型掛了（額度、網路）不該把已經比對出來的聲紋結果一起丟掉
+            mapping = {}
+        mapping.update(prior)  # 衝突時聲紋贏
+        if not mapping:
             return transcript, []
         text, applied = apply_speaker_names(transcript, mapping)
         if applied and self._remember_names:
@@ -108,13 +131,20 @@ class SpeakerNamerAgent:
                 pass  # 名冊寫入失敗不該讓已經完成的對應付諸流水
         return text, applied
 
-    def build_prompt(self, transcript: str, user: str = DEFAULT_USER) -> str:
+    def build_prompt(
+        self,
+        transcript: str,
+        user: str = DEFAULT_USER,
+        prior: dict[str, str] | None = None,
+    ) -> str:
         # 名冊必須依使用者取：共用一格的話，A 的與會者姓名會餵進 B 的提示
         names = self._known_names(user) if self._known_names else []
+        pairs = "、".join(f"{k}＝{v}" for k, v in (prior or {}).items())
         return PROMPT_TEMPLATE.format(
             max_len=MAX_NAME_LEN,
             transcript=transcript,
             roster_line=_ROSTER_LINE.format(names="、".join(names)) if names else "",
+            prior_line=_PRIOR_LINE.format(pairs=pairs) if pairs else "",
         )
 
     # ---- 內部 ----

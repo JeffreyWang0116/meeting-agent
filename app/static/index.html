@@ -351,6 +351,27 @@
                 <div class="glos-note" id="liveSysHint" style="margin-top:6px"></div>
               </div>
             </div>
+            <!-- 預錄聲音辨識人（選用）：會前每人錄一小段，結束分析時用聲紋把
+                 逐字稿的「講者A/B/C」換成真實姓名。沒勾就完全不啟用，不多打 API -->
+            <div class="field-row feature-row" id="liveEnrollRow" style="display:none">
+              <label class="chk" title="會前請每位與會者各錄一小段話，AI 記住每個人的聲音；會議結束分析時，逐字稿的「講者A」「講者B」就會換成真實姓名。沒錄就維持代號。">
+                <input type="checkbox" id="liveEnrollOn"> 預錄聲音辨識人（會前每人錄一小段）
+              </label>
+            </div>
+            <div id="liveEnrollBox" style="display:none">
+              <div class="field-row">
+                <div class="field">
+                  <label class="lbl" for="liveEnrollCount">
+                    與會人數
+                    <span class="lbl-aux">依序請每個人錄一段，錄好才會生效</span>
+                  </label>
+                  <select class="field-sel" id="liveEnrollCount"></select>
+                </div>
+              </div>
+              <div id="liveEnrollList"></div>
+              <div class="glos-note" id="liveEnrollHint" style="margin-top:8px"></div>
+            </div>
+
             <div class="actions">
               <button class="primary" id="btnLiveStart">
                 <svg class="i" aria-hidden="true"><use href="/static/icons.svg#mic"/></svg>

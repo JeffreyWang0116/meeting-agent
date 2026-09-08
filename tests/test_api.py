@@ -860,3 +860,120 @@ def test_remember_persons_endpoint_marks_names_without_wiping_terms(client):
     assert resp.json()["names"] == ["王霖翔"]  # 代號被擋掉
     terms = client.get("/api/glossary").json()["terms"]
     assert [t["term"] for t in terms] == ["TaskHub", "王霖翔"]
+
+
+# ---- 預錄聲音辨識人（選用功能）----
+
+def test_enroll_returns_the_registered_count(client):
+    sid = client.post("/api/live/start").json()["session_id"]
+    resp = client.post(
+        f"/api/live/{sid}/enroll",
+        files={"file": ("s.webm", io.BytesIO(b"voice"), "audio/webm")},
+        data={"name": "王小明"},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["enrolled"] == 1
+
+
+def test_enroll_unknown_session_404(client):
+    resp = client.post(
+        "/api/live/nope/enroll",
+        files={"file": ("s.webm", io.BytesIO(b"x"), "audio/webm")},
+        data={"name": "王小明"},
+    )
+    assert resp.status_code == 404
+
+
+def test_enroll_rejects_unsafe_name_400(client):
+    """姓名最後會寫進逐字稿的講者欄，含冒號會造出假標籤。"""
+    sid = client.post("/api/live/start").json()["session_id"]
+    resp = client.post(
+        f"/api/live/{sid}/enroll",
+        files={"file": ("s.webm", io.BytesIO(b"x"), "audio/webm")},
+        data={"name": "王小明：主席"},
+    )
+    assert resp.status_code == 400
+
+
+def _voice_app(tmp_path, transcriber, matcher, namer=None):
+    """建一個「只有聲紋比對是真的」的 app：LLM 全部以假 generate 取代。"""
+    from app.transcription.live_session import LiveSessionManager
+
+    settings = Settings(gemini_api_key=None, data_dir=tmp_path)
+    store = LocalJsonStore(tmp_path / "db.json")
+    orchestrator = Orchestrator(
+        parser=ParserAgent(),
+        decision=DecisionAgent(generate=lambda prompt: valid_json()),
+        executor=ExecutorAgent(store),
+        notifier=NotifierAgent(tmp_path / "notifications"),
+        namer=namer,
+    )
+    return TestClient(create_app(
+        settings,
+        store=store,
+        orchestrator=orchestrator,
+        transcriber=transcriber,
+        live_manager=LiveSessionManager(
+            transcriber, tmp_path / "live", voice_matcher=matcher
+        ),
+    ))
+
+
+def test_live_flow_without_enrollment_never_touches_the_matcher(tmp_path):
+    """沒用這個功能的人，走的路徑要與它不存在時完全相同——連比對都不該發生。"""
+    calls = []
+
+    class SpyMatcher:
+        def match(self, enrollments, evidence):
+            calls.append(1)
+            return {}
+
+    c = _voice_app(tmp_path, FakeTranscriber(), SpyMatcher())
+    sid = c.post("/api/live/start").json()["session_id"]
+    c.post(
+        f"/api/live/{sid}/chunk",
+        files={"file": ("c.webm", io.BytesIO(b"x"), "audio/webm")},
+    )
+    assert c.post(f"/api/live/{sid}/finish").status_code == 200
+    assert calls == []
+
+
+def test_enrolled_voices_rename_the_speaker_labels(tmp_path):
+    """錄了樣本就該看到名字，不必再另外勾「辨識名稱」——錄樣本本身就是開啟。
+
+    namer 的假 generate 回傳空對應，所以這裡改到名字**只可能**來自聲紋比對。
+    """
+    from app.agents.speaker_namer_agent import SpeakerNamerAgent
+
+    class LabelledTranscriber:
+        device = "cpu"
+        model_size = "fake"
+
+        def transcribe(self, path, on_progress=None, hint=None):
+            return "[0:01] 講者A：週五要 demo"
+
+    class FixedMatcher:
+        def match(self, enrollments, evidence):
+            return {"講者A": "王小明"}
+
+    c = _voice_app(
+        tmp_path,
+        LabelledTranscriber(),
+        FixedMatcher(),
+        namer=SpeakerNamerAgent(generate=lambda prompt: '{"speakers": []}'),
+    )
+    sid = c.post("/api/live/start").json()["session_id"]
+    assert c.post(
+        f"/api/live/{sid}/enroll",
+        files={"file": ("s.webm", io.BytesIO(b"voice"), "audio/webm")},
+        data={"name": "王小明"},
+    ).status_code == 200
+    c.post(
+        f"/api/live/{sid}/chunk",
+        files={"file": ("c.webm", io.BytesIO(b"x"), "audio/webm")},
+        data={"offset": "0"},
+    )
+    body = c.post(f"/api/live/{sid}/finish", json={"meeting_date": "2026-07-12"}).json()
+    assert "王小明：" in body["transcript"]
+    assert "講者A" not in body["transcript"]
+    assert body["speaker_names"] == [{"label": "講者A", "name": "王小明", "count": 1}]

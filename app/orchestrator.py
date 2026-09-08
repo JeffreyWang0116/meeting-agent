@@ -50,6 +50,7 @@ class Orchestrator:
         name_speakers: bool = False,
         terms: list[dict] | None = None,
         user: str = DEFAULT_USER,
+        speaker_prior: dict[str, str] | None = None,
     ) -> dict:
         text = self.parser.parse(raw_text)
         corrections: list[dict] = []
@@ -59,7 +60,13 @@ class Orchestrator:
         # 預設不對應姓名：轉錄輸出的講者A/B/C 已可用，補真名是選用的加分項。
         # 台語等語者辨識不穩的錄音，猜錯的名字比代號更糟，所以由呼叫端明確開啟
         if name_speakers and self.namer:
-            text, speaker_names = self.namer.name_speakers(text, user=user)
+            # speaker_prior：會前錄的聲音樣本比對出來的對應，勝過從上下文推斷。
+            # 沒錄樣本時不帶這個參數，呼叫形狀與這個功能出現之前完全相同
+            text, speaker_names = (
+                self.namer.name_speakers(text, user=user, prior=speaker_prior)
+                if speaker_prior
+                else self.namer.name_speakers(text, user=user)
+            )
         analysis = self.decision.analyze(
             text, meeting_date=meeting_date, kind=kind, features=features, extra_terms=terms
         )

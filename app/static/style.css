@@ -238,6 +238,25 @@
   .glos-note { color: var(--faint); font-size: .8rem; }
   .glos-item .del-btn { margin-left: auto; }
 
+  /* ---- 預錄聲音辨識人：每位與會者一列（序號、姓名、錄音鈕、狀態） ---- */
+  .enroll-row {
+    display: flex; align-items: center; gap: 10px;
+    border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--card);
+    padding: 9px 12px; font-size: .9rem;
+  }
+  .enroll-row + .enroll-row { margin-top: 8px; }
+  .enroll-row .enroll-no { color: var(--faint); flex: none; min-width: 1.4em; }
+  .enroll-row input[type="text"] {
+    flex: 1 1 120px; min-width: 0; font-family: var(--sans); font-size: .86rem; color: var(--ink);
+    background: var(--card-2); border: 1px solid var(--border); border-radius: var(--radius-sm);
+    padding: 7px 10px;
+  }
+  .enroll-row input[type="text"]:focus {
+    outline: none; border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft);
+  }
+  .enroll-row .enroll-state { color: var(--faint); font-size: .8rem; flex: none; min-width: 4.5em; text-align: right; }
+  .enroll-row.done .enroll-state { color: var(--accent); }
+
   /* ---- 訊息橫幅（錯誤／一般提示） ---- */
   .banner {
     display: none; align-items: center; gap: 10px; padding: 13px 16px; border-radius: var(--radius-md);

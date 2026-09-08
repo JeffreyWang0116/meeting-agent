@@ -45,6 +45,13 @@ class Settings:
     whisper_model: str | None = None
     whisper_device: str | None = None
     live_chunk_seconds: int = 45
+    # 預錄聲音辨識人：最多幾個人可以錄樣本（0＝停用整個功能）。上限讓送進比對
+    # 的音訊量有界；人再多時嗓音相近的機率也上升，比對本來就不該當唯一依據
+    live_enroll_max_speakers: int = 4
+    # 聲紋比對用的模型。一場會議只打一次（相較轉錄每 45 秒一次），所以用強模型
+    # 換準確度很划算——比對嗓音比轉錄吃力得多，lite 實測容易亂猜。
+    # 空字串＝沿用 correct_model
+    voice_match_model: str | None = "gemini-3.5-flash"
     # 上傳的長音檔分段轉錄的每段秒數（0＝不分段，整份送出）。
     # 實測整份送出 17 分鐘錄音時，Gemini 會整份放棄講者標註、時間戳也會漂掉
     transcribe_chunk_seconds: int = 240
@@ -134,6 +141,12 @@ def get_settings() -> Settings:
         whisper_model=os.environ.get("WHISPER_MODEL") or None,
         whisper_device=os.environ.get("WHISPER_DEVICE") or None,
         live_chunk_seconds=int(os.environ.get("LIVE_CHUNK_SECONDS", "45")),
+        live_enroll_max_speakers=int(
+            os.environ.get("LIVE_ENROLL_MAX_SPEAKERS", "4")
+        ),
+        voice_match_model=(
+            os.environ.get("VOICE_MATCH_MODEL", "gemini-3.5-flash") or None
+        ),
         transcribe_chunk_seconds=int(os.environ.get("TRANSCRIBE_CHUNK_SECONDS", "240")),
         transcribe_fallback_model=(
             os.environ.get("TRANSCRIBE_FALLBACK_MODEL", "gemini-3.5-flash") or None

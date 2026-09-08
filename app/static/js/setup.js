@@ -178,12 +178,25 @@ document.querySelectorAll(".tab").forEach(tab => {
   });
 });
 
+// 預錄聲音辨識人最多幾個人。後端設 0 就代表停用，整個功能連入口都不顯示
+let enrollMaxSpeakers = 0;
+
 async function loadHealth() {
   try {
     const h = await api.health();
     chunkSeconds = h.live_chunk_seconds || 45;
+    enrollMaxSpeakers = h.live_enroll_max_speakers || 0;
+    $("liveEnrollRow").style.display = enrollMaxSpeakers > 0 ? "" : "none";
+    // 人數下拉在這裡填，避免 inputs.js 反過來 import setup.js 造成循環相依
+    if (enrollMaxSpeakers > 0) {
+      $("liveEnrollCount").innerHTML = Array.from(
+        { length: enrollMaxSpeakers },
+        (_, i) => `<option value="${i + 1}">${i + 1} 人</option>`
+      ).join("");
+      $("liveEnrollCount").value = String(Math.min(2, enrollMaxSpeakers));
+    }
   } catch (e) { /* health 失敗不擋操作 */ }
 }
 loadHealth();
 
-export { FEATURE_BOX, LOOPBACK_RE, applyKindDefaults, chunkSeconds, correctTypos, featuresTouched, kindDefaults, kindHints, loadHealth, maybePromoteTerms, meetingTerms, nameSpeakers, populateSysSources, selectedFeatures, sysSourceValue, wantSystemAudio };
+export { FEATURE_BOX, LOOPBACK_RE, applyKindDefaults, chunkSeconds, correctTypos, enrollMaxSpeakers, featuresTouched, kindDefaults, kindHints, loadHealth, maybePromoteTerms, meetingTerms, nameSpeakers, populateSysSources, selectedFeatures, sysSourceValue, wantSystemAudio };

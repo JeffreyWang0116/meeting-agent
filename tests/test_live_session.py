@@ -337,3 +337,122 @@ def test_finished_session_reports_closed_then_is_released(tmp_path):
     mgr.start()
     with pytest.raises(SessionNotFound):
         mgr.add_chunk(sid, b"much-later-chunk")
+
+
+# ---- 預錄聲音辨識：會前每人錄一段樣本，結束時比對出誰是誰 ----
+
+class FakeMatcher:
+    def __init__(self, result=None, error=None):
+        self.result = result or {}
+        self.error = error
+        self.calls = []
+
+    def match(self, enrollments, evidence):
+        self.calls.append((enrollments, evidence))
+        if self.error:
+            raise self.error
+        return self.result
+
+
+def _mgr_with_matcher(tmp_path, texts, matcher):
+    return LiveSessionManager(
+        HintRecordingTranscriber(texts), tmp_path, voice_matcher=matcher
+    )
+
+
+def test_enroll_writes_the_sample_and_counts_people(tmp_path):
+    mgr = _mgr_with_matcher(tmp_path, [], FakeMatcher())
+    sid = mgr.start()
+    assert mgr.enroll(sid, "王小明", b"sample-1") == 1
+    assert mgr.enroll(sid, "李美華", b"sample-2") == 2
+    files = sorted((tmp_path / sid).glob("enroll_*"))
+    assert [f.read_bytes() for f in files] == [b"sample-1", b"sample-2"]
+
+
+def test_enroll_rejects_more_people_than_the_cap(tmp_path):
+    mgr = _mgr_with_matcher(tmp_path, [], FakeMatcher())
+    mgr.MAX_ENROLLMENTS = 2
+    sid = mgr.start()
+    mgr.enroll(sid, "甲", b"a")
+    mgr.enroll(sid, "乙", b"b")
+    with pytest.raises(ValueError):
+        mgr.enroll(sid, "丙", b"c")
+
+
+def test_enroll_rejects_unsafe_names(tmp_path):
+    """姓名會被寫進逐字稿的講者欄，含冒號就會造出假標籤——擋在入口。"""
+    mgr = _mgr_with_matcher(tmp_path, [], FakeMatcher())
+    sid = mgr.start()
+    with pytest.raises(ValueError):
+        mgr.enroll(sid, "王小明：主席", b"a")
+    with pytest.raises(ValueError):
+        mgr.enroll(sid, "   ", b"a")
+
+
+def test_enroll_belongs_to_its_owner(tmp_path):
+    """別人的 session 一律當作不存在（與 add_chunk / finish 同一條規則）。"""
+    mgr = _mgr_with_matcher(tmp_path, [], FakeMatcher())
+    sid = mgr.start(user="alice")
+    with pytest.raises(SessionNotFound):
+        mgr.enroll(sid, "王小明", b"a", user="bob")
+
+
+def test_voice_mapping_without_enrollments_never_calls_the_matcher(tmp_path):
+    """沒開這個功能就不能有任何成本——連 API 都不該打。"""
+    matcher = FakeMatcher({"講者A": "王小明"})
+    mgr = _mgr_with_matcher(tmp_path, ["[0:01] 講者A：大家好"], matcher)
+    sid = mgr.start()
+    mgr.add_chunk(sid, b"audio")
+    assert mgr.voice_mapping(sid) == {}
+    assert matcher.calls == []
+
+
+def test_voice_mapping_passes_samples_and_labelled_evidence(tmp_path):
+    """比對要同時拿到樣本音檔，以及「音訊＋那段的逐字稿」的證據。"""
+    matcher = FakeMatcher({"講者A": "王小明"})
+    mgr = _mgr_with_matcher(tmp_path, ["[0:01] 講者A：大家好"], matcher)
+    sid = mgr.start()
+    mgr.enroll(sid, "王小明", b"sample")
+    mgr.add_chunk(sid, b"audio", offset_seconds=0)  # 前端一律帶偏移，時間戳才留得住
+
+    assert mgr.voice_mapping(sid) == {"講者A": "王小明"}
+    enrollments, evidence = matcher.calls[0]
+    assert [e["name"] for e in enrollments] == ["王小明"]
+    assert enrollments[0]["path"].read_bytes() == b"sample"
+    assert evidence[0]["transcript"] == "[0:01] 講者A：大家好"
+    assert evidence[0]["path"].read_bytes() == b"audio"
+
+
+def test_voice_mapping_survives_a_matcher_failure(tmp_path):
+    """比對是加分項，掛掉就回空對應，不能擋住一場已經開完的會議。"""
+    matcher = FakeMatcher(error=RuntimeError("額度用完"))
+    mgr = _mgr_with_matcher(tmp_path, ["[0:01] 講者A：大家好"], matcher)
+    sid = mgr.start()
+    mgr.enroll(sid, "王小明", b"sample")
+    mgr.add_chunk(sid, b"audio")
+    assert mgr.voice_mapping(sid) == {}
+
+
+def test_samples_are_deleted_with_the_session(tmp_path):
+    """聲紋是生物特徵資料：跟著錄音段一起在 finish() 就刪掉，不留在磁碟。"""
+    mgr = _mgr_with_matcher(tmp_path, ["[0:01] 講者A：大家好"], FakeMatcher())
+    sid = mgr.start()
+    mgr.enroll(sid, "王小明", b"sample")
+    mgr.add_chunk(sid, b"audio")
+    assert list((tmp_path / sid).glob("enroll_*"))
+    mgr.finish(sid)
+    assert not (tmp_path / sid).exists()
+
+
+def test_enroll_rejects_a_duplicate_name(tmp_path):
+    """兩份樣本掛同一個名字，比對只會更混亂——而且下游遇到重複姓名會整批放棄。
+
+    使用者多半是分不清哪一列還沒錄而重錄了同一個人，當場擋下來比事後失效好。
+    """
+    mgr = _mgr_with_matcher(tmp_path, [], FakeMatcher())
+    sid = mgr.start()
+    mgr.enroll(sid, "王小明", b"a")
+    with pytest.raises(ValueError):
+        mgr.enroll(sid, "王小明", b"b")
+    with pytest.raises(ValueError):
+        mgr.enroll(sid, "  王小明  ", b"b")  # 前後空白不算不同的人

@@ -11,6 +11,7 @@ from app.transcription.segments import (
     drop_empty_lines,
     normalize_timestamps,
     parse_time_label,
+    pick_evidence_chunks,
     replace_speaker,
     replace_term_in_range,
     shift_timestamps,
@@ -424,3 +425,47 @@ def test_last_timestamp_seconds_ignores_lines_without_one():
     assert last_timestamp_seconds("[0:10] 講者A：有\n沒有時間戳的一行") == 10
     assert last_timestamp_seconds("完全沒有時間戳") is None
     assert last_timestamp_seconds("") is None
+
+
+# ---- 聲紋比對的證據段挑選 ----
+# 即時聆聽的 parts[i] 是第 i 段的逐字稿，chunk_{i:03d} 是同一段的音檔——現成的
+# 1:1 對應。挑出「每個代號講最多話的那一段」當比對證據，就不必切片。
+
+def test_pick_evidence_chunks_empty():
+    assert pick_evidence_chunks([]) == []
+    assert pick_evidence_chunks([None, "", "   "]) == []
+
+
+def test_pick_evidence_chunks_picks_the_chunk_where_a_label_talks_most():
+    """代號要挑它講最多行的那一段：話越多，模型越聽得出嗓音特徵。"""
+    parts = [
+        "[0:01] 講者A：嗨",
+        "[0:50] 講者B：我來報告第一項\n[0:55] 講者B：第二項是這樣\n[1:02] 講者B：最後一項",
+    ]
+    assert pick_evidence_chunks(parts) == [0, 1]
+
+
+def test_pick_evidence_chunks_dedupes_when_one_chunk_covers_several_labels():
+    """一段就涵蓋兩個代號時不必再多挑一段——音訊量要壓在有界的範圍。"""
+    parts = [
+        "[0:01] 講者A：你好\n[0:05] 講者B：你好",
+        "[0:50] 講者A：嗯",
+    ]
+    assert pick_evidence_chunks(parts) == [0]
+
+
+def test_pick_evidence_chunks_skips_pending_and_unlabelled_parts():
+    """None＝還在辨識中，沒有講者標籤的段落也給不出對應關係，都不能當證據。"""
+    parts = [None, "沒有標籤的一段話", "[0:50] 講者A：有標籤"]
+    assert pick_evidence_chunks(parts) == [2]
+
+
+def test_pick_evidence_chunks_respects_the_cap_in_appearance_order():
+    """講者比上限多時依出場序取——先出現的通常是主席與主要發言者。"""
+    parts = [
+        "[0:01] 講者A：一",
+        "[0:10] 講者B：二",
+        "[0:20] 講者C：三",
+        "[0:30] 講者D：四",
+    ]
+    assert pick_evidence_chunks(parts, max_chunks=2) == [0, 1]

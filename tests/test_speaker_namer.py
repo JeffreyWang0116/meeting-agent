@@ -266,3 +266,62 @@ def test_orchestrator_passes_the_user_down_to_the_namer():
     ).process_transcript("逐字稿", name_speakers=True, user="uid-B")
 
     assert got["user"] == "uid-B"
+
+
+# ---- 聲紋比對結果（prior）：會前錄的樣本比從上下文推斷更可信 ----
+
+def test_prior_wins_over_the_models_guess():
+    """聲紋是使用者主動提供的第一手資訊，與模型的上下文推斷衝突時由它決定。"""
+    agent = SpeakerNamerAgent(
+        api_key="k", generate=lambda prompt: _reply({"講者A": "石崇良"})
+    )
+    text, applied = agent.name_speakers(TRANSCRIPT, prior={"講者A": "吳宗憲"})
+    assert "吳宗憲：請問部長" in text
+    assert applied == [{"label": "講者A", "name": "吳宗憲", "count": 2}]
+
+
+def test_prior_and_model_results_merge():
+    """聲紋只認得出一部分人時，其餘仍交給文字線索補完。"""
+    agent = SpeakerNamerAgent(
+        api_key="k", generate=lambda prompt: _reply({"講者B": "石崇良"})
+    )
+    text, _ = agent.name_speakers(TRANSCRIPT, prior={"講者A": "吳宗憲"})
+    assert "吳宗憲：請問部長" in text and "石崇良：這件事" in text
+
+
+def test_prior_still_applies_when_the_model_call_fails():
+    """模型掛了（額度、網路）不該把已經比對出來的聲紋結果一起丟掉。"""
+
+    def boom(prompt):
+        raise RuntimeError("額度用完")
+
+    agent = SpeakerNamerAgent(api_key="k", generate=boom)
+    text, applied = agent.name_speakers(TRANSCRIPT, prior={"講者A": "吳宗憲"})
+    assert "吳宗憲：請問部長" in text
+    assert [a["label"] for a in applied] == ["講者A"]
+
+
+def test_unsafe_prior_names_are_ignored():
+    """prior 的姓名一樣要過安全檢查，不能因為來源不同就跳過。"""
+    agent = SpeakerNamerAgent(
+        api_key="k", generate=lambda prompt: _reply({"講者B": "石崇良"})
+    )
+    text, applied = agent.name_speakers(TRANSCRIPT, prior={"講者A": "吳宗憲：主席"})
+    assert "石崇良：這件事" in text
+    assert [a["label"] for a in applied] == ["講者B"]
+
+
+def test_no_prior_behaves_exactly_as_before():
+    """沒開聲紋功能時，走的必須是與加這個參數之前一模一樣的路徑。"""
+    agent = SpeakerNamerAgent(
+        api_key="k", generate=lambda prompt: _reply({"講者A": "吳宗憲"})
+    )
+    assert agent.name_speakers(TRANSCRIPT) == agent.name_speakers(TRANSCRIPT, prior=None)
+
+
+def test_prior_labels_appear_in_the_prompt_as_settled():
+    """已由聲紋確定的代號要寫進提示，模型才不會把別人也指給同一個名字。"""
+    prompt = SpeakerNamerAgent(api_key="k").build_prompt(
+        TRANSCRIPT, prior={"講者A": "吳宗憲"}
+    )
+    assert "講者A" in prompt and "吳宗憲" in prompt

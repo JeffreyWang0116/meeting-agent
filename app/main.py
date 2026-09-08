@@ -49,6 +49,7 @@ from app.translate import TARGETS as TRANSLATE_TARGETS
 from app.translate import Translator
 from app.transcription.gemini_transcriber import GeminiTranscriber
 from app.transcription.live_session import LiveSessionManager, SessionNotFound
+from app.transcription.voice_match import VoiceMatcher
 from app.transcription.transcriber import Transcriber
 from app.usage import UsageTracker
 
@@ -427,9 +428,27 @@ def create_app(
         on_call=record_call,
         model=settings.transcribe_model,
     )
-    live_manager = live_manager or LiveSessionManager(
-        transcriber, settings.data_dir / "tmp" / "live", translator=translator
-    )
+    if live_manager is None:
+        # 預錄聲音辨識人（選用）：沒設定人數上限就整個不建，等同功能不存在
+        voice_matcher = (
+            VoiceMatcher(
+                api_key=settings.gemini_api_key,
+                api_keys=settings.gemini_api_keys,
+                on_call=record_call,
+                # 一場會議只打一次，用強模型換準確度很划算——比對嗓音比轉錄
+                # 吃力得多，lite 實測容易亂猜
+                model=settings.voice_match_model or settings.correct_model,
+            )
+            if settings.live_enroll_max_speakers > 0
+            else None
+        )
+        live_manager = LiveSessionManager(
+            transcriber,
+            settings.data_dir / "tmp" / "live",
+            translator=translator,
+            voice_matcher=voice_matcher,
+        )
+        live_manager.MAX_ENROLLMENTS = settings.live_enroll_max_speakers
     job_manager = job_manager or MediaJobManager(
         transcriber, orchestrator, settings.data_dir / "tmp"
     )
@@ -546,10 +565,14 @@ def create_app(
         correct_typos: bool = False,
         name_speakers: bool = False,
         terms: list[dict] | None = None,
+        speaker_prior: dict[str, str] | None = None,
     ) -> dict:
         usage.record("analysis")
         if correct_typos:
             usage.record("correct")  # 校正是額外一次請求，用量面板要分開看得到
+        # 會前錄了聲音樣本就等於明確要求對應姓名了，不必再另外勾一次「辨識名稱」
+        # ——錄了樣本卻還看到「講者A」，在使用者眼裡就是功能沒生效
+        name_speakers = name_speakers or bool(speaker_prior)
         if name_speakers and orchestrator.namer:
             usage.record("speaker_names")  # 講者代號換姓名也是獨立一次請求
         try:
@@ -562,6 +585,7 @@ def create_app(
                 name_speakers=name_speakers,
                 terms=terms,
                 user=current_user(),
+                speaker_prior=speaker_prior,
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc))
@@ -619,6 +643,8 @@ def create_app(
             or settings.whisper_model
             or "auto（首次轉錄時載入）",
             "live_chunk_seconds": settings.live_chunk_seconds,
+            # 前端據此決定「預錄聲音辨識人」最多能列幾個人（0＝不顯示這個功能）
+            "live_enroll_max_speakers": settings.live_enroll_max_speakers,
             # 長音檔分段轉錄的每段秒數（0＝不分段）。放在 health 是為了能從
             # 外部確認部署版到底有沒有帶上這個功能
             "transcribe_chunk_seconds": settings.transcribe_chunk_seconds,
@@ -1133,9 +1159,36 @@ def create_app(
         except Exception as exc:  # 轉錄後端故障（額度、格式…）要讓前端看得到原因
             raise HTTPException(status_code=502, detail=f"這段音訊轉錄失敗：{exc}")
 
+    @app.post("/api/live/{session_id}/enroll")
+    def live_enroll(
+        session_id: str,
+        file: UploadFile = File(...),
+        name: str = Form(...),  # 這個人的姓名，會用來取代逐字稿裡的講者代號
+    ):
+        """會前註冊一位與會者的聲音樣本（選用功能）。
+
+        沒呼叫過這支端點的 session，結束時完全不會走聲紋比對——不多打 API，
+        行為與這個功能不存在時相同。
+        """
+        suffix = Path(file.filename or "enroll.webm").suffix or ".webm"
+        data = read_capped(file.file, max_upload_bytes)
+        try:
+            count = live_manager.enroll(
+                session_id, name, data, suffix=suffix, user=current_user()
+            )
+        except SessionNotFound as exc:
+            raise HTTPException(status_code=404, detail=str(exc))
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        return {"enrolled": count}
+
     @app.post("/api/live/{session_id}/finish")
     def live_finish(session_id: str, req: Optional[FinishRequest] = None):
         try:
+            # 聲紋比對務必在 finish 之前：finish 會刪掉整個 session 目錄，
+            # 樣本與會議音檔都在裡面，之後就沒有聲音可比了。
+            # 沒註冊樣本時這行回 {} 且不打任何 API
+            speaker_prior = live_manager.voice_mapping(session_id, user=current_user())
             transcript = live_manager.finish(session_id, user=current_user())
         except SessionNotFound as exc:
             raise HTTPException(status_code=404, detail=str(exc))
@@ -1153,6 +1206,7 @@ def create_app(
             correct_typos=bool(req and req.correct_typos),
             name_speakers=bool(req and req.name_speakers),
             terms=validate_terms(req.terms if req else None),
+            speaker_prior=speaker_prior,
         )
         # result 帶著校正後的 transcript，放在後面覆蓋原始版本
         return {"transcript": transcript, **result}

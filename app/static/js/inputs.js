@@ -1,5 +1,5 @@
 import { api } from "./api.js";
-import { $, clearError, showError, showNotice } from "./core.js";
+import { $, clearError, esc, showError, showNotice } from "./core.js";
 import { hideResultSkeleton, markAnalysisStart, renderResult, showResultSkeleton } from "./result.js";
 import { chunkSeconds, correctTypos, meetingTerms, nameSpeakers, selectedFeatures, sysSourceValue, wantSystemAudio } from "./setup.js";
 import { chatHtml, renderChat } from "./transcript.js";
@@ -409,6 +409,122 @@ function recordSegment() {
   }, secs * 1000);
 }
 
+// ---- 預錄聲音辨識人（選用功能）----
+// 會前請每位與會者各錄一小段話，按下「開始聆聽」時連同 session 一起送到後端；
+// 結束分析時由聲紋比對把逐字稿的「講者A/B/C」換成真實姓名。
+//
+// 沒勾這個功能就完全不執行：不開麥克風、不上傳、不多打任何 API，整條路徑與
+// 這個功能不存在時相同。錄音失敗或上傳失敗也一律只降級成「維持講者代號」，
+// 絕不擋住聆聽本身——會議內容遠比名字重要。
+const ENROLL_SECONDS = 10;  // 太短聲紋特徵不足、太長浪費額度；實測 10 秒足夠
+let enrollPeople = [];      // 依序對應畫面上每一列：{ name, blob }
+let enrollBusy = false;     // 同時只錄一個人，避免兩列搶同一支麥克風
+
+function enrollOn() {
+  return $("liveEnrollOn").checked;
+}
+
+function syncEnrollPeople() {
+  const n = Number($("liveEnrollCount").value || 0);
+  while (enrollPeople.length < n) enrollPeople.push({ name: "", blob: null });
+  enrollPeople.length = n;  // 人數調少時，多出來的樣本一併丟掉
+}
+
+function renderEnrollRows() {
+  syncEnrollPeople();
+  $("liveEnrollList").innerHTML = enrollPeople.map((p, i) => `
+    <div class="enroll-row${p.blob ? " done" : ""}">
+      <span class="enroll-no">${i + 1}.</span>
+      <input type="text" id="enrollName${i}" maxlength="20"
+             placeholder="第 ${i + 1} 位的姓名" value="${esc(p.name)}">
+      <button class="ghost" type="button" id="enrollRec${i}">
+        <svg class="i-sm" aria-hidden="true"><use href="/static/icons.svg#mic"/></svg>
+        ${p.blob ? "重錄" : "錄音"}
+      </button>
+      <span class="enroll-state" id="enrollState${i}">${p.blob ? "已錄好" : "未錄"}</span>
+    </div>`).join("");
+  enrollPeople.forEach((p, i) => {
+    // 姓名寫回資料模型，重繪（換人數、錄完音）時才不會把使用者打的字弄丟
+    $(`enrollName${i}`).addEventListener("input", e => { p.name = e.target.value; });
+    $(`enrollRec${i}`).addEventListener("click", () => recordEnrollment(i));
+  });
+  const ready = enrollPeople.filter(p => p.name.trim() && p.blob).length;
+  $("liveEnrollHint").textContent =
+    `每人錄約 ${ENROLL_SECONDS} 秒，說一兩句話即可（例如自我介紹）。`
+    + `目前 ${ready} / ${enrollPeople.length} 位已備妥；`
+    + "沒填姓名或沒錄音的人會被略過，那些人在逐字稿中維持講者代號。";
+}
+
+// 固定錄 ENROLL_SECONDS 秒後自動停止：比「按開始再按停止」少一半操作，
+// 也保證每個人的樣本長度一致，聲紋比對的條件才公平
+async function recordEnrollment(index) {
+  if (enrollBusy || liveRecording) return;
+  const state = $(`enrollState${index}`);
+  let stream;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  } catch (e) {
+    showError("無法使用麥克風錄製聲音樣本：" + e.message);
+    return;
+  }
+  enrollBusy = true;
+  const chunks = [];
+  const mime = pickMime();
+  const rec = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined);
+  rec.ondataavailable = e => { if (e.data.size) chunks.push(e.data); };
+  rec.onerror = () => { showError("錄製聲音樣本時發生錯誤，請再試一次。"); };
+  rec.onstop = () => {
+    stream.getTracks().forEach(t => t.stop());  // 立刻還回麥克風，別佔著
+    const blob = new Blob(chunks, { type: rec.mimeType });
+    if (blob.size) enrollPeople[index].blob = blob;
+    enrollBusy = false;
+    renderEnrollRows();
+  };
+  rec.start();
+  let left = ENROLL_SECONDS;
+  state.textContent = `錄音中 ${left}`;
+  const tick = setInterval(() => {
+    left -= 1;
+    if (left > 0) { state.textContent = `錄音中 ${left}`; return; }
+    clearInterval(tick);
+    if (rec.state !== "inactive") rec.stop();
+  }, 1000);
+}
+
+// 回傳實際上傳成功的人數。任何失敗都只降級成「維持講者代號」，不丟例外出去
+async function uploadEnrollments(sessionId) {
+  if (!enrollOn()) return 0;
+  const ready = enrollPeople.filter(p => p.name.trim() && p.blob);
+  const names = ready.map(p => p.name.trim());
+  if (new Set(names).size !== names.length) {
+    showNotice("有兩位以上填了相同的姓名，請改成不同的名字後重新開始，這場先維持講者代號。");
+    return 0;
+  }
+  if (!ready.length) {
+    showNotice("預錄聲音辨識人已勾選，但沒有任何一位同時填了姓名並錄好音，這場會維持講者代號。");
+    return 0;
+  }
+  let done = 0;
+  for (const p of ready) {
+    const form = new FormData();
+    form.append("file", p.blob, "enroll" + (p.blob.type.includes("mp4") ? ".mp4" : ".webm"));
+    form.append("name", p.name.trim());
+    try {
+      await api.liveEnroll(sessionId, form);
+      done++;
+    } catch (e) {
+      showNotice(`「${p.name.trim()}」的聲音樣本上傳失敗（${e.message}），這個人會維持講者代號。`);
+    }
+  }
+  return done;
+}
+
+$("liveEnrollOn").addEventListener("change", () => {
+  $("liveEnrollBox").style.display = enrollOn() ? "" : "none";
+  if (enrollOn()) renderEnrollRows();
+});
+$("liveEnrollCount").addEventListener("change", renderEnrollRows);
+
 $("btnLiveStart").addEventListener("click", async () => {
   clearError();
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
@@ -424,6 +540,11 @@ $("btnLiveStart").addEventListener("click", async () => {
       terms: meetingTerms(),  // 會前打的詞彙要進每段轉錄，不是只進最後的分析
     })).session_id;
   } catch (e) { releaseLiveStreams(); showError(e.message); return; }
+
+  // 樣本必須趕在第一段音訊之前送達：後端結束時才比對得出誰是誰。
+  // 這裡失敗只會少幾個名字，不影響聆聽本身
+  if (enrollOn()) $("liveStatus").textContent = "上傳聲音樣本…";
+  await uploadEnrollments(liveSessionId);
 
   liveRecording = true;
   liveStartTime = Date.now();

@@ -154,6 +154,46 @@ def collect_speakers(text: str, known: list[str]) -> None:
             known.append(name)
 
 
+def pick_evidence_chunks(
+    parts: list[str | None], max_chunks: int = 4
+) -> list[int]:
+    """挑出要當「聲紋比對證據」的段落 index。
+
+    即時聆聽的 parts[i] 與 chunk_{i:03d} 音檔一一對應，所以只要選出段落編號，
+    就同時拿到了「音訊」與「那段音訊裡誰是哪個代號」——不必依時間戳切片。
+
+    每個代號挑它講最多行的那一段（話越多，模型越聽得出嗓音特徵），已被選中的
+    段落涵蓋到的代號就不再多挑一段。超過 max_chunks 時依代號出場序取，先出現
+    的通常是主席與主要發言者；上限存在是為了讓送進模型的音訊量有界，與會議
+    長度脫鉤。
+
+    None（還在辨識中）與沒有講者標籤的段落一律跳過——給不出對應關係的音訊
+    當證據只會干擾判斷。
+    """
+    counts: dict[str, dict[int, int]] = {}
+    order: list[str] = []
+    for index, text in enumerate(parts):
+        for line in (text or "").split("\n"):
+            label = speaker_of(line)
+            if not label:
+                continue
+            if label not in counts:
+                counts[label] = {}
+                order.append(label)
+            counts[label][index] = counts[label].get(index, 0) + 1
+
+    chosen: list[int] = []
+    for label in order:
+        if len(chosen) >= max_chunks:
+            break
+        if any(index in counts[label] for index in chosen):
+            continue  # 已選的段落裡就有這個代號在講話，夠了
+        # 同樣行數時取較早的段落：開場通常收音較穩、也還沒被打斷
+        best = max(counts[label].items(), key=lambda kv: (kv[1], -kv[0]))[0]
+        chosen.append(best)
+    return sorted(chosen)
+
+
 def speaker_hint(speakers: list[str]) -> str | None:
     """給下一段轉錄的提示：沿用已出現過的講者標籤，別重新編號。"""
     if not speakers:

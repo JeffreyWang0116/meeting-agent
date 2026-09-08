@@ -77,3 +77,31 @@ def test_index_html_loads_the_module_entry_point():
     assert '<script type="module" src="/static/js/main.js"></script>' in html
     # 舊的單檔進入點不該還被引用
     assert "/static/app.js" not in html
+
+
+# ---- $("someId") 引用的元素必須真的存在 ----
+
+STATIC_LOOKUP_RE = re.compile(r'\$\("([A-Za-z][\w-]*)"\)')
+# id 可能來自 index.html，也可能由 JS 自己以 innerHTML 產生（如 liveCaret）
+HTML_ID_RE = re.compile(r'\bid="([A-Za-z][\w-]*)"')
+
+
+def test_every_static_dom_lookup_has_a_matching_id(modules):
+    """$("liveEnrollOn") 這種寫死的查找，對應的元素一定要存在於某處。
+
+    打錯一個字、或改了 index.html 卻漏改 JS，瀏覽器只會在執行到那一行時丟
+    「null 沒有 addEventListener」——而且往往是使用者點下去才炸，後端測試全綠。
+    模組載入時就會執行的那些綁定更糟：整個 app.js 直接停擺。
+    """
+    html = (JS_DIR.parent / "index.html").read_text(encoding="utf-8")
+    known = set(HTML_ID_RE.findall(html))
+    for src in modules.values():  # JS 動態產生的元素也算數
+        known |= set(HTML_ID_RE.findall(src))
+
+    missing = sorted(
+        f"{name} 找不到元素 #{el}"
+        for name, src in modules.items()
+        for el in STATIC_LOOKUP_RE.findall(src)
+        if el not in known
+    )
+    assert not missing, "JS 引用了不存在的 DOM id：\n" + "\n".join(missing)

@@ -73,6 +73,7 @@ const api = {
   // ---- 即時聆聽 ----
   liveStart: payload => post("/api/live/start", payload),
   liveChunk: (sessionId, form) => post(`/api/live/${q(sessionId)}/chunk`, form),
+  liveEnroll: (sessionId, form) => post(`/api/live/${q(sessionId)}/enroll`, form),
   liveFinish: (sessionId, options) => post(`/api/live/${q(sessionId)}/finish`, options),
 
   // ---- 備份還原 ----
