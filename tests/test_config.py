@@ -75,3 +75,39 @@ def test_relative_data_dir_also_resolves_against_the_project_root(monkeypatch):
     """DATA_DIR 有同樣的陷阱：相對路徑會讓資料落在啟動目錄底下。"""
     monkeypatch.setenv("DATA_DIR", "./data")
     assert get_settings().data_dir.is_absolute()
+
+
+# ---- 「這是不是公開部署」 ----
+
+def test_render_env_var_marks_this_as_a_public_deploy(monkeypatch):
+    """Render 一定會自己設 RENDER=true，官方文件明講就是給程式判斷用的。
+
+    本機開發不設認證是刻意的方便，公開網址不設認證是災難——兩者唯一的差別
+    就是這個旗標，所以它必須讀得準。
+    """
+    monkeypatch.setenv("RENDER", "true")
+    assert get_settings().is_public_deploy is True
+
+
+def test_no_render_var_means_local_dev(monkeypatch):
+    monkeypatch.delenv("RENDER", raising=False)
+    assert get_settings().is_public_deploy is False
+
+
+def test_allow_no_auth_needs_an_explicit_opt_in(monkeypatch):
+    """「忘記設定」與「就是要開一個沒門的站」後果差太多，不該共用同一個預設值。"""
+    monkeypatch.delenv("ALLOW_NO_AUTH", raising=False)
+    assert get_settings().allow_no_auth is False
+
+    monkeypatch.setenv("ALLOW_NO_AUTH", "1")
+    assert get_settings().allow_no_auth is True
+
+
+def test_auth_configured_accepts_either_mechanism():
+    """帳號制或共用鑰匙，有一個就算有把關。"""
+    assert Settings().auth_configured is False
+    assert Settings(api_token="shared-key").auth_configured is True
+    assert Settings(
+        firebase_web_api_key="web-key",
+        firebase_auth_domain="demo.firebaseapp.com",
+    ).auth_configured is True

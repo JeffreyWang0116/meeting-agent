@@ -217,3 +217,58 @@ def test_login_without_admin_credentials_fails_loudly(tmp_path):
 
     with pytest.raises(RuntimeError, match="FIREBASE_CREDENTIALS"):
         create_app(settings, store=store, orchestrator=orchestrator)
+
+
+# ---- 公開部署卻完全沒有認證 ----
+
+def _plain_deps(tmp_path):
+    store = LocalJsonStore(tmp_path / "db.json")
+    orchestrator = Orchestrator(
+        parser=ParserAgent(),
+        decision=DecisionAgent(generate=lambda p: valid_json()),
+        executor=ExecutorAgent(store),
+        notifier=NotifierAgent(tmp_path / "notifications"),
+    )
+    return {"store": store, "orchestrator": orchestrator}
+
+
+def test_public_deploy_with_no_auth_at_all_refuses_to_start(tmp_path):
+    """兩種把關方式都沒設，卻跑在公開網址上＝全世界都能讀寫刪除所有會議、
+    燒光 Gemini 額度，而且完全沒有徵兆。
+
+    這是最容易犯的錯：render.yaml 裡這些值都是部署後才在後台填的，忘了填服務
+    照樣起得來、首頁照樣打得開，看起來一切正常。所以寧可啟動就失敗——理由與
+    上面那條半套 Firebase 設定完全相同。
+    """
+    settings = Settings(gemini_api_key=None, data_dir=tmp_path, is_public_deploy=True)
+
+    with pytest.raises(RuntimeError, match="API_TOKEN"):
+        create_app(settings, **_plain_deps(tmp_path))
+
+
+def test_shared_key_is_enough_to_start_a_public_deploy(tmp_path):
+    """共用鑰匙不是帳號制，但確實把門關上了，不該被擋。"""
+    settings = Settings(
+        gemini_api_key=None,
+        data_dir=tmp_path,
+        is_public_deploy=True,
+        api_token="shared-key",
+    )
+    assert create_app(settings, **_plain_deps(tmp_path)) is not None
+
+
+def test_explicit_opt_in_allows_a_public_deploy_with_no_door(tmp_path):
+    """真的想開一個沒有門的公開站是他家的事——但要說出口，不能用沉默表示。"""
+    settings = Settings(
+        gemini_api_key=None,
+        data_dir=tmp_path,
+        is_public_deploy=True,
+        allow_no_auth=True,
+    )
+    assert create_app(settings, **_plain_deps(tmp_path)) is not None
+
+
+def test_local_dev_without_auth_is_still_fine(tmp_path):
+    """本機開發不設認證是刻意的方便，守衛不該波及。"""
+    settings = Settings(gemini_api_key=None, data_dir=tmp_path)
+    assert create_app(settings, **_plain_deps(tmp_path)) is not None

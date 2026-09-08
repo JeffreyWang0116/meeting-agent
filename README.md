@@ -128,19 +128,26 @@ repo 已附 `Dockerfile`（含 ffmpeg）、`requirements-cloud.txt`（精簡依�
 2. 部署過程會要你填 `GEMINI_API_KEY`（金鑰只存在 Render 後台，不進 repo）；多把 key 就改設 `GEMINI_API_KEYS`
 3. 等 Docker build 完成，就會拿到一個公開網址（如 `https://meeting-agent.onrender.com`）
 
-`render.yaml` 已預設好雲端需要的環境變數（`TRANSCRIBE_ENGINE=gemini`、轉錄與分析模型皆為 `gemini-flash-lite-latest`）；金鑰類（`GEMINI_API_KEY`、`FIREBASE_CREDENTIALS_JSON`、`API_TOKEN`）標記 `sync: false`，不進 repo、由你在 Render 後台填。
+`render.yaml` 已預設好雲端需要的環境變數（`TRANSCRIBE_ENGINE=gemini`、轉錄與分析模型皆為 `gemini-flash-lite-latest`）；金鑰類（`GEMINI_API_KEY`、`FIREBASE_CREDENTIALS_JSON`）標記 `sync: false`，不進 repo、由你在 Render 後台填。`API_TOKEN` 例外：標記 `generateValue: true`，由 Render 自己產一串隨機值，所以**新部署一開始就是鎖上的**——要登入時到後台 Environment 分頁把值複製出來。
 
 > 免費方案注意：閒置一段時間後容器會休眠，下次連線需等約 30 秒冷啟動；檔案系統是暫時性的（重啟後 `db.json` 會清空）。要**永久保存任務資料**，加設 `FIREBASE_CREDENTIALS_JSON` 環境變數（見下方）即可切成 Firestore。
 
-#### 加上 API 認證（強烈建議，部署後網址是公開的）
+#### 加上 API 認證（部署後網址是公開的）
 
-不設 `API_TOKEN` 的話，任何人只要知道你的 Render 網址，就能直接呼叫 `/api/backup` 下載全部會議紀錄、`/api/restore` 覆蓋資料庫，或刪除任意會議/任務——沒有密碼也沒有登入頁。
+沒有任何認證的話，任何人只要知道你的 Render 網址，就能直接呼叫 `/api/backup` 下載全部會議紀錄、`/api/restore` 覆蓋資料庫，或刪除任意會議/任務——沒有密碼也沒有登入頁，而且**看起來完全正常**：服務活著、首頁打得開，沒有任何徵兆顯示門是開的。
 
-1. 在 Render 環境變數新增 `API_TOKEN`，填一串隨機字串（例如用 `openssl rand -hex 32` 產生）
-2. 重新部署後，所有 `/api/*` 端點（除了 `/api/health`）都會要求帶 `Authorization: Bearer <token>`
+所以有兩道防線：
+
+- `render.yaml` 的 `API_TOKEN` 用 `generateValue: true`，新部署一開始就有一把隨機鑰匙
+- 萬一兩種把關方式都沒設（例如刪掉了變數，或服務是舊藍圖建的），偵測到跑在 Render 上時**啟動會直接失敗**，訊息說明少了什麼。寧可服務起不來，也不要它開著門假裝正常
+
+用共用鑰匙時：
+
+1. 到 Render 環境變數把 `API_TOKEN` 的值複製出來（自動產生的；也可以自己改成別的隨機字串）
+2. 所有 `/api/*` 端點（除了 `/api/health`、`/api/auth/config`）都會要求帶 `Authorization: Bearer <token>`
 3. 開啟網頁時，前端第一次打 API 會收到 401，跳出輸入框貼上這串 token 即可（存在瀏覽器 `localStorage`，之後不用再輸入）
 
-本機開發預設不設 `API_TOKEN`，不會要求登入。
+本機開發預設不設 `API_TOKEN`，不會要求登入，啟動守衛也不會被觸發（它只看 Render 自動設的 `RENDER=true`）。真的要開一個沒有門的公開站，設 `ALLOW_NO_AUTH=1` 明講。
 
 #### 上傳大小上限
 

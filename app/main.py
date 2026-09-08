@@ -447,6 +447,17 @@ def create_app(
 
     app = FastAPI(title="會議助手")
 
+    if settings.is_public_deploy and not settings.auth_configured and not settings.allow_no_auth:
+        raise RuntimeError(
+            "這是公開部署（偵測到 RENDER），但兩種把關方式一個都沒設："
+            "沒有 FIREBASE_WEB_API_KEY / FIREBASE_AUTH_DOMAIN（Google 登入），"
+            "也沒有 API_TOKEN（共用鑰匙）。"
+            "這樣任何拿到網址的人都能讀取全部會議逐字稿、刪除資料、燒光 Gemini 額度。"
+            "這裡刻意讓啟動失敗，而不是照常起來——後者最危險的地方在於它看起來"
+            "一切正常：服務活著、首頁打得開，沒有任何徵兆顯示門是開的。"
+            "真的要開一個沒有門的公開站，設 ALLOW_NO_AUTH=1 明講。"
+        )
+
     if settings.auth_enabled:
         # Firebase Auth：一人一份資料。優先於共用 API_TOKEN——兩個都設的時候，
         # 共用鑰匙不該還能繞過帳號制

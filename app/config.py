@@ -90,12 +90,24 @@ class Settings:
     firebase_web_api_key: str | None = None
     firebase_auth_domain: str | None = None
     firebase_project_id: str | None = None
+    # 這份服務是不是跑在公開網址上。Render 一定會設 RENDER=true，官方文件明講
+    # 就是給程式判斷用的。本機不設認證是刻意的方便，公開網址不設認證是災難——
+    # create_app 要靠這個旗標分辨兩者
+    is_public_deploy: bool = False
+    # 「我知道，就是要開一個沒有門的公開站」。預設 False：忘記設定與刻意不設定，
+    # 後果差太多，不該共用同一個沉默的預設值
+    allow_no_auth: bool = False
 
     @property
     def auth_enabled(self) -> bool:
         """前端跑得動登入流程才算啟用：少了 authDomain，Google 登入視窗
         根本開不起來，那時要求 ID token 只會把所有人擋在門外。"""
         return bool(self.firebase_web_api_key and self.firebase_auth_domain)
+
+    @property
+    def auth_configured(self) -> bool:
+        """有任何一種把關方式：帳號制，或退而求其次的共用鑰匙。"""
+        return self.auth_enabled or bool(self.api_token)
 
 
 def get_settings() -> Settings:
@@ -149,4 +161,7 @@ def get_settings() -> Settings:
         firebase_web_api_key=os.environ.get("FIREBASE_WEB_API_KEY") or None,
         firebase_auth_domain=os.environ.get("FIREBASE_AUTH_DOMAIN") or None,
         firebase_project_id=os.environ.get("FIREBASE_PROJECT_ID") or None,
+        is_public_deploy=bool(os.environ.get("RENDER")),
+        allow_no_auth=os.environ.get("ALLOW_NO_AUTH", "").strip().lower()
+        in {"1", "true", "yes"},
     )
