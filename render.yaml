@@ -20,10 +20,10 @@ services:
       # 轉錄專用模型：吃掉絕大多數請求，用免費額度高的輕量版
       - key: TRANSCRIBE_MODEL
         value: gemini-flash-lite-latest
-      # 長檔（>10 分）整份單次轉錄用的強模型：講者分辨比 lite 分段好。
-      # 用釘死版本 gemini-3.5-flash，不用會飄到過載版本（503）的 -latest 別名。
-      # 給很多人同時傳長檔、想更省額度時，改設 TRANSCRIBE_LONG_FILE_THRESHOLD_SECONDS=0
-      # 讓長檔也走 lite 分段即可。
+      # 強模型：講者分辨比 lite 好，但每日只有 20 次且實測連打 5 次會中 1 次 503。
+      # 預設不啟用——長檔一律走 lite 分段（TRANSCRIBE_LONG_FILE_THRESHOLD_SECONDS
+      # 預設 0）。留著這個值是為了讓「想換回去」只要設一個門檻秒數就好：
+      # TRANSCRIBE_LONG_FILE_THRESHOLD_SECONDS=600 即恢復長檔用強模型整份轉錄。
       - key: TRANSCRIBE_FALLBACK_MODEL
         value: gemini-3.5-flash
       # 選填：貼上 Firebase service account JSON 即改用 Firestore 永久保存資料；
