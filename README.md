@@ -175,6 +175,8 @@ repo 已附 `Dockerfile`（含 ffmpeg）、`requirements-cloud.txt`（精簡依�
 
 > 只設前三個、忘了 `FIREBASE_CREDENTIALS_JSON` 的話，服務會**啟動失敗並說明少了什麼**。這是刻意的：悄悄退回單人模式會讓人以為網站已經上鎖，實際上是全開的，而且完全沒有徵兆。
 
+> **四個值必須全部來自同一個 Firebase 專案。** 混到兩個專案（多人協作時各自填各自的最容易發生）的話，服務也會**啟動失敗並指名是哪兩個對不上**。這種錯自己查極貴：登入畫面過得去、看起來登入成功，但進去之後每個 API 都失敗，而錯誤只說 `InvalidIdTokenError`——因為 token 由 A 專案簽發、後端拿 B 專案的身分驗簽。
+
 #### （選填）用 Firestore 永久保存資料
 
 不設定就是本地 JSON，Render 重啟會清空；設定後所有會議與代辦改存 Google Firestore，重新部署也不會遺失。

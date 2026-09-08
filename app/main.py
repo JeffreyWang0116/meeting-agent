@@ -463,7 +463,10 @@ def create_app(
         # 共用鑰匙不該還能繞過帳號制
         verify = verify_token or verify_firebase_id_token
         if verify is verify_firebase_id_token:
-            from app.firebase import ensure_app  # 驗簽需要已初始化的 firebase app
+            from app.firebase import (  # 驗簽需要已初始化的 firebase app
+                ensure_app,
+                require_matching_project,
+            )
 
             if not (settings.firebase_credentials_json or settings.firebase_credentials_file):
                 raise RuntimeError(
@@ -473,6 +476,13 @@ def create_app(
                     "這裡刻意讓啟動失敗，而不是悄悄退回單人模式——後者會讓人"
                     "以為網站已經上鎖，實際上是全開的，而且完全沒有徵兆。"
                 )
+            # 憑證存在還不夠，還得跟前端是同一個專案；不然登入過得去、
+            # 每個 API 都失敗，而錯誤完全不指向真正的原因
+            require_matching_project(
+                project_id=settings.firebase_project_id,
+                cred_json=settings.firebase_credentials_json,
+                cred_file=settings.firebase_credentials_file,
+            )
             ensure_app(
                 cred_json=settings.firebase_credentials_json,
                 cred_file=settings.firebase_credentials_file,

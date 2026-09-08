@@ -292,3 +292,24 @@ def test_verify_surfaces_the_real_firebase_reason(monkeypatch):
     monkeypatch.setattr(fa, "verify_id_token", boom)
     with pytest.raises(AuthError, match="aud.*Expected 'proj-A' but got 'proj-B'"):
         verify_firebase_id_token("some-token")
+
+
+def test_mismatched_firebase_projects_refuse_to_start(tmp_path):
+    """四個值混到兩個專案時，啟動就該失敗並指名是哪兩個對不上。
+
+    這是 2026-09-08 實際發生的事：兩個人各自把自己 Firebase 專案的金鑰填進
+    同一個 Render 服務。站台看起來完全正常（health 200、首頁打得開、登入畫面
+    過得去），但每個 API 都失敗，而錯誤訊息把人往轉錄和額度的方向帶，查了
+    一整晚。這道守衛會讓它在部署當下就爆。
+    """
+    settings = Settings(
+        gemini_api_key=None,
+        data_dir=tmp_path,
+        firebase_web_api_key="web-key",
+        firebase_auth_domain="meeting-agent-aaaaa.firebaseapp.com",
+        firebase_project_id="meeting-agent-aaaaa",
+        firebase_credentials_json='{"type":"service_account","project_id":"meeting-agent-bbbbb"}',
+    )
+
+    with pytest.raises(RuntimeError, match="meeting-agent-bbbbb"):
+        create_app(settings, **_plain_deps(tmp_path))
