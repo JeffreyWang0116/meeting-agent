@@ -272,3 +272,23 @@ def test_local_dev_without_auth_is_still_fine(tmp_path):
     """本機開發不設認證是刻意的方便，守衛不該波及。"""
     settings = Settings(gemini_api_key=None, data_dir=tmp_path)
     assert create_app(settings, **_plain_deps(tmp_path)) is not None
+
+
+# ---- 驗簽失敗要攤出真正原因 ----
+
+def test_verify_surfaces_the_real_firebase_reason(monkeypatch):
+    """firebase 的例外訊息（aud 專案不符／時鐘偏移／過期）是唯一的線索，
+    不能只留型別名。"""
+    import firebase_admin.auth as fa
+
+    from app.auth import AuthError, verify_firebase_id_token
+
+    def boom(_token):
+        raise ValueError(
+            "The Firebase ID token has incorrect 'aud' (audience) claim. "
+            "Expected 'proj-A' but got 'proj-B'."
+        )
+
+    monkeypatch.setattr(fa, "verify_id_token", boom)
+    with pytest.raises(AuthError, match="aud.*Expected 'proj-A' but got 'proj-B'"):
+        verify_firebase_id_token("some-token")

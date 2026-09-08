@@ -17,9 +17,12 @@
 """
 from __future__ import annotations
 
+import logging
 from contextvars import ContextVar
 
 from app.stores.base import DEFAULT_USER
+
+logger = logging.getLogger(__name__)
 
 # 目前這個請求屬於誰。沒有中介層設定時（單人模式、背景執行緒）就是預設值
 CURRENT_USER: ContextVar[str] = ContextVar("current_user", default=DEFAULT_USER)
@@ -49,5 +52,11 @@ def verify_firebase_id_token(id_token: str) -> str:
 
     try:
         return firebase_auth.verify_id_token(id_token)["uid"]
-    except Exception as exc:  # SDK 會丟各種子類別，對外一律是「這個 token 不能用」
-        raise AuthError(f"登入憑證無效或已過期（{type(exc).__name__}）") from exc
+    except Exception as exc:  # SDK 會丟各種子類別
+        # firebase 的例外「訊息」才是關鍵：aud 專案不符（Render 的 service account
+        # 跟前端 web 設定不是同一個專案）、時鐘偏移（Token used too early）、還是
+        # 真的過期，全靠這句話分辨。只印型別＝把唯一的線索丟掉。連 log 一起記，
+        # 這樣即使前端只看到摘要，伺服器端也查得到。
+        reason = str(exc).strip() or type(exc).__name__
+        logger.warning("ID token 驗證失敗：%s", reason)
+        raise AuthError(f"登入憑證無效：{reason}") from exc
