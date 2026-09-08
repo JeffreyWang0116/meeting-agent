@@ -162,14 +162,14 @@ def test_prompt_demands_evidence_and_forbids_guessing():
 
 def test_roster_names_appear_in_prompt_as_spelling_reference_only():
     """名冊是「寫法參考」不是「判斷依據」：不能因為某人在名冊上就把代號指給他。"""
-    agent = SpeakerNamerAgent(api_key="k", known_names=lambda: ["吳宗憲", "石崇良"])
+    agent = SpeakerNamerAgent(api_key="k", known_names=lambda user=None: ["吳宗憲", "石崇良"])
     prompt = agent.build_prompt(TRANSCRIPT)
     assert "吳宗憲、石崇良" in prompt
     assert "不是判斷依據" in prompt
 
 
 def test_empty_roster_adds_nothing_to_prompt():
-    with_roster = SpeakerNamerAgent(api_key="k", known_names=lambda: []).build_prompt(TRANSCRIPT)
+    with_roster = SpeakerNamerAgent(api_key="k", known_names=lambda user=None: []).build_prompt(TRANSCRIPT)
     assert with_roster == SpeakerNamerAgent(api_key="k").build_prompt(TRANSCRIPT)
 
 
@@ -179,7 +179,7 @@ def test_applied_names_are_remembered():
     agent = SpeakerNamerAgent(
         api_key="k",
         generate=lambda p: _reply({"講者A": "吳宗憲", "講者B": "石崇良"}),
-        remember_names=remembered.extend,
+        remember_names=lambda names, user=None: remembered.extend(names),
     )
     agent.name_speakers(TRANSCRIPT)
     assert remembered == ["吳宗憲", "石崇良"]
@@ -188,7 +188,8 @@ def test_applied_names_are_remembered():
 def test_nothing_remembered_when_no_names_applied():
     remembered = []
     agent = SpeakerNamerAgent(
-        api_key="k", generate=lambda p: "這不是 JSON", remember_names=remembered.extend
+        api_key="k", generate=lambda p: "這不是 JSON",
+        remember_names=lambda names, user=None: remembered.extend(names),
     )
     agent.name_speakers(TRANSCRIPT)
     assert remembered == []
@@ -204,3 +205,64 @@ def test_remember_failure_does_not_break_naming():
     )
     text, applied = agent.name_speakers(TRANSCRIPT)
     assert "吳宗憲：" in text and applied
+
+
+# ---- 名冊要綁使用者 ----
+
+def test_roster_reads_and_writes_are_scoped_to_the_user():
+    """name_speakers 沒帶 user 的話，名冊永遠讀寫 DEFAULT_USER 那一格。
+
+    在多帳號部署裡後果是：A 的與會者姓名被寫進共用格子，再餵進 B 的命名提示
+    ——姓名（個資）跨帳號外洩，而且完全沒有徵兆。executor 早就有帶 user，
+    只有這條路徑漏掉。
+    """
+    asked, remembered = [], []
+
+    agent = SpeakerNamerAgent(
+        generate=lambda prompt: _reply({"講者A": "王霖翔"}),
+        known_names=lambda user=None: (asked.append(user), [])[1],
+        remember_names=lambda names, user=None: remembered.append((user, names)),
+    )
+    agent.name_speakers(TRANSCRIPT, user="uid-A")
+
+    assert asked == ["uid-A"], f"讀名冊沒帶使用者：{asked}"
+    assert remembered and remembered[0][0] == "uid-A", f"寫名冊沒帶使用者：{remembered}"
+
+
+def test_orchestrator_passes_the_user_down_to_the_namer():
+    """user 就在 process_transcript 的參數裡，executor 有用、namer 漏掉。"""
+    from app.orchestrator import Orchestrator
+
+    got = {}
+
+    class FakeNamer:
+        def name_speakers(self, text, user=None):
+            got["user"] = user
+            return text, []
+
+    class FakeParser:
+        def parse(self, t):
+            return t
+
+    class FakeAnalysis:
+        def model_dump(self, mode=None):
+            return {}
+
+    class FakeDecision:
+        def analyze(self, text, **kw):
+            return FakeAnalysis()
+
+    class FakeExecutor:
+        def execute(self, *a, **kw):
+            return "m1"
+
+    class FakeNotifier:
+        def notify(self, *a, **kw):
+            return {}
+
+    Orchestrator(
+        parser=FakeParser(), decision=FakeDecision(),
+        executor=FakeExecutor(), notifier=FakeNotifier(), namer=FakeNamer(),
+    ).process_transcript("逐字稿", name_speakers=True, user="uid-B")
+
+    assert got["user"] == "uid-B"

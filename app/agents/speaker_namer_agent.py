@@ -17,6 +17,7 @@ import json
 import re
 
 from app.gemini_keys import KeyPool, call_with_rotation
+from app.stores.base import DEFAULT_USER
 from app.transcription.segments import SPEAKER_RE, replace_speaker, speaker_of
 
 _CODE_FENCE = re.compile(r"^\s*```(?:json)?\s*|\s*```\s*$")
@@ -86,7 +87,7 @@ class SpeakerNamerAgent:
 
     # ---- 對外介面 ----
 
-    def name_speakers(self, transcript: str) -> tuple[str, list[dict]]:
+    def name_speakers(self, transcript: str, user: str = DEFAULT_USER) -> tuple[str, list[dict]]:
         """回傳 (換上姓名的逐字稿, 實際套用的對應清單)。
 
         任何一步出錯都回傳原文＋空清單：代號本身是可用的，補姓名是加分項，
@@ -95,20 +96,21 @@ class SpeakerNamerAgent:
         if not transcript or not transcript.strip():
             return transcript, []
         try:
-            raw = self._generate(self.build_prompt(transcript))
+            raw = self._generate(self.build_prompt(transcript, user))
             mapping = _parse_mapping(raw)
         except Exception:
             return transcript, []
         text, applied = apply_speaker_names(transcript, mapping)
         if applied and self._remember_names:
             try:
-                self._remember_names([a["name"] for a in applied])
+                self._remember_names([a["name"] for a in applied], user)
             except Exception:
                 pass  # 名冊寫入失敗不該讓已經完成的對應付諸流水
         return text, applied
 
-    def build_prompt(self, transcript: str) -> str:
-        names = self._known_names() if self._known_names else []
+    def build_prompt(self, transcript: str, user: str = DEFAULT_USER) -> str:
+        # 名冊必須依使用者取：共用一格的話，A 的與會者姓名會餵進 B 的提示
+        names = self._known_names(user) if self._known_names else []
         return PROMPT_TEMPLATE.format(
             max_len=MAX_NAME_LEN,
             transcript=transcript,

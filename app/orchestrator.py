@@ -59,7 +59,7 @@ class Orchestrator:
         # 預設不對應姓名：轉錄輸出的講者A/B/C 已可用，補真名是選用的加分項。
         # 台語等語者辨識不穩的錄音，猜錯的名字比代號更糟，所以由呼叫端明確開啟
         if name_speakers and self.namer:
-            text, speaker_names = self.namer.name_speakers(text)
+            text, speaker_names = self.namer.name_speakers(text, user=user)
         analysis = self.decision.analyze(
             text, meeting_date=meeting_date, kind=kind, features=features, extra_terms=terms
         )
