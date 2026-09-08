@@ -713,6 +713,25 @@
 
   .progress { height: 6px; background: var(--card-2); border-radius: 999px; overflow: hidden; }
   .progress > div { height: 100%; width: 0%; background: var(--ink); transition: width .4s; }
+  /* 轉錄卡在同一個百分比時：長段落轉錄進度本來就會不動好一陣子，靜止的進度條
+     會讓人以為當掉了。加一道流動光澤＋狀態列轉圈，明白表示還在跑。sheen 的亮色
+     用 --card-2（軌道色），在深淺兩色主題都與 --ink 填色有對比 */
+  .progress.stuck > div {
+    background-image: linear-gradient(90deg, transparent 15%, var(--card-2) 50%, transparent 85%);
+    background-size: 220% 100%;
+    animation: progress-sheen 1.15s linear infinite;
+  }
+  @keyframes progress-sheen { from { background-position: 180% 0; } to { background-position: -80% 0; } }
+  .spinner {
+    display: inline-block; width: .85em; height: .85em; margin-left: .45em; vertical-align: -.12em;
+    border: 2px solid var(--card-2); border-top-color: var(--ink); border-radius: 50%;
+    animation: spin .7s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) {
+    .progress.stuck > div { animation-duration: 2.4s; }
+    .spinner { animation-duration: 1.6s; }
+  }
   .status-line { font-size: .84rem; color: var(--muted); display: flex; align-items: center; gap: 8px; }
   .transcript-box {
     background: var(--card-2); border: 1px solid var(--border); border-radius: var(--radius-md);

@@ -60,13 +60,22 @@ $("btnUpload").addEventListener("click", async () => {
     if (nameSpeakers()) form.append("name_speakers", "true");
     const { job_id } = await api.uploadMedia(form);
 
+    let lastPct = -1, stalled = 0;
     while (true) {
       await new Promise(r => setTimeout(r, 1500));
       const job = await api.mediaJob(job_id);
       const pct = Math.round((job.progress || 0) * 100);
       $("fileProgress").firstElementChild.style.width = pct + "%";
-      $("fileStatus").textContent =
-        JOB_STATUS_ZH[job.status] + (job.status === "transcribing" ? `（${pct}%）` : "");
+      // 卡在同一個百分比超過兩輪（~3 秒）就切成「處理中」樣式：長段落轉錄時
+      // 進度本來就會不動好一陣子，靜止的進度條會讓人以為當掉了
+      const transcribing = job.status === "transcribing";
+      stalled = transcribing && pct === lastPct ? stalled + 1 : 0;
+      lastPct = pct;
+      const stuck = stalled >= 2;
+      $("fileProgress").classList.toggle("stuck", stuck);
+      $("fileStatus").innerHTML =
+        esc(JOB_STATUS_ZH[job.status] + (transcribing ? `（${pct}%）` : "")) +
+        (stuck ? '<span class="spinner" aria-hidden="true"></span>' : "");
       if (job.transcript) {
         renderChat($("fileTranscript"), job.transcript);
         $("fileTranscript").scrollTop = $("fileTranscript").scrollHeight;
