@@ -83,9 +83,9 @@ def test_prompt_instructs_dedupe_and_priority_reason():
 def test_prompt_includes_kind_hint_when_given():
     from app.agents.decision_agent import build_prompt
 
-    # 舊值「講座」會被對應到新的「教育訓練」
+    # 舊值「講座」會被對應到還存在的種類
     prompt = build_prompt("測試", MEETING_DATE, kind="講座")
-    assert "會議種類：教育訓練" in prompt
+    assert "會議種類：其它" in prompt
     # 沒指定種類時不出現種類段落（維持通用行為）
     assert "會議種類" not in build_prompt("測試", MEETING_DATE)
 
@@ -98,9 +98,9 @@ def test_analyze_passes_kind_into_prompt():
         return valid_json()
 
     DecisionAgent(generate=fake_generate).analyze(
-        "測試", meeting_date=MEETING_DATE, kind="設計技術評審"
+        "測試", meeting_date=MEETING_DATE, kind="專案會議"
     )
-    assert "會議種類：設計技術評審" in captured["prompt"]
+    assert "會議種類：專案會議" in captured["prompt"]
 
 
 def test_prompt_asks_for_tags():
@@ -244,7 +244,7 @@ def test_legacy_kind_values_still_resolve():
     from app.agents.decision_agent import MEETING_KINDS, resolve_kind
 
     assert resolve_kind("會議") == "一般會議"
-    assert resolve_kind("講座") == "教育訓練"
+    assert resolve_kind("講座") == "其它"  # 教育訓練也移除了，再往下對應
     assert resolve_kind("語音備忘錄") == "語音備忘錄"  # 這個種類留下來了
     assert resolve_kind(None) is None
     assert resolve_kind("銷售拜訪") == "銷售拜訪"
@@ -272,7 +272,7 @@ def test_per_meeting_terms_work_without_a_global_glossary():
     assert "Kessel" in prompt
 
 
-# ---- 種類專屬輸出區塊（銷售拜訪 / 回顧會議 / 事故檢討）----
+# ---- 種類專屬輸出區塊（目前只有銷售拜訪的 BANT）----
 
 def test_kind_sections_appear_in_schema_and_instructions():
     from app.agents.decision_agent import KIND_SECTIONS, build_prompt
@@ -331,3 +331,61 @@ def test_sections_are_reordered_to_the_defined_order():
     result = agent.analyze("測試", meeting_date=MEETING_DATE, kind="銷售拜訪")
     assert [s.label for s in result.sections] == ["預算", "需求"]
     assert result.sections[0].items == ["50 萬"]
+
+
+# ---- 會議種類選單：幾份名單必須彼此對得上 ----
+
+def test_menu_kinds_and_hints_stay_in_sync():
+    """選單列的每個種類都要有分析提示，反之亦然。
+
+    KIND_GROUPS（選單）與 KIND_HINTS（提示）是兩份分開維護的名單，
+    增刪種類時很容易只改一邊——少了這個測試會慢慢對不上，而且不會報錯。
+    """
+    from app.agents.decision_agent import KIND_GROUPS, KIND_HINTS
+
+    listed = [k for _, kinds in KIND_GROUPS for k in kinds]
+    assert sorted(listed) == sorted(KIND_HINTS)
+    assert len(listed) == len(set(listed)), "同一個種類不該出現在兩個分組"
+
+
+def test_legacy_kinds_all_point_at_kinds_that_still_exist():
+    """舊值的對應目標必須是還存在的種類。
+
+    實際踩到的雷：把「教育訓練」從選單拿掉時，LEGACY_KINDS 裡的
+    「講座 → 教育訓練」就懸空了——舊紀錄被對應到一個已不存在的種類，
+    而這不會拋任何錯，只是分析提示默默消失，極難察覺。
+    """
+    from app.agents.decision_agent import LEGACY_KINDS, MEETING_KINDS
+
+    for old, new in LEGACY_KINDS.items():
+        assert new in MEETING_KINDS, f"「{old}」對應到已不存在的「{new}」"
+
+
+def test_kinds_dropped_from_the_menu_still_open_old_records():
+    """從選單移除的種類，既有紀錄仍要能讀取、重新分析與編輯——
+    validate_kind 同時接受 MEETING_KINDS 與 LEGACY_KINDS，靠的就是這層對應。"""
+    from app.agents.decision_agent import MEETING_KINDS, resolve_kind
+
+    for gone in (
+        "團隊站會", "專案啟動會", "專案進度會議", "設計技術評審",
+        "回顧會議", "事故檢討", "教育訓練", "腦力激盪", "全體會議",
+    ):
+        assert resolve_kind(gone) in MEETING_KINDS, f"「{gone}」的舊紀錄會開不起來"
+
+
+def test_project_group_is_a_single_kind():
+    from app.agents.decision_agent import KIND_GROUPS
+
+    assert dict(KIND_GROUPS)["專案"] == ["專案會議"]
+
+
+def test_side_tables_only_mention_kinds_that_exist():
+    """種類專屬區塊與預設功能表都不該留下已移除種類的殘骸。"""
+    from app.agents.decision_agent import (
+        KIND_DEFAULT_FEATURES,
+        KIND_SECTIONS,
+        MEETING_KINDS,
+    )
+
+    for kind in {**KIND_SECTIONS, **KIND_DEFAULT_FEATURES}:
+        assert kind in MEETING_KINDS, f"「{kind}」已不在選單裡"
