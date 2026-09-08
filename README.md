@@ -65,7 +65,7 @@
 | 長音檔分段秒數 | `TRANSCRIBE_CHUNK_SECONDS` | `240`（0＝不分段） | 每段各算一次轉錄請求；**六分鐘以內的檔案不分段**，整份送出 |
 | 標註率不足時的 Lite 重試次數 | `TRANSCRIBE_LABEL_RETRIES` | `2` | 每次僅佔每日額度 0.2% |
 | 長檔／講者標註備援的強模型 | `TRANSCRIBE_FALLBACK_MODEL` | `gemini-3.5-flash`（空＝關閉） | 比 lite 分講者好，但每日僅 20 次且常 503 |
-| 長檔改用強模型的門檻（秒）| `TRANSCRIBE_LONG_FILE_THRESHOLD_SECONDS` | `0`（停用，長檔一律 lite 分段）| 設 600 即恢復長檔用強模型 |
+| 長檔改用強模型的門檻（秒）| `TRANSCRIBE_LONG_FILE_THRESHOLD_SECONDS` | `600`（10 分鐘；0＝停用，一律 lite 分段）| 超過就用強模型整份單次轉錄，語者分辨較佳（代價：Flash 每日僅 20 次、長檔整份呼叫易 503）|
 | 每個檔案最多幾段可用備援模型 | `TRANSCRIBE_MAX_FALLBACK_CHUNKS` | `0`（＝預設完全不動用 Flash） | 設 1 才會在重試仍失敗時降級 |
 | 單一檔案的重試總上限 | `TRANSCRIBE_MAX_RETRY_CALLS` | `10` | 讓重試成本與影片長度脫鉤 |
 | 分段之間往前多抓幾秒 | `TRANSCRIBE_OVERLAP_SECONDS` | `20` | 讓講者標籤跨段接得起來 |

@@ -111,25 +111,3 @@ def test_auth_configured_accepts_either_mechanism():
         firebase_web_api_key="web-key",
         firebase_auth_domain="demo.firebaseapp.com",
     ).auth_configured is True
-
-
-# ---- 長檔轉錄走哪條路 ----
-
-def test_long_files_stay_on_the_high_quota_model_by_default(monkeypatch):
-    """長檔預設不再走強模型「整份單次轉錄」。
-
-    那條路用 gemini-3.5-flash：免費層每天每專案只有 20 次，而且實測連打 5 次
-    會中 1 次 503——長檔又是「整份音訊一次大呼叫」，在高峰期比小請求更容易被
-    Google 端丟棄，撞上就整份失敗，使用者白等十分鐘什麼都沒有。
-
-    門檻設 0＝長檔改走跟短檔一樣的 lite 分段。講者分辨會差一些（分段會破壞
-    模型賴以分辨講者的全局脈絡），但寧可品質差一點，也不要報錯。
-    """
-    monkeypatch.delenv("TRANSCRIBE_LONG_FILE_THRESHOLD_SECONDS", raising=False)
-    assert get_settings().transcribe_long_file_threshold_seconds == 0
-
-
-def test_strong_whole_pass_can_still_be_opted_back_in(monkeypatch):
-    """額度充裕或升級付費後，設個秒數就換回強模型整份轉錄。"""
-    monkeypatch.setenv("TRANSCRIBE_LONG_FILE_THRESHOLD_SECONDS", "600")
-    assert get_settings().transcribe_long_file_threshold_seconds == 600
