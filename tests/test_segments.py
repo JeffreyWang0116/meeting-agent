@@ -408,3 +408,19 @@ def test_chunk_hint_without_tail_is_unchanged():
     hint = chunk_hint([])
     assert "重疊" not in hint
     assert "不可省略" in hint  # 但仍要求標註講者
+
+
+def test_last_timestamp_seconds_reads_the_newest_line():
+    """串流轉錄時用它估進度：模型吐到第幾秒，就是轉錄到第幾秒。"""
+    from app.transcription.segments import last_timestamp_seconds
+
+    text = "[0:05] 講者A：開始\n[1:30] 講者B：中間\n[2:07] 講者A：現在"
+    assert last_timestamp_seconds(text) == 127
+
+
+def test_last_timestamp_seconds_ignores_lines_without_one():
+    from app.transcription.segments import last_timestamp_seconds
+
+    assert last_timestamp_seconds("[0:10] 講者A：有\n沒有時間戳的一行") == 10
+    assert last_timestamp_seconds("完全沒有時間戳") is None
+    assert last_timestamp_seconds("") is None

@@ -160,7 +160,7 @@ def test_long_file_uses_strong_model_whole_pass(monkeypatch, tmp_path):
     used = []
 
     class Tracking(GeminiTranscriber):
-        def _transcribe_one(self, audio_path, hint, model=None):
+        def _transcribe_one(self, audio_path, hint, model=None, on_partial=None):
             used.append(model or self.model)
             return "[0:00] 講者A：整場一次轉完\n[5:00] 講者B：分得很清楚"
 
@@ -181,7 +181,7 @@ def test_medium_file_still_uses_lite_chunking(monkeypatch, tmp_path):
     used = []
 
     class Tracking(GeminiTranscriber):
-        def _transcribe_one(self, audio_path, hint, model=None):
+        def _transcribe_one(self, audio_path, hint, model=None, on_partial=None):
             used.append(model or self.model)
             return "[0:00] 講者A：內容"
 
@@ -202,7 +202,7 @@ def test_long_file_without_strong_model_falls_back_to_chunking(monkeypatch, tmp_
     used = []
 
     class Tracking(GeminiTranscriber):
-        def _transcribe_one(self, audio_path, hint, model=None):
+        def _transcribe_one(self, audio_path, hint, model=None, on_partial=None):
             used.append(model or self.model)
             return "[0:00] 講者A：內容"
 
@@ -223,7 +223,7 @@ def test_strong_whole_disabled_when_threshold_zero(monkeypatch, tmp_path):
     used = []
 
     class Tracking(GeminiTranscriber):
-        def _transcribe_one(self, audio_path, hint, model=None):
+        def _transcribe_one(self, audio_path, hint, model=None, on_partial=None):
             used.append(model or self.model)
             return "[0:00] 講者A：內容"
 
@@ -269,7 +269,7 @@ class FakeChunkedSetup:
         setup = self
 
         class Recording(GeminiTranscriber):
-            def _transcribe_one(self, audio_path, hint, model=None):
+            def _transcribe_one(self, audio_path, hint, model=None, on_partial=None):
                 setup.hints.append(hint)
                 return setup.texts[str(audio_path)]
 
@@ -425,7 +425,7 @@ class RetryingSetup(FakeChunkedSetup):
         calls = {"n": 0}
 
         class Sequenced(GeminiTranscriber):
-            def _transcribe_one(self, audio_path, hint, model=None):
+            def _transcribe_one(self, audio_path, hint, model=None, on_partial=None):
                 text = sequence[min(calls["n"], len(sequence) - 1)]
                 calls["n"] += 1
                 return text
@@ -570,7 +570,7 @@ def test_falls_back_to_stronger_model_when_retries_all_fail(monkeypatch, tmp_pat
     used_models = []
 
     class Tracking(GeminiTranscriber):
-        def _transcribe_one(self, audio_path, hint, model=None):
+        def _transcribe_one(self, audio_path, hint, model=None, on_partial=None):
             used_models.append(model or self.model)
             if model == "gemini-flash-latest":
                 return "[0:00] 講者A：強模型標得好\n[0:05] 講者B：也標了"
@@ -595,7 +595,7 @@ def test_stronger_model_not_used_when_labels_are_fine(monkeypatch, tmp_path):
     used_models = []
 
     class Tracking(GeminiTranscriber):
-        def _transcribe_one(self, audio_path, hint, model=None):
+        def _transcribe_one(self, audio_path, hint, model=None, on_partial=None):
             used_models.append(model or self.model)
             return "[0:00] 講者A：標得很好\n[0:05] 講者B：也是"
 
@@ -611,7 +611,7 @@ def test_fallback_result_discarded_if_worse(monkeypatch, tmp_path):
     FakeChunkedSetup(monkeypatch, tmp_path, duration=600, chunk_texts=["", ""])
 
     class Tracking(GeminiTranscriber):
-        def _transcribe_one(self, audio_path, hint, model=None):
+        def _transcribe_one(self, audio_path, hint, model=None, on_partial=None):
             if model:
                 return "[0:00] 完全沒標\n[0:05] 也沒標"
             return "[0:00] 講者A：至少有一行\n[0:05] 沒標"
@@ -636,7 +636,7 @@ def test_no_fallback_when_not_configured(monkeypatch, tmp_path):
     calls = []
 
     class Tracking(GeminiTranscriber):
-        def _transcribe_one(self, audio_path, hint, model=None):
+        def _transcribe_one(self, audio_path, hint, model=None, on_partial=None):
             calls.append(model)
             return "[0:00] 沒標\n[0:05] 也沒標"
 
@@ -658,7 +658,7 @@ def _all_failing(monkeypatch, tmp_path, chunks, **kw):
     used = []
 
     class Tracking(GeminiTranscriber):
-        def _transcribe_one(self, audio_path, hint, model=None):
+        def _transcribe_one(self, audio_path, hint, model=None, on_partial=None):
             used.append(model or self.model)
             return "[0:00] 沒標\n[0:05] 也沒標"
 
@@ -696,7 +696,7 @@ def test_successful_chunks_do_not_consume_fallback_budget(monkeypatch, tmp_path)
     seen = {"n": 0}
 
     class Tracking(GeminiTranscriber):
-        def _transcribe_one(self, audio_path, hint, model=None):
+        def _transcribe_one(self, audio_path, hint, model=None, on_partial=None):
             used.append(model or self.model)
             seen["n"] += 1
             # 第一段標得好，之後兩段都失敗
@@ -765,3 +765,98 @@ def test_chunk_fully_inside_overlap_is_skipped(monkeypatch, tmp_path):
     text = setup.transcriber(chunk_seconds=240, overlap_seconds=20).transcribe(src)
     assert text == "[0:05] 講者A：第一段"
     assert not text.endswith("\n")
+
+
+# ---- 串流轉錄：進度要一路動，不能卡在 10% 再跳完成 ----
+
+def _short_file(monkeypatch, tmp_path, duration=180):
+    from app.transcription import media
+
+    monkeypatch.setattr(media, "ffmpeg_available", lambda: True)
+    monkeypatch.setattr(media, "audio_duration", lambda p: duration)
+    src = tmp_path / "clip.wav"
+    src.write_bytes(b"RIFF-fake")
+    return src
+
+
+def test_short_file_reports_progress_while_streaming(monkeypatch, tmp_path):
+    """六分鐘以內的檔案不分段，整份走一次大呼叫。
+
+    原本只回報 0.1 然後一路阻塞到結束才 1.0——使用者看到的是進度條卡在 10%
+    幾分鐘，然後瞬間完成，完全無從判斷是在跑還是掛了。改成串流後，模型每吐
+    一段就依「最後一個時間戳 ÷ 音檔長度」回報真實進度。
+    """
+    src = _short_file(monkeypatch, tmp_path, duration=180)
+    pieces = ["[0:00] 講者A：開始\n", "[1:00] 講者B：中段\n", "[2:30] 講者A：結尾\n"]
+    seen = []
+
+    t = GeminiTranscriber(
+        api_key="k",
+        upload=lambda p: {"h": 1},
+        generate=lambda h: iter(pieces),  # 產生器＝模擬串流
+        chunk_seconds=240,
+    )
+    text = t.transcribe(src, on_progress=lambda f, txt: seen.append((f, txt)))
+
+    fractions = [f for f, _ in seen]
+    assert fractions == sorted(fractions), f"進度不能倒退：{fractions}"
+    middle = [f for f in fractions if 0.1 < f < 1.0]
+    assert len(middle) >= 2, f"串流中要有多個中間進度，不能 10%→完成：{fractions}"
+    assert "結尾" in text
+
+
+def test_streaming_surfaces_partial_transcript(monkeypatch, tmp_path):
+    """進度數字之外，逐字稿本身也要邊轉邊出現——那比百分比更能讓人安心。"""
+    src = _short_file(monkeypatch, tmp_path, duration=180)
+    seen = []
+
+    t = GeminiTranscriber(
+        api_key="k",
+        upload=lambda p: {"h": 1},
+        generate=lambda h: iter(["[0:00] 講者A：開始\n", "[1:00] 講者B：中段\n"]),
+        chunk_seconds=240,
+    )
+    t.transcribe(src, on_progress=lambda f, txt: seen.append((f, txt)))
+
+    partials = [txt for f, txt in seen if 0.1 < f < 1.0]
+    assert any("中段" in x for x in partials), f"串流中看不到部分逐字稿：{seen}"
+
+
+def test_plain_string_generate_still_works(monkeypatch, tmp_path):
+    """注入的假 generate 回傳字串（非產生器）時照舊運作，不強迫改寫。"""
+    src = _short_file(monkeypatch, tmp_path, duration=180)
+    t = GeminiTranscriber(
+        api_key="k", upload=lambda p: {"h": 1},
+        generate=lambda h: "[0:00] 講者A：一次講完", chunk_seconds=240,
+    )
+    assert "一次講完" in t.transcribe(src)
+
+
+def test_chunked_progress_moves_within_a_chunk(monkeypatch, tmp_path):
+    """長檔逐段轉錄，段與段之間隔數十秒。段內也要回報進度，否則一小時的檔案
+    就是 15 次跳動、中間一直不動——看起來仍像卡住。
+
+    段內只推進度數字、不送預覽文字：預覽文字由每段完成時送出（jobs.py 會把
+    每次回報的文字接起來），段內再送一份會重複計算。
+    """
+    src = tmp_path / "long.wav"
+    src.write_bytes(b"RIFF-fake")
+    FakeChunkedSetup(monkeypatch, tmp_path, duration=480, chunk_texts=["a", "b"])
+    calls = []
+
+    class Streaming(GeminiTranscriber):
+        def _transcribe_one(self, audio_path, hint, model=None, on_partial=None):
+            if on_partial:
+                on_partial("[1:00] 講者A：前半")
+                on_partial("[1:00] 講者A：前半\n[3:00] 講者A：後半")
+            # 時間戳是段內相對時間，要避開重疊區（第二段起前 20 秒被濾掉）
+            return "[2:00] 講者A：內容"
+
+    t = Streaming(api_key="k", chunk_seconds=240)
+    t.transcribe(src, on_progress=lambda f, txt: calls.append((round(f, 2), txt)))
+
+    fractions = [f for f, _ in calls]
+    assert fractions == sorted(fractions), f"進度不能倒退：{fractions}"
+    assert any(0 < f < 0.5 for f in fractions), f"第一段段內沒有進度：{fractions}"
+    assert [f for f, _ in calls if f in (0.5, 1.0)] == [0.5, 1.0], "每段完成仍要回報"
+    assert all(txt == "" for f, txt in calls if f not in (0.5, 1.0)), "段內不該送預覽文字"

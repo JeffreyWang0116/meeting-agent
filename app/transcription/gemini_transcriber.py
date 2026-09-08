@@ -22,6 +22,7 @@ from app.transcription.segments import (
     collect_speakers,
     drop_empty_lines,
     drop_lines_before,
+    last_timestamp_seconds,
     normalize_timestamps,
     shift_timestamps,
     speaker_label_ratio,
@@ -153,12 +154,14 @@ class GeminiTranscriber:
 
         # 長檔：強模型整份單次轉錄（見 strong_model 的說明）
         if self._use_strong_whole(duration):
-            return self._transcribe_whole(audio_path, on_progress, hint, self.strong_model)
+            return self._transcribe_whole(
+                audio_path, on_progress, hint, self.strong_model, duration
+            )
 
         chunks = self._plan_chunks(audio_path, duration)
         if chunks:
             return self._transcribe_chunked(chunks, on_progress, hint)
-        return self._transcribe_whole(audio_path, on_progress, hint, None)
+        return self._transcribe_whole(audio_path, on_progress, hint, None, duration)
 
     # ---- 內部 ----
 
@@ -171,17 +174,45 @@ class GeminiTranscriber:
         )
 
     def _transcribe_whole(
-        self, audio_path: Path, on_progress, hint: str | None, model: str | None
+        self,
+        audio_path: Path,
+        on_progress,
+        hint: str | None,
+        model: str | None,
+        duration: float | None = None,
     ) -> str:
         """整份單次轉錄（不分段）。model=None 用預設模型（短檔走 lite），
-        指定 model 則用該模型（長檔走強模型）。"""
+        指定 model 則用該模型（長檔走強模型）。
+
+        串流收字：整份轉錄是一次長呼叫，不串流的話進度條會卡在 10% 好幾分鐘
+        再瞬間跳完成，使用者無從判斷是還在跑還是已經掛了。進度依「最後一個
+        時間戳 ÷ 音檔長度」估算，是真實進度而不是動畫。
+        """
         if on_progress:
             on_progress(0.1, "")
+
+        report = None
+        sent = 0  # 已送出幾個字元：on_progress 收的是增量，不是全文
+        highest = 0.1
+        if on_progress and duration:
+
+            def report(partial: str) -> None:
+                nonlocal sent, highest
+                delta, sent = partial[sent:], len(partial)
+                seconds = last_timestamp_seconds(partial)
+                if seconds is not None:
+                    # 留 0.99 給收尾：吐完最後一句不等於整份處理完
+                    highest = max(highest, min(0.99, seconds / duration))
+                on_progress(highest, delta)
+
         text = drop_empty_lines(
-            normalize_timestamps(self._transcribe_one(audio_path, hint, model=model))
+            normalize_timestamps(
+                self._transcribe_one(audio_path, hint, model=model, on_partial=report)
+            )
         )
         if on_progress:
-            on_progress(1.0, text)
+            # 串流過的話預覽已逐段送出，這裡只推進度；沒串流才補上全文
+            on_progress(1.0, "" if sent else text)
         return text
 
     def _plan_chunks(self, audio_path: Path, duration: float | None = None) -> list[Path]:
@@ -210,6 +241,28 @@ class GeminiTranscriber:
         retries_left = self.max_retry_calls  # 整個檔案共用的重試預算
         chunk_dir = chunks[0].parent
         previous_tail = ""
+        # 已回報過的最高進度：段內重試會讓時間戳從頭來過，不能讓進度倒退
+        highest = 0.0
+
+        def inner_reporter(index: int):
+            """回報「這一段轉到哪了」。段與段之間隔數十秒，只有段完成才更新
+            的話，長檔看起來仍像卡住。段內只推進度數字——預覽文字由每段完成
+            時送出，這裡再送一份會被 jobs.py 重複接起來。"""
+            if not on_progress or self.chunk_seconds <= 0:
+                return None
+
+            def report(partial: str) -> None:
+                nonlocal highest
+                seconds = last_timestamp_seconds(partial)
+                if seconds is None:
+                    return
+                inner = min(1.0, seconds / self.chunk_seconds)
+                fraction = min(0.99, (index + inner) / len(chunks))
+                if fraction > highest:
+                    highest = fraction
+                    on_progress(fraction, "")
+
+            return report
         try:
             for index, chunk in enumerate(chunks):
                 # own_start：本段「負責」的內容從整場的第幾秒開始
@@ -230,6 +283,7 @@ class GeminiTranscriber:
                     this_hint,
                     allow_fallback=fallback_used < self.max_fallback_chunks,
                     retry_budget=retries_left,
+                    on_partial=inner_reporter(index),
                 )
                 if used_fallback:
                     fallback_used += 1
@@ -265,6 +319,7 @@ class GeminiTranscriber:
         hint: str | None,
         allow_fallback: bool = True,
         retry_budget: int | None = None,
+        on_partial=None,
     ) -> tuple[str, bool, int]:
         """轉錄一段，講者標註率太低就重跑，取標得最好的那次。
 
@@ -283,7 +338,7 @@ class GeminiTranscriber:
         best, best_ratio = "", -1.0
         retries_used = 0
         for attempt in range(allowed_retries + 1):
-            text = self._transcribe_one(chunk, hint)
+            text = self._transcribe_one(chunk, hint, on_partial=on_partial)
             if attempt:
                 retries_used += 1
             ratio = speaker_label_ratio(text)
@@ -300,23 +355,41 @@ class GeminiTranscriber:
         # 一次。allow_fallback 由呼叫端控管，避免一個難搞的檔案把強模型額度用光
         if allow_fallback and self.fallback_model and self.fallback_model != self.model:
             logger.info("%s 改用 %s 重跑", chunk.name, self.fallback_model)
-            text = self._transcribe_one(chunk, hint, model=self.fallback_model)
+            text = self._transcribe_one(
+                chunk, hint, model=self.fallback_model, on_partial=on_partial
+            )
             if speaker_label_ratio(text) > best_ratio:
                 best = text
             return best, True, retries_used
         return best, False, retries_used
 
     def _transcribe_one(
-        self, audio_path: Path, hint: str | None, model: str | None = None
+        self,
+        audio_path: Path,
+        hint: str | None,
+        model: str | None = None,
+        on_partial=None,
     ) -> str:
+        """on_partial(累積至今的文字)：有給就走串流，模型每吐一段就呼叫一次。"""
         if self._upload or self._generate:  # 測試注入假物件，不經金鑰輪替
             uploaded = self._upload(audio_path)
-            return (self._generate(uploaded) or "").strip()
+            result = self._generate(uploaded)
+            if result is None or isinstance(result, str):
+                return (result or "").strip()
+            # 產生器＝串流，讓測試不必碰真 API 也能驗進度回報
+            text = ""
+            for piece in result:
+                text += piece
+                if on_partial:
+                    on_partial(text)
+            return text.strip()
         # 上傳的檔案綁在該 key 的專案底下，所以「上傳＋轉錄」必須整組用同一把 key
         return (
             call_with_rotation(
                 self._pool,
-                lambda key: self._transcribe_with_key(key, audio_path, hint, model),
+                lambda key: self._transcribe_with_key(
+                    key, audio_path, hint, model, on_partial
+                ),
             )
             or ""
         ).strip()
@@ -345,6 +418,7 @@ class GeminiTranscriber:
         path: Path,
         hint: str | None = None,
         model: str | None = None,
+        on_partial=None,
     ) -> str:
         client = self._client(key)
         uploaded = client.files.upload(file=str(path))
@@ -359,12 +433,21 @@ class GeminiTranscriber:
                     raise GeminiTranscribeError("Gemini 檔案處理失敗，請換一個檔案再試")
                 time.sleep(1)
                 uploaded = client.files.get(name=uploaded.name)
-            response = client.models.generate_content(
-                model=model or self.model,
-                contents=[self.build_prompt(hint), uploaded],
-                config={"temperature": 0.0},
-            )
-            return response.text or ""
+            args = {
+                "model": model or self.model,
+                "contents": [self.build_prompt(hint), uploaded],
+                "config": {"temperature": 0.0},
+            }
+            if on_partial is None:
+                return client.models.generate_content(**args).text or ""
+            # 串流：一次長呼叫沒有中間狀態可看，逐段收才回報得出真實進度
+            text = ""
+            for event in client.models.generate_content_stream(**args):
+                piece = getattr(event, "text", None)
+                if piece:
+                    text += piece
+                    on_partial(text)
+            return text
         finally:
             # Files API 有 20GB 儲存上限；即時聆聽每 45 秒上傳一個檔，用完即刪，
             # 不留給 48 小時自動清除（否則長時間聆聽很快撞到上限）

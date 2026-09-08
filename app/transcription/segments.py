@@ -55,6 +55,20 @@ def parse_time_label(label: str) -> int:
     return seconds
 
 
+def last_timestamp_seconds(text: str) -> int | None:
+    """文字裡最後一個時間戳是第幾秒；一個都沒有回 None。
+
+    串流轉錄時用來估進度：模型吐到第幾秒，就是聽到第幾秒。比「已經收到幾個字」
+    可靠得多——講話密度差很多，字數與時間不成比例。
+    """
+    last = None
+    for line in text.splitlines():
+        matched = TIME_PREFIX_RE.match(line)
+        if matched:
+            last = parse_time_label(matched.group(1))
+    return last
+
+
 def strip_time_prefix(line: str) -> str:
     return TIME_PREFIX_RE.sub("", line)
 
