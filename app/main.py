@@ -414,6 +414,14 @@ def create_app(
                 # 長檔改用強模型整份單次轉錄：語者分辨遠優於 lite 分段
                 strong_model=settings.transcribe_fallback_model,
                 strong_whole_threshold=settings.transcribe_long_file_threshold_seconds,
+                # 聲紋跨段接力（暫時停用，程式碼與測試都保留）：分段轉錄時把已
+                # 確立的講者聲音樣本接力餵給後續分段，讓模型靠嗓音沿用同一代號。
+                # 機制與失敗處理都做完也測過了，但每段轉錄都要重傳全部樣本（重試
+                # 也會重傳），一支 77 分鐘的檔約多 240~400 次上傳往返、多花數分鐘，
+                # 而「模型是否真的因此標對代號」還沒用真檔驗證過。先不接上去，
+                # 等實測確認值得再說。
+                # 啟用方式：取消下面這行註解（額度／延遲的取捨見 README）
+                # voice_relay_max_speakers=settings.voice_relay_max_speakers,
             )
         else:
             transcriber = Transcriber(

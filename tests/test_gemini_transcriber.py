@@ -160,7 +160,7 @@ def test_long_file_uses_strong_model_whole_pass(monkeypatch, tmp_path):
     used = []
 
     class Tracking(GeminiTranscriber):
-        def _transcribe_one(self, audio_path, hint, model=None, on_partial=None):
+        def _transcribe_one(self, audio_path, hint, model=None, on_partial=None, voice_refs=None):
             used.append(model or self.model)
             return "[0:00] 講者A：整場一次轉完\n[5:00] 講者B：分得很清楚"
 
@@ -181,7 +181,7 @@ def test_medium_file_still_uses_lite_chunking(monkeypatch, tmp_path):
     used = []
 
     class Tracking(GeminiTranscriber):
-        def _transcribe_one(self, audio_path, hint, model=None, on_partial=None):
+        def _transcribe_one(self, audio_path, hint, model=None, on_partial=None, voice_refs=None):
             used.append(model or self.model)
             return "[0:00] 講者A：內容"
 
@@ -202,7 +202,7 @@ def test_long_file_without_strong_model_falls_back_to_chunking(monkeypatch, tmp_
     used = []
 
     class Tracking(GeminiTranscriber):
-        def _transcribe_one(self, audio_path, hint, model=None, on_partial=None):
+        def _transcribe_one(self, audio_path, hint, model=None, on_partial=None, voice_refs=None):
             used.append(model or self.model)
             return "[0:00] 講者A：內容"
 
@@ -223,7 +223,7 @@ def test_strong_whole_disabled_when_threshold_zero(monkeypatch, tmp_path):
     used = []
 
     class Tracking(GeminiTranscriber):
-        def _transcribe_one(self, audio_path, hint, model=None, on_partial=None):
+        def _transcribe_one(self, audio_path, hint, model=None, on_partial=None, voice_refs=None):
             used.append(model or self.model)
             return "[0:00] 講者A：內容"
 
@@ -269,7 +269,7 @@ class FakeChunkedSetup:
         setup = self
 
         class Recording(GeminiTranscriber):
-            def _transcribe_one(self, audio_path, hint, model=None, on_partial=None):
+            def _transcribe_one(self, audio_path, hint, model=None, on_partial=None, voice_refs=None):
                 setup.hints.append(hint)
                 return setup.texts[str(audio_path)]
 
@@ -425,7 +425,7 @@ class RetryingSetup(FakeChunkedSetup):
         calls = {"n": 0}
 
         class Sequenced(GeminiTranscriber):
-            def _transcribe_one(self, audio_path, hint, model=None, on_partial=None):
+            def _transcribe_one(self, audio_path, hint, model=None, on_partial=None, voice_refs=None):
                 text = sequence[min(calls["n"], len(sequence) - 1)]
                 calls["n"] += 1
                 return text
@@ -570,7 +570,7 @@ def test_falls_back_to_stronger_model_when_retries_all_fail(monkeypatch, tmp_pat
     used_models = []
 
     class Tracking(GeminiTranscriber):
-        def _transcribe_one(self, audio_path, hint, model=None, on_partial=None):
+        def _transcribe_one(self, audio_path, hint, model=None, on_partial=None, voice_refs=None):
             used_models.append(model or self.model)
             if model == "gemini-flash-latest":
                 return "[0:00] 講者A：強模型標得好\n[0:05] 講者B：也標了"
@@ -595,7 +595,7 @@ def test_stronger_model_not_used_when_labels_are_fine(monkeypatch, tmp_path):
     used_models = []
 
     class Tracking(GeminiTranscriber):
-        def _transcribe_one(self, audio_path, hint, model=None, on_partial=None):
+        def _transcribe_one(self, audio_path, hint, model=None, on_partial=None, voice_refs=None):
             used_models.append(model or self.model)
             return "[0:00] 講者A：標得很好\n[0:05] 講者B：也是"
 
@@ -611,7 +611,7 @@ def test_fallback_result_discarded_if_worse(monkeypatch, tmp_path):
     FakeChunkedSetup(monkeypatch, tmp_path, duration=600, chunk_texts=["", ""])
 
     class Tracking(GeminiTranscriber):
-        def _transcribe_one(self, audio_path, hint, model=None, on_partial=None):
+        def _transcribe_one(self, audio_path, hint, model=None, on_partial=None, voice_refs=None):
             if model:
                 return "[0:00] 完全沒標\n[0:05] 也沒標"
             return "[0:00] 講者A：至少有一行\n[0:05] 沒標"
@@ -636,7 +636,7 @@ def test_no_fallback_when_not_configured(monkeypatch, tmp_path):
     calls = []
 
     class Tracking(GeminiTranscriber):
-        def _transcribe_one(self, audio_path, hint, model=None, on_partial=None):
+        def _transcribe_one(self, audio_path, hint, model=None, on_partial=None, voice_refs=None):
             calls.append(model)
             return "[0:00] 沒標\n[0:05] 也沒標"
 
@@ -658,7 +658,7 @@ def _all_failing(monkeypatch, tmp_path, chunks, **kw):
     used = []
 
     class Tracking(GeminiTranscriber):
-        def _transcribe_one(self, audio_path, hint, model=None, on_partial=None):
+        def _transcribe_one(self, audio_path, hint, model=None, on_partial=None, voice_refs=None):
             used.append(model or self.model)
             return "[0:00] 沒標\n[0:05] 也沒標"
 
@@ -696,7 +696,7 @@ def test_successful_chunks_do_not_consume_fallback_budget(monkeypatch, tmp_path)
     seen = {"n": 0}
 
     class Tracking(GeminiTranscriber):
-        def _transcribe_one(self, audio_path, hint, model=None, on_partial=None):
+        def _transcribe_one(self, audio_path, hint, model=None, on_partial=None, voice_refs=None):
             used.append(model or self.model)
             seen["n"] += 1
             # 第一段標得好，之後兩段都失敗
@@ -845,7 +845,7 @@ def test_chunked_progress_moves_within_a_chunk(monkeypatch, tmp_path):
     calls = []
 
     class Streaming(GeminiTranscriber):
-        def _transcribe_one(self, audio_path, hint, model=None, on_partial=None):
+        def _transcribe_one(self, audio_path, hint, model=None, on_partial=None, voice_refs=None):
             if on_partial:
                 on_partial("[1:00] 講者A：前半")
                 on_partial("[1:00] 講者A：前半\n[3:00] 講者A：後半")
@@ -877,8 +877,241 @@ def test_transcriber_reports_every_api_call(monkeypatch, tmp_path):
     t = GeminiTranscriber(api_key="k", chunk_seconds=240, on_call=lambda: calls.append(1))
     monkeypatch.setattr(
         t, "_transcribe_with_key",
-        lambda key, path, hint=None, model=None, on_partial=None: "[0:10] 講者A：內容",
+        lambda key, path, hint=None, model=None, on_partial=None, voice_refs=None: "[0:10] 講者A：內容",
     )
     t.transcribe(src)
 
     assert len(calls) == 4, f"四段應各記一次，實際 {len(calls)}"
+
+
+# ---- 聲紋跨段接力（approach A）：分段轉錄邊轉邊建聲音簿，接力餵給後續分段 ----
+
+
+def test_voice_relay_grows_book_and_passes_refs_to_next_chunk(monkeypatch, tmp_path):
+    """新代號的聲音樣本剪出來後，從下一段開始當參考音訊接力餵給模型。"""
+    from app.transcription import media
+
+    src = tmp_path / "long.wav"
+    src.write_bytes(b"RIFF-fake")
+    setup = FakeChunkedSetup(monkeypatch, tmp_path, duration=600, chunk_texts=[
+        "[0:00] 講者A：第一段開頭發言內容比較長一點才挑得到樣本",
+        "[0:00] 講者A：延續\n[0:20] 講者B：新的人",
+    ])
+
+    cut_calls = []
+
+    def fake_cut_clip(path, start, end, output_path=None):
+        cut_calls.append((path, start, end))
+        return Path(f"{path}.clip{len(cut_calls)}.wav")
+
+    monkeypatch.setattr(media, "cut_clip", fake_cut_clip)
+    captured_refs = []
+
+    class Recording(GeminiTranscriber):
+        def _transcribe_one(self, audio_path, hint, model=None, on_partial=None, voice_refs=None):
+            captured_refs.append(voice_refs)
+            return setup.texts[str(audio_path)]
+
+    Recording(api_key="k", chunk_seconds=240, voice_relay_max_speakers=20, overlap_seconds=0).transcribe(src)
+
+    assert captured_refs[0] is None  # 第一段還沒有任何樣本可用
+    assert {r["label"] for r in captured_refs[1]} == {"講者A"}  # 第一段確立的講者
+    assert len(cut_calls) == 2  # 講者A（第一段後）、講者B（第二段後）各剪一次
+
+
+def test_voice_relay_disabled_by_default_never_cuts_clips(monkeypatch, tmp_path):
+    """預設 voice_relay_max_speakers=0：功能停用不該產生任何額外的 ffmpeg 呼叫。"""
+    from app.transcription import media
+
+    src = tmp_path / "long.wav"
+    src.write_bytes(b"RIFF-fake")
+    setup = FakeChunkedSetup(monkeypatch, tmp_path, duration=600, chunk_texts=[
+        "[0:00] 講者A：開頭",
+        "[0:00] 講者B：後段",
+    ])
+    cut_calls = []
+    monkeypatch.setattr(
+        media, "cut_clip",
+        lambda *a, **k: cut_calls.append(1) or Path("unused.wav"),
+    )
+    captured_refs = []
+
+    class Recording(GeminiTranscriber):
+        def _transcribe_one(self, audio_path, hint, model=None, on_partial=None, voice_refs=None):
+            captured_refs.append(voice_refs)
+            return setup.texts[str(audio_path)]
+
+    Recording(api_key="k", chunk_seconds=240).transcribe(src)  # 預設值，未指定
+
+    assert cut_calls == []
+    assert all(refs is None for refs in captured_refs)
+
+
+def test_voice_relay_caps_at_max_speakers(monkeypatch, tmp_path):
+    """封頂之後不再替新代號剪樣本，但既有樣本繼續沿用。"""
+    from app.transcription import media
+
+    src = tmp_path / "long.wav"
+    src.write_bytes(b"RIFF-fake")
+    setup = FakeChunkedSetup(monkeypatch, tmp_path, duration=900, chunk_texts=[
+        "[0:00] 講者A：第一位發言內容足夠長",
+        "[0:00] 講者B：第二位發言內容也足夠長",
+        "[0:00] 講者C：第三位應該被擋在封頂之外",
+    ])
+    cut_calls = []
+
+    def fake_cut_clip(path, start, end, output_path=None):
+        cut_calls.append(1)
+        return Path(f"{path}.clip{len(cut_calls)}.wav")
+
+    monkeypatch.setattr(media, "cut_clip", fake_cut_clip)
+    captured_refs = []
+
+    class Recording(GeminiTranscriber):
+        def _transcribe_one(self, audio_path, hint, model=None, on_partial=None, voice_refs=None):
+            captured_refs.append(voice_refs)
+            return setup.texts[str(audio_path)]
+
+    Recording(api_key="k", chunk_seconds=240, voice_relay_max_speakers=2, overlap_seconds=0).transcribe(src)
+
+    assert len(cut_calls) == 2  # 講者A、講者B 各一次；講者C 被擋下
+    # 第三段開始前，聲音簿已滿在講者A／B，講者C 不會出現在任何一次的 refs 裡
+    assert all(
+        refs is None or all(r["label"] != "講者C" for r in refs) for refs in captured_refs
+    )
+
+
+def test_voice_relay_skips_speaker_when_clip_cut_fails(monkeypatch, tmp_path):
+    """剪音檔失敗（ffmpeg 出錯）不該讓整個轉錄跟著失敗，只是那個代號沒有樣本。"""
+    from app.transcription import media
+
+    src = tmp_path / "long.wav"
+    src.write_bytes(b"RIFF-fake")
+    setup = FakeChunkedSetup(monkeypatch, tmp_path, duration=600, chunk_texts=[
+        "[0:00] 講者A：第一段內容足夠長才挑得到樣本",
+        "[0:00] 講者A：第二段",
+    ])
+
+    def failing_cut_clip(path, start, end, output_path=None):
+        raise media.MediaError("seek 失敗")
+
+    monkeypatch.setattr(media, "cut_clip", failing_cut_clip)
+    captured_refs = []
+
+    class Recording(GeminiTranscriber):
+        def _transcribe_one(self, audio_path, hint, model=None, on_partial=None, voice_refs=None):
+            captured_refs.append(voice_refs)
+            return setup.texts[str(audio_path)]
+
+    text = Recording(
+        api_key="k", chunk_seconds=240, voice_relay_max_speakers=20, overlap_seconds=0
+    ).transcribe(src)
+
+    assert "第一段" in text and "第二段" in text  # 整份轉錄仍然完成
+    assert all(refs is None for refs in captured_refs)  # 剪樣本失敗，聲音簿始終是空的
+
+
+def test_voice_relay_skips_speaker_without_valid_sample_span(monkeypatch, tmp_path):
+    """代號沒有帶時間戳的有效發言（例如整段沒有內容）就不會被加進聲音簿。"""
+    from app.transcription import media
+
+    src = tmp_path / "long.wav"
+    src.write_bytes(b"RIFF-fake")
+    setup = FakeChunkedSetup(monkeypatch, tmp_path, duration=600, chunk_texts=[
+        "講者A：這句沒有時間戳",  # collect_speakers 認得到代號，但無從剪音檔
+        "講者A：這句同樣沒有時間戳",
+    ])
+    cut_calls = []
+    monkeypatch.setattr(
+        media, "cut_clip",
+        lambda *a, **k: cut_calls.append(1) or Path("unused.wav"),
+    )
+    captured_refs = []
+
+    class Recording(GeminiTranscriber):
+        def _transcribe_one(self, audio_path, hint, model=None, on_partial=None, voice_refs=None):
+            captured_refs.append(voice_refs)
+            return setup.texts[str(audio_path)]
+
+    Recording(api_key="k", chunk_seconds=240, voice_relay_max_speakers=20, overlap_seconds=0).transcribe(src)
+
+    assert cut_calls == []
+    assert all(refs is None for refs in captured_refs)
+
+
+def test_voice_samples_do_not_overwrite_each_other(monkeypatch, tmp_path):
+    """同一個時間戳出現多位講者時，算出來的取樣區間可能完全相同——若用區間
+    當檔名，後剪的會蓋掉前一個，聲音簿裡兩個代號指向同一段音訊，等於告訴
+    模型「這是A的聲音」又「這是B的聲音」卻放同一段，比沒有樣本更糟。"""
+    from app.transcription import media
+
+    src = tmp_path / "long.wav"
+    src.write_bytes(b"RIFF-fake")
+    setup = FakeChunkedSetup(monkeypatch, tmp_path, duration=600, chunk_texts=[
+        "[0:05] 講者A：短\n[0:05] 講者B：短\n[0:05] 講者C：短",
+        "[0:10] 講者A：第二段",
+    ])
+    # 來源檔 600 秒（才會分段）；分段檔各 240 秒（夾取範圍的依據）
+    monkeypatch.setattr(
+        media, "audio_duration",
+        lambda p: 240 if "chunk_" in str(p) else 600,
+    )
+    written = []
+
+    def fake_cut_clip(path, start, end, output_path=None):
+        assert output_path is not None, "必須指定輸出路徑，不能讓預設檔名互相覆蓋"
+        written.append(Path(output_path))
+        return Path(output_path)
+
+    monkeypatch.setattr(media, "cut_clip", fake_cut_clip)
+    captured_refs = []
+
+    class Recording(GeminiTranscriber):
+        def _transcribe_one(self, audio_path, hint, model=None, on_partial=None, voice_refs=None):
+            captured_refs.append(voice_refs)
+            return setup.texts[str(audio_path)]
+
+    Recording(
+        api_key="k", chunk_seconds=240, voice_relay_max_speakers=20, overlap_seconds=0
+    ).transcribe(src)
+
+    assert len(written) == len(set(written)), f"樣本檔名撞號：{written}"
+    paths = [r["path"] for r in captured_refs[1]]
+    assert len(paths) == len(set(paths)), "不同代號不可以指向同一個樣本檔"
+
+
+def test_voice_sample_skipped_when_timestamp_drifts_past_the_chunk(monkeypatch, tmp_path):
+    """模型的時間戳會漂（本 repo 實測長音訊會漂到超過實際長度）。漂到分段
+    音檔之外時去剪，ffmpeg 會 seek 過頭吐出一段空音訊卻不報錯——那種「樣本」
+    上傳上去只會誤導模型，不如不要。"""
+    from app.transcription import media
+
+    src = tmp_path / "long.wav"
+    src.write_bytes(b"RIFF-fake")
+    setup = FakeChunkedSetup(monkeypatch, tmp_path, duration=600, chunk_texts=[
+        "[5:30] 講者A：這個時間戳已經超出這段音檔的長度",  # chunk 只有 240 秒
+        "[0:10] 講者B：這段在範圍內",
+    ])
+    # 來源檔 600 秒（才會分段）；分段檔各 240 秒（夾取範圍的依據）
+    monkeypatch.setattr(
+        media, "audio_duration",
+        lambda p: 240 if "chunk_" in str(p) else 600,
+    )
+    cut_spans = []
+
+    def fake_cut_clip(path, start, end, output_path=None):
+        cut_spans.append((start, end))
+        return Path(output_path or "x.wav")
+
+    monkeypatch.setattr(media, "cut_clip", fake_cut_clip)
+
+    class Recording(GeminiTranscriber):
+        def _transcribe_one(self, audio_path, hint, model=None, on_partial=None, voice_refs=None):
+            return setup.texts[str(audio_path)]
+
+    Recording(
+        api_key="k", chunk_seconds=240, voice_relay_max_speakers=20, overlap_seconds=0
+    ).transcribe(src)
+
+    assert all(start < 240 for start, _ in cut_spans), f"剪到音檔範圍外：{cut_spans}"
+    assert all(end <= 240 for _, end in cut_spans), f"結束點超出音檔：{cut_spans}"

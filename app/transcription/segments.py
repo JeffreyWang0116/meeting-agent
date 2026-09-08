@@ -212,6 +212,47 @@ def transcript_tail(text: str, max_lines: int = 6) -> str:
     return "\n".join(lines[-max_lines:])
 
 
+def speaker_sample_span(
+    text: str,
+    code: str,
+    max_seconds: float = 8.0,
+    min_seconds: float = 2.0,
+) -> tuple[float, float] | None:
+    """在（本地時間戳的）逐字稿裡，替講者 code 挑一段有代表性的發言時間區間。
+
+    回傳 (start, end) 秒，或 None（該代號沒有帶時間戳、有內容的發言，無從在
+    音檔裡定位）。挑內容最長的一次發言——字多＝嗓音樣本較充足、跨段比對較準。
+    end 取「下一個時間戳」與 start+max_seconds 的較小者（樣本不跨到別人講話），
+    但不短於 min_seconds。續行（沒有自己時間戳）的內容併入前一個 turn 計長。
+    """
+    target = speaker_of(f"{code}：")
+    if not target:
+        return None
+    turns: list[list] = []  # [start_sec, speaker, content_len]
+    for line in text.split("\n"):
+        m = TIME_PREFIX_RE.match(line)
+        if m:
+            rest = strip_time_prefix(line)
+            mm = SPEAKER_RE.match(rest)
+            content = rest[mm.end():] if mm else rest
+            turns.append(
+                [parse_time_label(m.group(1)), speaker_of(line),
+                 sum(ch.isalnum() for ch in content)]
+            )
+        elif turns:
+            turns[-1][2] += sum(ch.isalnum() for ch in line)
+    best = -1
+    for i, (_, spk, clen) in enumerate(turns):
+        if spk == target and clen > 0 and (best < 0 or clen > turns[best][2]):
+            best = i
+    if best < 0:
+        return None
+    start = float(turns[best][0])
+    nxt = turns[best + 1][0] if best + 1 < len(turns) else None
+    end = start + max_seconds if nxt is None else min(float(nxt), start + max_seconds)
+    return (start, max(end, start + min_seconds))
+
+
 def drop_lines_before(text: str, seconds: float) -> str:
     """丟掉時間戳早於 seconds 的行（時間戳須已平移成整場時間）。
 

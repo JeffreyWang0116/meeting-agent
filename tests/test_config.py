@@ -133,3 +133,22 @@ def test_strong_whole_pass_can_still_be_opted_back_in(monkeypatch):
     """額度充裕或升級付費後，設個秒數就換回強模型整份轉錄。"""
     monkeypatch.setenv("TRANSCRIBE_LONG_FILE_THRESHOLD_SECONDS", "600")
     assert get_settings().transcribe_long_file_threshold_seconds == 600
+
+
+# ---- 聲紋跨段接力（approach A）：分段轉錄邊轉邊建聲音簿，接力餵給後續分段 ----
+
+def test_voice_relay_defaults_to_twenty_speakers(monkeypatch):
+    """預設開、封頂 20 位——這是每段轉錄多附帶的參考音訊數量上限，
+    設太高會讓每次呼叫的延遲與流量跟著膨脹。"""
+    monkeypatch.delenv("VOICE_RELAY_MAX_SPEAKERS", raising=False)
+    assert get_settings().voice_relay_max_speakers == 20
+
+
+def test_voice_relay_can_be_disabled(monkeypatch):
+    monkeypatch.setenv("VOICE_RELAY_MAX_SPEAKERS", "0")
+    assert get_settings().voice_relay_max_speakers == 0
+
+
+def test_voice_relay_env_var_wins(monkeypatch):
+    monkeypatch.setenv("VOICE_RELAY_MAX_SPEAKERS", "5")
+    assert get_settings().voice_relay_max_speakers == 5

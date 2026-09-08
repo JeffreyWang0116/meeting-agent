@@ -86,6 +86,13 @@ class Settings:
     # 端丟棄，撞上就整份失敗、使用者白等十分鐘。講者分辨差一點可以接受，白等
     # 一場然後報錯不行。額度充裕或升級付費後設 600（10 分鐘）即可換回。
     transcribe_long_file_threshold_seconds: int = 0
+    # 聲紋跨段接力（approach A）：分段轉錄時邊轉邊建「聲音簿」，把已確立的
+    # 講者聲音樣本接力餵給後續分段，模型才有真的聽得到的依據去沿用同一個
+    # 代號，不必再靠純文字提示憑空猜測。這是額度邊際成本很低的功能——樣本
+    # 只在轉錄期間短暫存在（不落地成獨立 API 呼叫，是主要轉錄呼叫多帶的
+    # 幾個檔案），所以預設開；封頂 20 位是為了不讓每次呼叫的參考音訊無限
+    # 膨脹（立院質詢動輒十幾位委員＋列席官員）。設 0 停用整個功能
+    voice_relay_max_speakers: int = 20
     data_dir: Path = field(default_factory=lambda: BASE_DIR / "data")
     # Firebase 金鑰：任一有值就用 Firestore 雲端儲存，否則用本地 JSON
     firebase_credentials_json: str | None = None  # service account JSON 字串（Render 用）
@@ -163,6 +170,9 @@ def get_settings() -> Settings:
         ),
         transcribe_long_file_threshold_seconds=int(
             os.environ.get("TRANSCRIBE_LONG_FILE_THRESHOLD_SECONDS", "0")
+        ),
+        voice_relay_max_speakers=int(
+            os.environ.get("VOICE_RELAY_MAX_SPEAKERS", "20")
         ),
         data_dir=_under_base(os.environ.get("DATA_DIR")) or BASE_DIR / "data",
         firebase_credentials_json=os.environ.get("FIREBASE_CREDENTIALS_JSON") or None,

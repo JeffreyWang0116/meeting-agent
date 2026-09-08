@@ -89,6 +89,37 @@ def audio_duration(path: str | Path) -> float | None:
         return None
 
 
+def cut_clip(
+    input_path: str | Path,
+    start_seconds: float,
+    end_seconds: float,
+    output_path: str | Path | None = None,
+) -> Path:
+    """剪出 [start_seconds, end_seconds) 這段音訊（供聲紋接力當講者的聲音樣本）。
+
+    輸出統一單聲道 16kHz WAV，與 extract_audio／split_audio 一致——不需要
+    額外轉檔就能直接當 Gemini 的參考音訊上傳。
+    """
+    input_path = Path(input_path)
+    output_path = (
+        Path(output_path)
+        if output_path
+        else input_path.parent
+        / f"{input_path.stem}_clip_{int(start_seconds)}_{int(end_seconds)}.wav"
+    )
+    cmd = [
+        _ffmpeg_cmd() or "ffmpeg", "-y",
+        "-ss", f"{start_seconds:.3f}", "-t", f"{end_seconds - start_seconds:.3f}",
+        "-i", str(input_path),
+        "-vn", "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le",
+        str(output_path),
+    ]
+    proc = subprocess.run(cmd, capture_output=True, text=True, errors="replace")
+    if proc.returncode != 0:
+        raise MediaError(f"ffmpeg 剪音檔失敗：{(proc.stderr or '').strip()[-500:]}")
+    return output_path
+
+
 def split_audio(
     input_path: str | Path,
     chunk_seconds: int,

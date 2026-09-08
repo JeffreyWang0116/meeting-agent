@@ -26,8 +26,10 @@ from app.transcription.segments import (
     normalize_timestamps,
     shift_timestamps,
     speaker_label_ratio,
+    speaker_sample_span,
     transcript_tail,
 )
+from app.transcription.voice_match import wait_until_active
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +49,9 @@ DEFAULT_CHUNK_THRESHOLD_SECONDS = 360  # 6 分鐘
 # 舊值 0.5 是配合當時會灌水的標註率計算訂的——句中冒號（「重點：…」）被誤判
 # 成講者，真實標註率再低都能衝過 0.5，重試等於從來沒有真正生效過。
 MIN_SPEAKER_LABEL_RATIO = 0.8
+
+# 聲紋樣本短於這個秒數就不值得剪：太短的音訊比對不出嗓音，還要多付一次上傳
+_MIN_VOICE_SAMPLE_SECONDS = 1.0
 
 # 轉錄 prompt：務必強力要求分辨講者。實測 gemini-flash-lite 在「弱提示」下
 # 幾乎不標講者（多人對話被併成一段，使用者只看到講者A/B 甚至沒標），把要求
@@ -77,6 +82,35 @@ class GeminiTranscribeError(Exception):
     pass
 
 
+def voice_relay_parts(voice_refs: list[dict] | None) -> list[str | Path]:
+    """把「聲音簿」組成 Gemini contents 的一段前導內容：先前分段已經確認過的
+    講者聲音範例＋比對指示。voice_refs 是 [{"label": 代號, "path": 音檔}, ...]。
+
+    沒有樣本（第一段，或功能停用）就回空 list，不佔用這次呼叫——這是
+    approach A 的核心：模型每段轉錄都是全新呼叫、沒有跨段記憶，光靠文字
+    提示「請沿用同一個代號指稱同一個人」，模型從沒真的聽過那個人的聲音，
+    等於要它憑空判斷。這裡把之前段落已經確認的嗓音實際餵給它，讓「沿用
+    代號」從文字指示變成真的聽得到、比對得了的依據。
+
+    指示放在所有樣本之後：模型先聽完全部參考音再看到要求，比先看到要求
+    再逐一聽樣本更容易對應起來。
+    """
+    if not voice_refs:
+        return []
+    parts: list[str | Path] = [
+        "以下是先前段落已經確認的講者聲音範例，請記住每個代號對應的嗓音："
+    ]
+    for ref in voice_refs:
+        parts.append(f"【{ref['label']}】的聲音範例：")
+        parts.append(Path(ref["path"]))
+    parts.append(
+        "接下來要轉錄的錄音如果出現上述任一範例的嗓音，請沿用對應的代號；"
+        "只有確定是全新的聲音才使用新的代號，不要僅因音色相近就混用，"
+        "也不要因為之前用過某個代號就略過中間沒出現過的代號。"
+    )
+    return parts
+
+
 class GeminiTranscriber:
     def __init__(
         self,
@@ -95,6 +129,7 @@ class GeminiTranscriber:
         max_retry_calls: int = 10,
         strong_model: str | None = None,
         strong_whole_threshold: int = 0,
+        voice_relay_max_speakers: int = 0,
     ):
         # 多把 key 輪替（429 換下一把）；單把 api_key 為向後相容寫法
         self._pool = KeyPool(api_keys if api_keys else [api_key])
@@ -135,6 +170,11 @@ class GeminiTranscriber:
         # 設 0，或 strong_model 為 None，就停用這條路徑（一律照舊 lite 分段）
         self.strong_model = strong_model
         self.strong_whole_threshold = strong_whole_threshold
+        # 分段轉錄時邊轉邊建「聲音簿」{代號: 樣本音檔}，接力餵給後續分段當
+        # 參考音訊（approach A：見 voice_relay_parts）。0＝停用，不剪任何樣本、
+        # 不產生額外的 ffmpeg／上傳成本——這是會加成本的功能，class 層級預設關，
+        # 「預設開」由 Settings 層的預設值負責（與 max_fallback_chunks 同一慣例）
+        self.voice_relay_max_speakers = voice_relay_max_speakers
 
     def build_prompt(self, hint: str | None = None) -> str:
         # 詞彙表含人名，措辭要明講它只管內文用字，否則模型會拿它當講者標籤用；
@@ -241,6 +281,9 @@ class GeminiTranscriber:
         retries_left = self.max_retry_calls  # 整個檔案共用的重試預算
         chunk_dir = chunks[0].parent
         previous_tail = ""
+        # 聲紋接力（approach A）的聲音簿：{代號: 樣本音檔}。voice_relay_max_speakers
+        # <=0 時這裡永遠是空的，_grow_voice_book 會立刻跳過，不產生任何額外成本
+        voice_book: dict[str, Path] = {}
         # 已回報過的最高進度：段內重試會讓時間戳從頭來過，不能讓進度倒退
         highest = 0.0
 
@@ -278,12 +321,19 @@ class GeminiTranscriber:
                 this_hint = chunk_hint(speakers, previous_tail)
                 if hint:  # 呼叫端另外給的提示（即時聆聽跨 session 用）附在後面
                     this_hint += hint
+                # 聲音簿是本段開始前、上一段結束時的狀態——本段引入的新代號要等
+                # 這段轉完才會被加進去，下一段才用得到，不能提前給自己用
+                voice_refs = (
+                    [{"label": c, "path": p} for c, p in voice_book.items()]
+                    if voice_book else None
+                )
                 text, used_fallback, retries_used = self._transcribe_labelled(
                     chunk,
                     this_hint,
                     allow_fallback=fallback_used < self.max_fallback_chunks,
                     retry_budget=retries_left,
                     on_partial=inner_reporter(index),
+                    voice_refs=voice_refs,
                 )
                 if used_fallback:
                     fallback_used += 1
@@ -295,6 +345,9 @@ class GeminiTranscriber:
                 text = drop_empty_lines(text)
                 if not text.strip():
                     continue
+                # 用本段（chunk 本地時間戳，尚未平移）的文字剪樣本——樣本要從
+                # chunk 這個實體音檔剪，時間軸得跟這份逐字稿的時間戳對得上
+                self._grow_voice_book(voice_book, text, chunk)
                 text = shift_timestamps(text, audio_start)
                 if index:  # 重疊那段前一輪已經轉過了，依絕對時間濾掉避免重複
                     text = drop_lines_before(text, own_start)
@@ -313,6 +366,52 @@ class GeminiTranscriber:
             shutil.rmtree(chunk_dir, ignore_errors=True)
         return "\n".join(parts).strip()
 
+    def _grow_voice_book(
+        self, voice_book: dict[str, Path], text: str, chunk: Path
+    ) -> None:
+        """替本段新出現、聲音簿裡還沒有樣本的講者代號剪一小截嗓音，加進聲音簿
+        供後續分段當參考音訊（approach A，見 voice_relay_parts）。
+
+        text 必須是本段（chunk 本地時間戳）尚未平移的逐字稿——樣本要從 chunk
+        這個實體音檔剪，時間軸才對得上整場時間平移過的版本。
+
+        voice_relay_max_speakers<=0（功能停用）或聲音簿已滿就直接跳過，不呼叫
+        ffmpeg：停用時這個功能不該產生任何額外成本，額滿後也不該無限增長。
+        剪樣本失敗（ffmpeg 出錯、時間戳異常）只跳過那個代號，不能讓整份轉錄
+        因為聲紋這個加分項而失敗——沒有樣本就退回純文字提示接力（既有行為）。
+        """
+        if len(voice_book) >= self.voice_relay_max_speakers:
+            return
+        codes: list[str] = []
+        collect_speakers(text, codes)
+        # 模型的時間戳會漂（本 repo 實測長音訊會漂到超過實際長度）。漂到音檔
+        # 之外還去剪，ffmpeg 會 seek 過頭吐出一段空音訊卻不算失敗——那種「樣本」
+        # 上傳上去只會誤導模型，不如不要。取一次長度當上界即可
+        limit = media.audio_duration(chunk)
+        for code in codes:
+            if len(voice_book) >= self.voice_relay_max_speakers:
+                break
+            if code in voice_book:
+                continue
+            span = speaker_sample_span(text, code)
+            if span is None:
+                continue
+            start, end = span
+            if limit is not None:
+                if start >= limit - _MIN_VOICE_SAMPLE_SECONDS:
+                    continue  # 起點已經在音檔尾巴之外（或只剩不到一秒）
+                end = min(end, limit)
+            # 檔名用聲音簿序號，不用時間區間：同一個時間戳出現多位講者時，
+            # 算出來的區間可能完全相同，用區間當檔名會讓後剪的蓋掉前一個，
+            # 兩個代號指向同一段音訊——那比沒有樣本更會誤導模型
+            dest = chunk.parent / f"{chunk.stem}_voice{len(voice_book):02d}.wav"
+            try:
+                voice_book[code] = media.cut_clip(chunk, start, end, dest)
+            except media.MediaError as exc:
+                logger.warning(
+                    "%s 的聲音樣本剪取失敗（%s），改靠文字提示沿用代號", code, exc
+                )
+
     def _transcribe_labelled(
         self,
         chunk: Path,
@@ -320,11 +419,15 @@ class GeminiTranscriber:
         allow_fallback: bool = True,
         retry_budget: int | None = None,
         on_partial=None,
+        voice_refs: list[dict] | None = None,
     ) -> tuple[str, bool, int]:
         """轉錄一段，講者標註率太低就重跑，取標得最好的那次。
 
         retry_budget 是整個檔案剩餘的重試次數（None＝不限）；本段最多只能用掉
         這麼多次，長影片才不會因為段數多而讓重試成本線性膨脹。
+
+        voice_refs：聲紋接力的聲音簿（見 voice_relay_parts），每次重試都帶
+        上——重試換的是「這次夠不夠標好」，樣本音訊該不該給是另一件事。
 
         回傳 (逐字稿, 有沒有動用強模型, 用掉幾次重試)——呼叫端據此控管整個
         檔案的強模型與重試用量。
@@ -338,7 +441,9 @@ class GeminiTranscriber:
         best, best_ratio = "", -1.0
         retries_used = 0
         for attempt in range(allowed_retries + 1):
-            text = self._transcribe_one(chunk, hint, on_partial=on_partial)
+            text = self._transcribe_one(
+                chunk, hint, on_partial=on_partial, voice_refs=voice_refs
+            )
             if attempt:
                 retries_used += 1
             ratio = speaker_label_ratio(text)
@@ -356,7 +461,8 @@ class GeminiTranscriber:
         if allow_fallback and self.fallback_model and self.fallback_model != self.model:
             logger.info("%s 改用 %s 重跑", chunk.name, self.fallback_model)
             text = self._transcribe_one(
-                chunk, hint, model=self.fallback_model, on_partial=on_partial
+                chunk, hint, model=self.fallback_model, on_partial=on_partial,
+                voice_refs=voice_refs,
             )
             if speaker_label_ratio(text) > best_ratio:
                 best = text
@@ -369,8 +475,14 @@ class GeminiTranscriber:
         hint: str | None,
         model: str | None = None,
         on_partial=None,
+        voice_refs: list[dict] | None = None,
     ) -> str:
-        """on_partial(累積至今的文字)：有給就走串流，模型每吐一段就呼叫一次。"""
+        """on_partial(累積至今的文字)：有給就走串流，模型每吐一段就呼叫一次。
+
+        voice_refs：聲紋接力的聲音簿（見 voice_relay_parts），只有真的走
+        Gemini 呼叫時才用得上；測試注入的假 upload/generate 是單檔案的淺層
+        介面，不經過這裡（那些測試要驗聲音簿就直接覆寫本方法來看傳了什麼）。
+        """
         if self._upload or self._generate:  # 測試注入假物件，不經金鑰輪替
             uploaded = self._upload(audio_path)
             result = self._generate(uploaded)
@@ -388,7 +500,7 @@ class GeminiTranscriber:
             call_with_rotation(
                 self._pool,
                 lambda key: self._transcribe_with_key(
-                    key, audio_path, hint, model, on_partial
+                    key, audio_path, hint, model, on_partial, voice_refs
                 ),
                 on_call=self._on_call,
             )
@@ -420,10 +532,45 @@ class GeminiTranscriber:
         hint: str | None = None,
         model: str | None = None,
         on_partial=None,
+        voice_refs: list[dict] | None = None,
     ) -> str:
         client = self._client(key)
-        uploaded = client.files.upload(file=str(path))
+        # 聲音簿的樣本檔要先於主音訊上傳，contents 裡才排得在「請沿用代號」
+        # 指示之前——模型讀 contents 是有順序的，樣本必須先出現才聽得到。
+        #
+        # 整段包在 try 裡：聲紋接力是加分項，樣本上傳失敗（網路、配額、Gemini
+        # 端判定 FAILED、遲遲不 ACTIVE）只該讓這一次沒有參考音訊，不能讓整段
+        # 轉錄跟著失敗——沒有樣本就退回純文字提示沿用代號的既有行為。中途失敗
+        # 時已經上傳成功的樣本也要立刻刪掉，否則它們不在下面的 finally 管轄範圍
+        # 內，會一直留在 Files API 上累積到撞儲存上限
+        ref_uploads: list = []
+        resolved_refs: list = []
         try:
+            for part in voice_relay_parts(voice_refs):
+                if not isinstance(part, Path):
+                    resolved_refs.append(part)
+                    continue
+                # 樣本是幾秒鐘的小 wav，正常會立刻 ACTIVE；輪詢上限故意設小，
+                # 免得單一卡住的樣本讓整段轉錄乾等（20 份樣本 × 60 秒＝20 分鐘）
+                handle = wait_until_active(
+                    client, client.files.upload(file=str(part)), max_polls=5
+                )
+                if getattr(getattr(handle, "state", None), "name", "") != "ACTIVE":
+                    raise GeminiTranscribeError(f"聲音樣本 {part.name} 遲遲未就緒")
+                ref_uploads.append(handle)
+                resolved_refs.append(handle)
+        except Exception as exc:
+            logger.warning("聲紋樣本準備失敗（%s），這一段改用純文字提示沿用代號", exc)
+            for handle in ref_uploads:
+                try:
+                    client.files.delete(name=handle.name)
+                except Exception:
+                    pass
+            ref_uploads, resolved_refs = [], []
+
+        uploaded = None
+        try:
+            uploaded = client.files.upload(file=str(path))
             # 音訊通常上傳即就緒；video 或大檔可能要等處理，輪詢到 ACTIVE
             for _ in range(60):
                 state = getattr(uploaded, "state", None)
@@ -436,7 +583,7 @@ class GeminiTranscriber:
                 uploaded = client.files.get(name=uploaded.name)
             args = {
                 "model": model or self.model,
-                "contents": [self.build_prompt(hint), uploaded],
+                "contents": [*resolved_refs, self.build_prompt(hint), uploaded],
                 "config": {"temperature": 0.0},
             }
             if on_partial is None:
@@ -451,8 +598,12 @@ class GeminiTranscriber:
             return text
         finally:
             # Files API 有 20GB 儲存上限；即時聆聽每 45 秒上傳一個檔，用完即刪，
-            # 不留給 48 小時自動清除（否則長時間聆聽很快撞到上限）
-            try:
-                client.files.delete(name=uploaded.name)
-            except Exception:
-                pass
+            # 不留給 48 小時自動清除（否則長時間聆聽很快撞到上限）。聲音簿樣本
+            # 每段轉錄都會重新上傳（同一把 key 才能跟主音訊同一次呼叫送），
+            # 用完同樣要刪，不然累積起來很快撞到儲存上限。
+            # uploaded 可能是 None（主音訊上傳就失敗），那時仍要清掉樣本
+            for handle in (*ref_uploads, *([uploaded] if uploaded else [])):
+                try:
+                    client.files.delete(name=handle.name)
+                except Exception:
+                    pass
