@@ -209,7 +209,12 @@ def build_prompt(
     # 本次專用詞彙排在全域詞彙表後面：同一個詞若兩邊都有，後出現的寫法更貼近這場會議
     terms = glossary_prompt_line((glossary or []) + (extra_terms or []))
     if terms:
-        glossary_line = f"\n已知詞彙表（輸出的人名與專有名詞一律以此寫法為準）：{terms}。"
+        glossary_line = (
+            f"\n已知詞彙表（輸出的人名與專有名詞一律以此寫法為準，"
+            f"但這只是拼字對照，不代表這個人這場會議有出席或發言——"
+            f"逐字稿裡沒有依據時，禁止把詞彙表的人名拿來猜 owner、attendees "
+            f"或任何欄位）：{terms}。"
+        )
     # 規則編號接在 PROMPT_TEMPLATE 的第 10 條之後，而且不能跳號——
     # 模型看到 10 之後直接跳 12，會以為自己漏讀了一條
     rules, n = [], 10

@@ -124,6 +124,19 @@ def test_prompt_includes_glossary_terms():
     assert "詞彙表" not in build_prompt("測試", MEETING_DATE)
 
 
+def test_glossary_line_forbids_guessing_owner_from_vocab():
+    """詞彙表只是拼字對照，不能被模型當成「猜負責人／與會者」的候選名單——
+    否則詞彙表裡剛好只有一個人名時，找不到負責人的代辦事項會被誤填成他。"""
+    from app.agents.decision_agent import build_prompt
+
+    prompt = build_prompt(
+        "測試", MEETING_DATE,
+        glossary=[{"term": "王霖翔", "note": "人名"}],
+    )
+    assert "不代表" in prompt or "不能" in prompt or "禁止" in prompt
+    assert "owner" in prompt.split("已知詞彙表")[1].split("。")[0]
+
+
 def test_analyze_uses_injected_glossary_provider():
     captured = {}
 
