@@ -138,6 +138,19 @@ function openInBrowserHint() {
     + "請點畫面右上角的「⋯」選單，選「用其他瀏覽器開啟」，或把網址複製到 Chrome 再試。";
 }
 
+// 呼叫 getUserMedia 前的前置檢查：內建瀏覽器／非 https／不支援 getUserMedia 這三種情況，
+// 手機上要嘛連權限詢問都不跳，要嘛丟出來的原生錯誤訊息看不懂，先擋下給可操作的說明。
+// 回傳錯誤訊息字串；沒問題則回傳 null。
+function micAvailabilityError() {
+  const inAppMsg = openInBrowserHint();
+  if (inAppMsg) return inAppMsg;
+  if (!window.isSecureContext)
+    return "麥克風只在 https:// 加密連線（或 localhost）下可用。請用 https:// 開頭的網址開啟再試。";
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia)
+    return "這個環境取不到麥克風。iPhone 請直接用 Safari 開啟網址（有些情況下從主畫面捷徑／內嵌瀏覽器開啟會擋掉麥克風），Android 請用 Chrome 開啟。";
+  return null;
+}
+
 // getUserMedia 的錯誤依類型給可操作說明。內建瀏覽器是根因就先講它；否則手機上
 // 最常見的是「之前拒絕過就不再自動跳詢問」，只回一句籠統的話會讓人不知道去哪開。
 function micPermissionMessage(e) {
@@ -506,11 +519,13 @@ function renderEnrollRows() {
 async function recordEnrollment(index) {
   if (enrollBusy || liveRecording) return;
   const state = $(`enrollState${index}`);
+  const availErr = micAvailabilityError();
+  if (availErr) { showError(availErr); return; }
   let stream;
   try {
     stream = await navigator.mediaDevices.getUserMedia({ audio: true });
   } catch (e) {
-    showError("無法使用麥克風錄製聲音樣本：" + e.message);
+    showError("無法使用麥克風錄製聲音樣本：" + micPermissionMessage(e));
     return;
   }
   enrollBusy = true;
@@ -587,18 +602,8 @@ $("btnLiveStart").addEventListener("click", async () => {
     showError("聲音樣本還在錄製中，請等這一段錄完再開始聆聽。");
     return;
   }
-  // App 內建瀏覽器（LINE/FB/IG…）通常直接封鎖麥克風、連詢問都不跳——先擋下並
-  // 引導改用系統瀏覽器，免得使用者按了「開始聆聽」卻毫無反應、不知所措
-  const inAppMsg = openInBrowserHint();
-  if (inAppMsg) { showError(inAppMsg); return; }
-  if (!window.isSecureContext) {
-    showError("麥克風只在 https:// 加密連線（或 localhost）下可用。請用 https:// 開頭的網址開啟再試。");
-    return;
-  }
-  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-    showError("這個環境取不到麥克風。iPhone 請直接用 Safari 開啟網址（有些情況下從主畫面捷徑／內嵌瀏覽器開啟會擋掉麥克風），Android 請用 Chrome 開啟。");
-    return;
-  }
+  const availErr = micAvailabilityError();
+  if (availErr) { showError(availErr); return; }
   try {
     liveStream = await buildLiveStream(wantSystemAudio());
   } catch (e) { releaseLiveStreams(); showError(e.message); return; }
