@@ -120,7 +120,12 @@ class SpeakerNamerAgent:
         except Exception:
             # 模型掛了（額度、網路）不該把已經比對出來的聲紋結果一起丟掉
             mapping = {}
-        mapping.update(prior)  # 衝突時聲紋贏
+        # 衝突時聲紋贏。除了同一個代號的直接衝突，還要擋住「模型把聲紋已確定
+        # 的姓名安給別的代號」——那會讓 apply_speaker_names 因重複姓名整批放棄，
+        # 連比對出來的結果一起賠掉，正好與「聲紋優先」相反
+        claimed = set(prior.values())
+        mapping = {k: v for k, v in mapping.items() if v not in claimed}
+        mapping.update(prior)
         if not mapping:
             return transcript, []
         text, applied = apply_speaker_names(transcript, mapping)

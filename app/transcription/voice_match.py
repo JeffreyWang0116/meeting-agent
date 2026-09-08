@@ -21,13 +21,38 @@ from __future__ import annotations
 
 import json
 import re
+import time
 from pathlib import Path
 
 from app.agents.speaker_namer_agent import is_safe_name
 from app.gemini_keys import KeyPool, call_with_rotation
-from app.transcription.segments import SPEAKER_RE
+from app.transcription.segments import collect_speakers, speaker_of
 
 _CODE_FENCE = re.compile(r"^\s*```(?:json)?\s*|\s*```\s*$")
+
+
+class VoiceMatchError(Exception):
+    pass
+
+
+def wait_until_active(client, handle, max_polls: int = 60, sleep=time.sleep):
+    """輪詢到上傳的檔案就緒為止，回傳最新的 handle。
+
+    音訊通常上傳即就緒，但大檔可能要等處理。還在 PROCESSING 就送出，Gemini
+    會回 400——那既不是額度也不是暫時性錯誤，金鑰輪替救不了，最後被 match()
+    的 except 吞掉，等於白付了上傳成本卻只拿到空結果。
+    （GeminiTranscriber._transcribe_with_key 有同一道輪詢。）
+    """
+    for _ in range(max_polls):
+        state = getattr(handle, "state", None)
+        name = getattr(state, "name", str(state))  # 可能是列舉，也可能已是字串
+        if name == "ACTIVE":
+            return handle
+        if name == "FAILED":
+            raise VoiceMatchError("Gemini 檔案處理失敗，聲音樣本無法用於比對")
+        sleep(1)
+        handle = client.files.get(name=handle.name)
+    return handle
 
 _PROMPT_HEAD = (
     "你是會議錄音的講者辨識模組。接下來會給你兩種音訊：\n"
@@ -86,7 +111,12 @@ class VoiceMatcher:
             mapping = _parse_mapping(raw)
         except Exception:
             return {}
-        return _sanitize(mapping, [e["name"] for e in enrollments])
+        # 只認證據逐字稿裡真的出現過的代號。模型幻想一個「講者D」時，放它過關
+        # 會讓下游 apply_speaker_names 整批放棄，連正確的那幾筆一起賠掉
+        labels: list[str] = []
+        for item in evidence:
+            collect_speakers(item.get("transcript") or "", labels)
+        return _sanitize(mapping, [e["name"] for e in enrollments], set(labels))
 
     def build_parts(
         self, enrollments: list[dict], evidence: list[dict]
@@ -129,7 +159,8 @@ class VoiceMatcher:
                 if isinstance(part, Path):
                     handle = client.files.upload(file=str(part))
                     uploaded.append(handle)
-                    contents.append(handle)
+                    # 一次要送 3~8 個檔，其中任何一個還沒就緒都會讓整次呼叫失敗
+                    contents.append(wait_until_active(client, handle))
                 else:
                     contents.append(part)
             response = client.models.generate_content(
@@ -158,20 +189,27 @@ def _parse_mapping(raw: str) -> dict[str, str]:
     return mapping
 
 
-def _sanitize(mapping: dict[str, str], enrolled: list[str]) -> dict[str, str]:
-    """只留下「代號是真的代號、姓名是真的註冊過」的那些對應。
+def _sanitize(
+    mapping: dict[str, str], enrolled: list[str], labels_present: set[str]
+) -> dict[str, str]:
+    """只留下「代號真的出現過、姓名是真的註冊過」的那些對應。
 
     模型即使被規則 2 約束，仍可能回傳沒註冊過的名字（從逐字稿內容猜的）。
     那正是這個功能要避免的事——聲紋比對的依據只能是嗓音，所以名冊之外的
     一律丟掉。逐條篩選而不是整批放棄：對到一個人也比全部維持代號有用。
+
+    代號一律經 speaker_of 正規化，「講者 a」與「講者A」才會被當成同一個人；
+    正規化後還必須真的在證據逐字稿裡出現過，否則下游會因為找不到那個代號而
+    放棄整批對應。
     """
     known = set(enrolled)
     clean: dict[str, str] = {}
     for label, name in mapping.items():
-        if not SPEAKER_RE.match(f"{label}："):
-            continue  # label 必須是真的講者代號
+        normalized = speaker_of(f"{label}：")
+        if not normalized or normalized not in labels_present:
+            continue  # 不是講者代號，或根本沒在這場會議出現過
         if name in known and is_safe_name(name):
-            clean[label] = name
+            clean[normalized] = name
     # 同一個人對到兩個代號＝分不出哪個對，兩個都不要（下游 apply_speaker_names
     # 遇到重複姓名會整批放棄，在這裡先剔除才留得住其他正確的對應）
     seen: dict[str, int] = {}

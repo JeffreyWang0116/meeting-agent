@@ -325,3 +325,19 @@ def test_prior_labels_appear_in_the_prompt_as_settled():
         TRANSCRIPT, prior={"講者A": "吳宗憲"}
     )
     assert "講者A" in prompt and "吳宗憲" in prompt
+
+
+def test_prior_wins_even_when_the_model_gives_that_name_to_another_label():
+    """模型把聲紋已確定的姓名安給別的代號時，該丟的是模型那一筆。
+
+    只靠 mapping.update(prior) 解決不了：它只處理「同一個代號」的衝突。姓名
+    撞在一起時 apply_speaker_names 會因為重複姓名整批放棄，連聲紋比對出來的
+    結果一起賠掉——那正好與「衝突時聲紋贏」相反。
+    """
+    agent = SpeakerNamerAgent(
+        api_key="k", generate=lambda prompt: _reply({"講者B": "吳宗憲"})
+    )
+    text, applied = agent.name_speakers(TRANSCRIPT, prior={"講者A": "吳宗憲"})
+    assert "吳宗憲：請問部長" in text
+    assert [a["label"] for a in applied] == ["講者A"]
+    assert "講者B：" in text  # 模型那筆被丟掉，講者B 維持代號

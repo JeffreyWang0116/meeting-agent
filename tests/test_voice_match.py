@@ -6,8 +6,15 @@
 """
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
-from app.transcription.voice_match import VoiceMatcher
+import pytest
+
+from app.transcription.voice_match import (
+    VoiceMatcher,
+    VoiceMatchError,
+    wait_until_active,
+)
 
 ENROLLMENTS = [
     {"name": "王小明", "path": Path("enroll_0.webm")},
@@ -119,3 +126,66 @@ def test_no_enrollments_skips_the_call_entirely():
     assert m.match([], EVIDENCE) == {}
     assert m.match(ENROLLMENTS, []) == {}
     assert called == []
+
+
+# ---- 代號必須真的在證據裡出現過 ----
+
+def test_labels_absent_from_the_evidence_are_dropped():
+    """模型幻想一個沒出現過的代號時，只丟那一筆，不能拖垮整批。
+
+    下游 apply_speaker_names 對「逐字稿裡沒有的代號」是整批放棄，所以放它過關
+    等於連正確的那筆也一起賠掉。
+    """
+    m = _matcher(lambda parts: _reply({"講者A": "王小明", "講者D": "李美華"}))
+    assert m.match(ENROLLMENTS, EVIDENCE) == {"講者A": "王小明"}
+
+
+def test_label_spelling_is_normalised():
+    """「講者 a」與「講者A」是同一個人，不該因為模型的寫法差異而失效。"""
+    m = _matcher(lambda parts: _reply({"講者 a": "王小明"}))
+    assert m.match(ENROLLMENTS, EVIDENCE) == {"講者A": "王小明"}
+
+
+# ---- 上傳的檔案要等到就緒才能送出 ----
+
+class _Files:
+    """假的 Files API：依序回傳預設狀態，記錄被查詢幾次。"""
+
+    def __init__(self, states):
+        self.states = list(states)
+        self.gets = 0
+
+    def get(self, name=None):
+        self.gets += 1
+        return SimpleNamespace(name=name, state=self.states.pop(0))
+
+
+class _Client:
+    def __init__(self, states):
+        self.files = _Files(states)
+
+
+def test_wait_until_active_polls_until_the_file_is_ready():
+    """還在 PROCESSING 就送出，Gemini 回的 400 既不是額度也不是暫時性錯誤，
+    會被 match() 的 except 吞掉——白付了上傳成本卻只拿到空結果。"""
+    client = _Client(["PROCESSING", "ACTIVE"])
+    handle = SimpleNamespace(name="files/a", state="PROCESSING")
+    ready = wait_until_active(client, handle, sleep=lambda s: None)
+    assert ready.state == "ACTIVE"
+    assert client.files.gets == 2
+
+
+def test_wait_until_active_returns_immediately_when_ready():
+    """音訊通常上傳即就緒，不該白等一秒。"""
+    client = _Client([])
+    handle = SimpleNamespace(name="files/a", state="ACTIVE")
+    assert wait_until_active(client, handle, sleep=lambda s: None) is handle
+    assert client.files.gets == 0
+
+
+def test_wait_until_active_raises_on_failed():
+    """處理失敗要明確拋出，而不是繼續輪詢到逾時。"""
+    client = _Client([])
+    handle = SimpleNamespace(name="files/a", state="FAILED")
+    with pytest.raises(VoiceMatchError):
+        wait_until_active(client, handle, sleep=lambda s: None)

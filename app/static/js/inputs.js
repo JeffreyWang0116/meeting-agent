@@ -468,15 +468,23 @@ async function recordEnrollment(index) {
     return;
   }
   enrollBusy = true;
+  // 錄音中把人數鎖住：中途調少人數會把正在錄的這一列從 enrollPeople 抽掉，
+  // onstop 就會踩到 undefined，enrollBusy 永遠留在 true——之後整頁都錄不了
+  // 任何人，而且完全沒有錯誤訊息
+  $("liveEnrollCount").disabled = true;
   const chunks = [];
   const mime = pickMime();
   const rec = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined);
   rec.ondataavailable = e => { if (e.data.size) chunks.push(e.data); };
-  rec.onerror = () => { showError("錄製聲音樣本時發生錯誤，請再試一次。"); };
+  rec.onerror = () => {
+    showError("錄製聲音樣本時發生錯誤，請再試一次。");
+    if (rec.state !== "inactive") rec.stop();  // 觸發 onstop 收尾，別卡在錄音中
+  };
   rec.onstop = () => {
     stream.getTracks().forEach(t => t.stop());  // 立刻還回麥克風，別佔著
     const blob = new Blob(chunks, { type: rec.mimeType });
-    if (blob.size) enrollPeople[index].blob = blob;
+    if (blob.size && enrollPeople[index]) enrollPeople[index].blob = blob;
+    $("liveEnrollCount").disabled = false;
     enrollBusy = false;
     renderEnrollRows();
   };
@@ -527,6 +535,12 @@ $("liveEnrollCount").addEventListener("change", renderEnrollRows);
 
 $("btnLiveStart").addEventListener("click", async () => {
   clearError();
+  // 樣本還在錄的時候開始聆聽，那個人會來不及上傳而被略過，但錄完後畫面仍會
+  // 顯示「已錄好」——使用者不會發現少了一個人
+  if (enrollBusy) {
+    showError("聲音樣本還在錄製中，請等這一段錄完再開始聆聽。");
+    return;
+  }
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
     showError("此瀏覽器無法使用麥克風：麥克風只在 https:// 加密連線（或 localhost）下可用，請確認網址是 https 開頭");
     return;
