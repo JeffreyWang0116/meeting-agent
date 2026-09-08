@@ -860,3 +860,25 @@ def test_chunked_progress_moves_within_a_chunk(monkeypatch, tmp_path):
     assert any(0 < f < 0.5 for f in fractions), f"第一段段內沒有進度：{fractions}"
     assert [f for f, _ in calls if f in (0.5, 1.0)] == [0.5, 1.0], "每段完成仍要回報"
     assert all(txt == "" for f, txt in calls if f not in (0.5, 1.0)), "段內不該送預覽文字"
+
+
+def test_transcriber_reports_every_api_call(monkeypatch, tmp_path):
+    """一個長檔會打很多次 API，用量統計要算到每一次。
+
+    原本統計記在端點層：上傳一個檔案記 1 次。但 15 分鐘的檔會切成 4 段、
+    各打一次，畫面顯示的數字因此只有真實用量的四分之一——拿來判斷「今天
+    還剩多少免費額度」等於看錯表。
+    """
+    src = tmp_path / "long.wav"
+    src.write_bytes(b"RIFF-fake")
+    FakeChunkedSetup(monkeypatch, tmp_path, duration=900, chunk_texts=["a", "b", "c", "d"])
+    calls = []
+
+    t = GeminiTranscriber(api_key="k", chunk_seconds=240, on_call=lambda: calls.append(1))
+    monkeypatch.setattr(
+        t, "_transcribe_with_key",
+        lambda key, path, hint=None, model=None, on_partial=None: "[0:10] 講者A：內容",
+    )
+    t.transcribe(src)
+
+    assert len(calls) == 4, f"四段應各記一次，實際 {len(calls)}"

@@ -279,3 +279,57 @@ def test_transcribe_defaults_favour_cheap_retries_over_fallback():
     s = Settings()
     assert s.transcribe_label_retries >= 2      # lite 重試（每次佔額度 0.2%）
     assert s.transcribe_max_fallback_chunks <= 1  # Flash 降級（每次佔額度 5%）
+
+
+# ---- 每打一次 API 就記一次（用量統計要準） ----
+
+def test_on_call_fires_once_per_attempt_including_retries():
+    """統計要記在「實際打出去幾次」，不是「使用者按了幾次」。
+
+    原本用量記在端點層：上傳一個檔案記 1 次，但那個檔案實際可能打了 15 次
+    （每 240 秒一段）。畫面上顯示的數字因此比真實用量少一個數量級，拿來
+    判斷「今天還剩多少免費額度」等於看錯表。
+    """
+    pool = KeyPool(["k1", "k2", "k3"])
+    calls, attempts = [], []
+
+    def fn(key):
+        attempts.append(key)  # 獨立計數：不能拿 calls 判斷，那會自我干擾
+        if len(attempts) < 3:
+            raise _quota_exc()
+        return "ok"
+
+    assert call_with_rotation(pool, fn, on_call=lambda: calls.append(1)) == "ok"
+    assert len(calls) == 3, "換金鑰的每一次都要算進去"
+
+
+def test_on_call_counts_the_transient_retries_too():
+    pool = KeyPool(["k1"])
+    calls = []
+
+    def fn(key):
+        raise _unavailable_exc()
+
+    with pytest.raises(RuntimeError, match="UNAVAILABLE"):
+        call_with_rotation(pool, fn, sleep=lambda s: None, on_call=lambda: calls.append(1))
+    assert len(calls) == 4  # 首次 + 3 次退避重試
+
+
+def test_on_call_fires_even_without_keys():
+    """沒設金鑰時仍會打一次（讓 fn 丟出友善錯誤），那一次也是一次嘗試。"""
+    calls = []
+    with pytest.raises(LookupError):
+        call_with_rotation(
+            KeyPool([]),
+            lambda key: (_ for _ in ()).throw(LookupError("未設定金鑰")),
+            on_call=lambda: calls.append(1),
+        )
+    assert len(calls) == 1
+
+
+def test_broken_recorder_never_breaks_the_call():
+    """統計是附屬功能。它自己壞掉（磁碟滿、JSON 損毀）不該讓轉錄跟著失敗。"""
+    def boom():
+        raise OSError("磁碟滿了")
+
+    assert call_with_rotation(KeyPool(["k1"]), lambda key: "ok", on_call=boom) == "ok"

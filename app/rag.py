@@ -74,10 +74,13 @@ class GeminiEmbedder:
         self,
         api_key=None,
         api_keys=None,
+        on_call=None,
         model: str = "gemini-embedding-001",
         dim: int = EMBED_DIM,
     ):
         self._pool = KeyPool(api_keys if api_keys else [api_key])
+        # 每打一次 API 就回報一次，用量統計才會算到重試與換金鑰
+        self._on_call = on_call
         self.model = model
         self.dim = dim
 
@@ -86,7 +89,9 @@ class GeminiEmbedder:
             raise RagError(
                 "未設定 GEMINI_API_KEY：跨會議問答需要 Gemini 金鑰做向量檢索"
             )
-        return call_with_rotation(self._pool, lambda key: self._embed_with_key(key, texts))
+        return call_with_rotation(
+            self._pool, lambda key: self._embed_with_key(key, texts), on_call=self._on_call
+        )
 
     def _embed_with_key(self, key: str, texts: list[str]) -> list[list[float]]:
         from google import genai
@@ -231,6 +236,7 @@ class AskAgent:
         store,
         api_key=None,
         api_keys=None,
+        on_call=None,
         model: str = "gemini-flash-latest",
         generate=None,
         top_k: int = 4,
@@ -238,6 +244,8 @@ class AskAgent:
         self._index = index
         self._store = store
         self._pool = KeyPool(api_keys if api_keys else [api_key])
+        # 每打一次 API 就回報一次，用量統計才會算到重試與換金鑰
+        self._on_call = on_call
         self.model = model
         self.top_k = top_k
         self._generate = generate or self._generate_with_gemini
@@ -277,7 +285,9 @@ class AskAgent:
     def _generate_with_gemini(self, prompt: str) -> str:
         if not self._pool:
             raise RagError("未設定 GEMINI_API_KEY：跨會議問答需要 Gemini 金鑰")
-        return call_with_rotation(self._pool, lambda key: self._call_gemini(key, prompt))
+        return call_with_rotation(
+            self._pool, lambda key: self._call_gemini(key, prompt), on_call=self._on_call
+        )
 
     def _call_gemini(self, key: str, prompt: str) -> str:
         from google import genai

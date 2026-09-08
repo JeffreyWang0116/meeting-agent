@@ -28,11 +28,13 @@ import { refreshTasks } from "./tasks.js";
       try {
         const u = await api.usage();
         const t = u.today || {};
+        $("usageCalls").textContent = t.gemini_call || 0;
         $("usageAnalysis").textContent = t.analysis || 0;
         $("usageAsk").textContent = t.ask || 0;
         $("usageLive").textContent = t.live_chunk || 0;
       } catch (err) {
-        $("usageAnalysis").textContent = $("usageAsk").textContent = $("usageLive").textContent = "—";
+        $("usageCalls").textContent = $("usageAnalysis").textContent =
+          $("usageAsk").textContent = $("usageLive").textContent = "—";
       }
     }
   });

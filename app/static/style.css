@@ -199,7 +199,7 @@
   .set-row .set-label .i-sm { color: var(--faint); }
   .set-sep { border: none; border-top: 1px solid var(--border); margin: 4px 0; }
   /* 今日用量：數字磚（大數字 + 小標籤，取代擠成一行的純文字） */
-  .usage-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; padding: 4px 8px 8px; }
+  .usage-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; padding: 4px 8px 8px; }
   .usage-tile {
     display: flex; flex-direction: column; align-items: center; gap: 2px;
     padding: 9px 4px; border-radius: var(--radius-sm);

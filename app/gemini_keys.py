@@ -61,7 +61,11 @@ class KeyPool:
 
 
 def call_with_rotation(
-    pool: KeyPool, fn: Callable[[str | None], T], *, sleep: Callable[[float], None] = time.sleep
+    pool: KeyPool,
+    fn: Callable[[str | None], T],
+    *,
+    sleep: Callable[[float], None] = time.sleep,
+    on_call: Callable[[], None] | None = None,
 ) -> T:
     """每次呼叫先取下一把 key（round-robin）給 fn。
 
@@ -69,15 +73,27 @@ def call_with_rotation(
     確認爆掉才放棄；撞到暫時性過載（503）時退避後重試，最多 3 次。
     空池會以 None 呼叫一次，讓 fn 自己丟出「未設定金鑰」的友善錯誤；
     其他錯誤直接往外拋，不再試。`sleep` 可注入以便測試不真的等待。
+
+    on_call()：每「實際打出去一次」就呼叫一次，換金鑰與退避重試都算。用量
+    統計掛在這裡而不是端點層——端點層記的是「使用者按了幾次」，一個一小時
+    的上傳按一次卻會打十幾次，兩者差一個數量級。
     """
+    def attempt(key):
+        if on_call:
+            try:
+                on_call()
+            except Exception:  # 統計是附屬功能，壞掉不該讓轉錄跟著失敗
+                pass
+        return fn(key)
+
     if not pool:
-        return fn(None)
+        return attempt(None)
     exhausted: set[str | None] = set()  # 本次呼叫內已確認配額爆掉的 key
     transient_fails = 0
     while True:
         key = pool.next_key()
         try:
-            return fn(key)
+            return attempt(key)
         except Exception as exc:
             if is_quota_error(exc):
                 exhausted.add(key)

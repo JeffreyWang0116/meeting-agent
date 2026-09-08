@@ -30,10 +30,13 @@ class Translator:
         self,
         api_key: str | None = None,
         api_keys=None,
+        on_call=None,
         model: str = "gemini-flash-lite-latest",
         generate=None,
     ):
         self._pool = KeyPool(api_keys if api_keys else [api_key])
+        # 每打一次 API 就回報一次，用量統計才會算到重試與換金鑰
+        self._on_call = on_call
         self.model = model
         # 可注入 callable(prompt) -> str，測試時不需要真的呼叫 Gemini
         self._generate = generate or self._generate_with_gemini
@@ -50,7 +53,9 @@ class Translator:
     def _generate_with_gemini(self, prompt: str) -> str:
         if not self._pool:
             raise TranslateError("未設定 GEMINI_API_KEY：翻譯需要 Gemini 金鑰")
-        return call_with_rotation(self._pool, lambda key: self._call_gemini(key, prompt))
+        return call_with_rotation(
+            self._pool, lambda key: self._call_gemini(key, prompt), on_call=self._on_call
+        )
 
     def _call_gemini(self, key: str, prompt: str) -> str:
         from google import genai

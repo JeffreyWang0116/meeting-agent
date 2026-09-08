@@ -5,7 +5,7 @@ import { activeAlerts, remindersLoaded } from "./reminders.js";
 import { showView } from "./router.js";
 import { allTasks, tasksLoaded } from "./tasks.js";
 
-let todayAnalysis = 0;
+let todayCalls = 0;
 let usageLoaded = false;
 
 function renderHome() {
@@ -21,7 +21,7 @@ function renderHome() {
   $("statOpen").innerHTML = num(tasksLoaded, open.length);
   $("statOverdue").innerHTML = num(remindersLoaded, urgent);
   $("statOverdue").classList.toggle("hot", urgent > 0);
-  $("statUsage").innerHTML = num(usageLoaded, todayAnalysis);
+  $("statUsage").innerHTML = num(usageLoaded, todayCalls);
 
   // 側欄徽章：不用切過去也知道那邊有幾件事在等
   $("navAlert").textContent = urgent || "";
@@ -59,14 +59,15 @@ $("homeMeetings").addEventListener("click", e => {
   openMeetingDetail(row.dataset.meeting);
 });
 
-// 今日分析次數：設定選單也會用同一支 API，這裡先抓一次給首頁的數字磚
+// 今日實際打出去幾次 Gemini：轉錄佔絕大多數（一個一小時的檔約 15 次），
+// 所以這裡不能拿「分析次數」充數——那是使用者按了幾次，不是 API 用量
 async function refreshUsage() {
   try {
-    todayAnalysis = (await api.usage()).today?.analysis ?? 0;
-  } catch (e) { todayAnalysis = "—"; }
+    todayCalls = (await api.usage()).today?.gemini_call ?? 0;
+  } catch (e) { todayCalls = "—"; }
   usageLoaded = true;
   renderHome();
 }
 refreshUsage();
 
-export { refreshUsage, renderHome, todayAnalysis, usageLoaded };
+export { refreshUsage, renderHome, todayCalls, usageLoaded };

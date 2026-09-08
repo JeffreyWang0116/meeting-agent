@@ -85,6 +85,7 @@ class GeminiTranscriber:
         upload=None,
         generate=None,
         api_keys=None,
+        on_call=None,
         glossary=None,
         chunk_seconds: int = 0,
         label_retries: int = 2,
@@ -97,6 +98,8 @@ class GeminiTranscriber:
     ):
         # 多把 key 輪替（429 換下一把）；單把 api_key 為向後相容寫法
         self._pool = KeyPool(api_keys if api_keys else [api_key])
+        # 每打一次 API 就回報一次，用量統計才會算到重試與換金鑰
+        self._on_call = on_call
         self.api_key = self._pool.first
         self.model = model
         # 供 /api/health 顯示；命名對齊 Whisper Transcriber 以免前端分歧
@@ -390,6 +393,7 @@ class GeminiTranscriber:
                 lambda key: self._transcribe_with_key(
                     key, audio_path, hint, model, on_partial
                 ),
+                on_call=self._on_call,
             )
             or ""
         ).strip()

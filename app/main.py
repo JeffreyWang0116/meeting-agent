@@ -355,6 +355,13 @@ def create_app(
 ) -> FastAPI:
     settings = settings or get_settings()
     store = store or make_store(settings)
+    # 用量統計要在 agent 之前建好：每個會打 Gemini 的元件都得拿到 record_call，
+    # 統計才算得到重試與換金鑰（端點層只知道「使用者按了幾次」，差一個數量級）
+    usage = UsageTracker(settings.data_dir / "output" / "usage.json")
+
+    def record_call() -> None:
+        usage.record("gemini_call")
+
     # 自訂詞彙表：持久化交給 store（本地 JSON / 雲端 Firestore，與任務同後端），
     # 以 callable 注入，轉錄/分析每次都讀到最新內容
     glossary = Glossary(store)
@@ -365,6 +372,7 @@ def create_app(
         decision=DecisionAgent(
             api_key=settings.gemini_api_key,
             api_keys=settings.gemini_api_keys,
+            on_call=record_call,
             model=settings.gemini_model,
             glossary=glossary.terms,
         ),
@@ -373,12 +381,14 @@ def create_app(
         corrector=CorrectorAgent(
             api_key=settings.gemini_api_key,
             api_keys=settings.gemini_api_keys,
+            on_call=record_call,
             model=settings.correct_model,
             glossary=glossary.terms,
         ),
         namer=SpeakerNamerAgent(
             api_key=settings.gemini_api_key,
             api_keys=settings.gemini_api_keys,
+            on_call=record_call,
             # 依上下文判讀「誰是誰」，與校正同屬機械性工作，用便宜模型即可
             model=settings.correct_model,
             known_names=roster.names,
@@ -391,6 +401,7 @@ def create_app(
             transcriber = GeminiTranscriber(
                 api_key=settings.gemini_api_key,
                 api_keys=settings.gemini_api_keys,
+                on_call=record_call,
                 model=settings.transcribe_model,
                 glossary=glossary.terms,
                 chunk_seconds=settings.transcribe_chunk_seconds,
@@ -413,6 +424,7 @@ def create_app(
     translator = translator or Translator(
         api_key=settings.gemini_api_key,
         api_keys=settings.gemini_api_keys,
+        on_call=record_call,
         model=settings.transcribe_model,
     )
     live_manager = live_manager or LiveSessionManager(
@@ -426,7 +438,9 @@ def create_app(
         rag_index = RagIndex(
             settings.data_dir / "output" / "rag_index.json",
             GeminiEmbedder(
-                api_key=settings.gemini_api_key, api_keys=settings.gemini_api_keys
+                api_key=settings.gemini_api_key,
+                api_keys=settings.gemini_api_keys,
+                on_call=record_call,
             ),
         )
         ask_agent = AskAgent(
@@ -434,6 +448,7 @@ def create_app(
             store=store,
             api_key=settings.gemini_api_key,
             api_keys=settings.gemini_api_keys,
+            on_call=record_call,
             model=settings.gemini_model,
         )
 
@@ -443,7 +458,6 @@ def create_app(
             rag_index.drop_meeting(meeting_id)
     uploads_dir = settings.data_dir / "tmp" / "uploads"
     max_upload_bytes = settings.max_upload_mb * 1024 * 1024
-    usage = UsageTracker(settings.data_dir / "output" / "usage.json")
 
     app = FastAPI(title="會議助手")
 

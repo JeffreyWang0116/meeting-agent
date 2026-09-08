@@ -248,10 +248,13 @@ class DecisionAgent:
         generate=None,
         max_attempts: int = 3,
         api_keys=None,
+        on_call=None,
         glossary=None,
     ):
         # 多把 key 輪替（429 換下一把）；單把 api_key 為向後相容寫法
         self._pool = KeyPool(api_keys if api_keys else [api_key])
+        # 每打一次 API 就回報一次，用量統計才會算到重試與換金鑰
+        self._on_call = on_call
         self.api_key = self._pool.first
         self.model = model
         self.max_attempts = max_attempts
@@ -266,7 +269,9 @@ class DecisionAgent:
                 "未設定 GEMINI_API_KEY：請到 https://aistudio.google.com/apikey "
                 "取得金鑰並填入專案根目錄的 .env 檔"
             )
-        return call_with_rotation(self._pool, lambda key: self._call_gemini(key, prompt))
+        return call_with_rotation(
+            self._pool, lambda key: self._call_gemini(key, prompt), on_call=self._on_call
+        )
 
     def _call_gemini(self, key: str, prompt: str) -> str:
         from google import genai

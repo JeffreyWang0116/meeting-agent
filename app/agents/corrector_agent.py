@@ -62,9 +62,12 @@ class CorrectorAgent:
         model: str = "gemini-flash-lite-latest",
         generate=None,
         api_keys=None,
+        on_call=None,
         glossary=None,
     ):
         self._pool = KeyPool(api_keys if api_keys else [api_key])
+        # 每打一次 API 就回報一次，用量統計才會算到重試與換金鑰
+        self._on_call = on_call
         self.api_key = self._pool.first
         self.model = model
         # 可注入 callable(prompt) -> str，測試時不需要真的呼叫 Gemini
@@ -105,7 +108,9 @@ class CorrectorAgent:
     def _generate_with_gemini(self, prompt: str) -> str:
         if not self._pool:
             return '{"corrections": []}'  # 沒金鑰就等同「沒有要修正的地方」
-        return call_with_rotation(self._pool, lambda key: self._call_gemini(key, prompt))
+        return call_with_rotation(
+            self._pool, lambda key: self._call_gemini(key, prompt), on_call=self._on_call
+        )
 
     def _call_gemini(self, key: str, prompt: str) -> str:
         from google import genai
