@@ -48,9 +48,11 @@ class Settings:
     # 上傳的長音檔分段轉錄的每段秒數（0＝不分段，整份送出）。
     # 實測整份送出 17 分鐘錄音時，Gemini 會整份放棄講者標註、時間戳也會漂掉
     transcribe_chunk_seconds: int = 240
-    # 某一段的講者標註率過低時，改用這個較強的模型重跑那一段（空字串＝不啟用）。
-    # 只在失敗的段落動用，免費額度較低的模型才不會被整場錄音吃光
-    transcribe_fallback_model: str | None = "gemini-flash-latest"
+    # 較強的轉錄模型：長檔整份單次轉錄、以及某段講者標註率過低時重跑那一段
+    # （空字串＝不啟用）。不用 gemini-flash-latest：那是會飄到「當下最新版」的
+    # 別名，實測常飄到過載的版本回 503，長檔整份一次呼叫撞上就整份失敗。改用
+    # 釘死版本 gemini-3.5-flash（實測穩定且能聽音訊），不會被別名帶去踩過載。
+    transcribe_fallback_model: str | None = "gemini-3.5-flash"
     # 單一檔案最多幾段可以動用備援模型。免費層實測額度：Flash Lite 每日 500 次、
     # Flash 每日只有 20 次——備援跑一次就吃掉每日 Flash 額度的 5%，遠高於重試
     # 的成本上限，所以預設 0（不啟用），把預算全花在便宜的 lite 重試，稀有的
@@ -131,7 +133,7 @@ def get_settings() -> Settings:
         live_chunk_seconds=int(os.environ.get("LIVE_CHUNK_SECONDS", "45")),
         transcribe_chunk_seconds=int(os.environ.get("TRANSCRIBE_CHUNK_SECONDS", "240")),
         transcribe_fallback_model=(
-            os.environ.get("TRANSCRIBE_FALLBACK_MODEL", "gemini-flash-latest") or None
+            os.environ.get("TRANSCRIBE_FALLBACK_MODEL", "gemini-3.5-flash") or None
         ),
         transcribe_max_fallback_chunks=int(
             os.environ.get("TRANSCRIBE_MAX_FALLBACK_CHUNKS", "0")
