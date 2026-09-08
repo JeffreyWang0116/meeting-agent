@@ -648,12 +648,12 @@ def test_glossary_roundtrip_and_validation(client):
 
     resp = client.put(
         "/api/glossary",
-        json={"terms": [{"term": "王霖翔", "note": "人名"}, {"term": "TaskHub"}]},
+        json={"terms": [{"term": "王霖翔", "note": "人名", "person": False}, {"term": "TaskHub"}]},
     )
     assert resp.status_code == 200
     assert resp.json()["terms"] == [
-        {"term": "王霖翔", "note": "人名"},
-        {"term": "TaskHub", "note": ""},
+        {"term": "王霖翔", "note": "人名", "person": False},
+        {"term": "TaskHub", "note": "", "person": False},
     ]
     assert client.get("/api/glossary").json()["terms"][0]["term"] == "王霖翔"
     # 空詞彙要擋
@@ -662,37 +662,15 @@ def test_glossary_roundtrip_and_validation(client):
 
 # ---- 講者名冊 ----
 
-def test_speaker_roster_roundtrip_and_validation(client):
-    assert client.get("/api/speakers").json() == {"names": []}
-
-    resp = client.put("/api/speakers", json={"names": ["王霖翔", "李經理"]})
-    assert resp.status_code == 200
-    assert resp.json()["names"] == ["王霖翔", "李經理"]
-    assert client.get("/api/speakers").json()["names"] == ["王霖翔", "李經理"]
-
-    # 空姓名、以及「講者A」這種代號要擋（進了名冊只會污染 prompt）
-    assert client.put("/api/speakers", json={"names": ["  "]}).status_code == 400
-    assert client.put("/api/speakers", json={"names": ["講者A"]}).status_code == 400
-
-
-def test_speaker_roster_post_adds_without_replacing(client):
-    """手動改名時前端只送新名字，不該把既有名冊洗掉；最近用到的排最前面。"""
-    client.put("/api/speakers", json={"names": ["王霖翔", "李經理"]})
-    resp = client.post("/api/speakers", json={"names": ["陳工程師"]})
-    assert resp.status_code == 200
-    assert resp.json()["names"] == ["陳工程師", "王霖翔", "李經理"]
-
-
-def test_speaker_roster_post_ignores_bad_names(client):
-    """POST 走的是分析流程的寬鬆路徑：壞名字略過就好，不回 400。"""
-    resp = client.post("/api/speakers", json={"names": ["講者A"]})
-    assert resp.status_code == 200
-    assert resp.json()["names"] == []
-
-
-def test_backup_includes_speaker_roster(client):
-    client.put("/api/speakers", json={"names": ["王霖翔"]})
-    assert client.get("/api/backup").json()["speaker_roster"] == ["王霖翔"]
+def test_person_terms_survive_backup(client):
+    """講者名冊已併入詞彙表：標成人名的項目要跟著備份走。"""
+    client.put(
+        "/api/glossary",
+        json={"terms": [{"term": "王霖翔", "person": True}, {"term": "TaskHub"}]},
+    )
+    terms = client.get("/api/backup").json()["glossary"]
+    assert [t["term"] for t in terms] == ["王霖翔", "TaskHub"]
+    assert [t["person"] for t in terms] == [True, False]
 
 
 # ---- 其他 ----
@@ -871,3 +849,14 @@ def test_live_chunk_rejects_oversized_chunk(tiny_limit_client):
     )
 
     assert resp.status_code == 413
+
+
+def test_remember_persons_endpoint_marks_names_without_wiping_terms(client):
+    """手動改講者名時前端只送那一個名字，不能把既有詞彙洗掉。"""
+    client.put("/api/glossary", json={"terms": [{"term": "TaskHub", "note": "產品"}]})
+    resp = client.post("/api/glossary/persons", json={"names": ["王霖翔", "講者A"]})
+
+    assert resp.status_code == 200
+    assert resp.json()["names"] == ["王霖翔"]  # 代號被擋掉
+    terms = client.get("/api/glossary").json()["terms"]
+    assert [t["term"] for t in terms] == ["TaskHub", "王霖翔"]

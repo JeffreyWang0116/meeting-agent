@@ -114,14 +114,6 @@
             <hr class="set-sep">
             <div class="set-row">
               <span class="set-label">
-                <svg class="i-sm" aria-hidden="true"><use href="/static/icons.svg#users"/></svg>
-                講者名冊
-              </span>
-              <button class="ghost" id="btnRoster">管理</button>
-            </div>
-            <hr class="set-sep">
-            <div class="set-row">
-              <span class="set-label">
                 <svg class="i-sm" aria-hidden="true"><use href="/static/icons.svg#database"/></svg>
                 資料備份
               </span>
@@ -642,33 +634,19 @@
         <svg class="i-sm" aria-hidden="true"><use href="/static/icons.svg#x"/></svg>
       </button>
     </div>
-    <p class="hint">會議中常出現的名稱，加進詞彙表後，會優先採用這些寫法。</p>
+    <p class="hint">會議中常出現的名稱，加進詞彙表後，轉錄會優先採用這些寫法。勾「人名」的項目另外會用來統一講者姓名——同一個人在每場會議都叫同一個名字；你在歷史會議改過的講者名字也會自動記進來。</p>
     <div class="glossary-add">
       <input type="text" id="glosTerm" placeholder="名稱">
       <input type="text" id="glosNote" placeholder="說明（選填）">
+      <label class="chk" title="勾選後，辨識講者時會用這個寫法統一姓名">
+        <input type="checkbox" id="glosPerson"> 人名
+      </label>
       <button class="primary" id="btnGlosAdd">新增</button>
     </div>
     <div id="glosList"><p class="empty-note">尚無詞彙</p></div>
   </div>
 </div>
 
-<!-- 講者名冊管理視窗 -->
-<div class="modal-overlay" id="rosterModal">
-  <div class="modal">
-    <div class="panel-head">
-      <h2>講者名冊</h2>
-      <button class="panel-x" id="btnRosterClose" aria-label="關閉">
-        <svg class="i-sm" aria-hidden="true"><use href="/static/icons.svg#x"/></svg>
-      </button>
-    </div>
-    <p class="hint">常一起開會的人。辨識講者時會用這份名單統一姓名寫法，讓同一個人在每場會議都叫同一個名字。你在歷史會議改過的講者名字會自動記進來。</p>
-    <div class="glossary-add">
-      <input type="text" id="rosterName" placeholder="姓名或職稱">
-      <button class="primary" id="btnRosterAdd">新增</button>
-    </div>
-    <div id="rosterList"><p class="empty-note">尚無講者</p></div>
-  </div>
-</div>
 
 <!-- 即時聆聽的沉浸畫面：聆聽期間蓋滿螢幕，顯示聲控光球、計時與即時字幕。
      裡面的逐字稿是把 #liveTranscript 整個節點搬進來，不是另一份複本，

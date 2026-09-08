@@ -325,10 +325,10 @@ def test_per_meeting_terms_are_stored_and_reused_on_reanalyze(client):
     body = client.post("/api/meetings", json={
         "text": "開會內容",
         "kind": "一般會議",
-        "terms": [{"term": "TaskHub", "note": "本次專案代號"}],
+        "terms": [{"term": "TaskHub", "note": "本次專案代號", "person": False}],
     }).json()
     detail = client.get(f"/api/meetings/{body['meeting_id']}").json()
-    assert detail["terms"] == [{"term": "TaskHub", "note": "本次專案代號"}]
+    assert detail["terms"] == [{"term": "TaskHub", "note": "本次專案代號", "person": False}]
 
     # 重新分析要沿用，不能把會前打的詞弄丟
     assert client.post(f"/api/meetings/{body['meeting_id']}/reanalyze").status_code == 200

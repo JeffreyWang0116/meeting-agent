@@ -39,7 +39,6 @@ from app.auth import CURRENT_USER, AuthError, bearer_token, verify_firebase_id_t
 from app.config import Settings, get_settings
 from app.export import meeting_report_md, tasks_to_csv, tasks_to_ics
 from app.glossary import Glossary, clean_terms
-from app.speakers import SpeakerRoster
 from app.jobs import MediaJobManager
 from app.orchestrator import Orchestrator
 from app.rag import AskAgent, GeminiEmbedder, RagIndex
@@ -304,12 +303,12 @@ class AskRequest(BaseModel):
     meeting_ids: Optional[list[str]] = None  # 限定檢索範圍（複選會議）；None = 全部
 
 
+class PersonNamesRequest(BaseModel):
+    names: list[str]
+
+
 class GlossaryRequest(BaseModel):
     terms: list[dict]
-
-
-class SpeakerRosterRequest(BaseModel):
-    names: list[str]
 
 
 class TaskCreateRequest(BaseModel):
@@ -365,8 +364,6 @@ def create_app(
     # 自訂詞彙表：持久化交給 store（本地 JSON / 雲端 Firestore，與任務同後端），
     # 以 callable 注入，轉錄/分析每次都讀到最新內容
     glossary = Glossary(store)
-    # 講者名冊：只餵給 SpeakerNamerAgent 統一姓名寫法（不進轉錄，理由見 app/speakers.py）
-    roster = SpeakerRoster(store)
     orchestrator = orchestrator or Orchestrator(
         parser=ParserAgent(),
         decision=DecisionAgent(
@@ -391,8 +388,10 @@ def create_app(
             on_call=record_call,
             # 依上下文判讀「誰是誰」，與校正同屬機械性工作，用便宜模型即可
             model=settings.correct_model,
-            known_names=roster.names,
-            remember_names=roster.remember,
+            # 人名就是詞彙表裡標成人名的項目：使用者只維護一份清單，
+            # 而且那些名字同時餵進轉錄，不會再被聽成別的字
+            known_names=glossary.person_names,
+            remember_names=glossary.remember_persons,
         ),
     )
     if transcriber is None:
@@ -916,24 +915,17 @@ def create_app(
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc))
 
-    # ---- 講者名冊 ----
+    @app.post("/api/glossary/persons")
+    def remember_persons(req: PersonNamesRequest):
+        """記一筆剛用到的姓名並標成人名（前端手動改講者名時呼叫）。
 
-    @app.get("/api/speakers")
-    def get_speakers():
-        return {"names": roster.names(current_user())}
-
-    @app.put("/api/speakers")
-    def put_speakers(req: SpeakerRosterRequest):
-        """設定畫面整份取代：手動輸入的錯誤要讓使用者看見。"""
-        try:
-            return {"names": roster.replace(req.names, current_user())}
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc))
-
-    @app.post("/api/speakers")
-    def add_speakers(req: SpeakerRosterRequest):
-        """記一筆剛用到的姓名（前端手動改講者名時呼叫），不合格的略過就好。"""
-        return {"names": roster.remember(req.names)}
+        整份取代（PUT）在這裡不適用：前端只知道剛改的那一個名字，送完整清單
+        會把同時開著別的分頁改的東西洗掉。不合格的姓名略過就好，不回報錯誤
+        ——這是順手記一筆，不是使用者主動送出的表單。
+        """
+        user = current_user()
+        glossary.remember_persons(req.names, user)
+        return {"names": glossary.person_names(user)}
 
     # ---- 任務管理 ----
 

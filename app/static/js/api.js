@@ -59,9 +59,7 @@ const api = {
   // ---- 詞彙表 / 講者名冊 ----
   glossary: () => get("/api/glossary"),
   saveGlossary: payload => put("/api/glossary", payload),          // { terms }
-  speakers: () => get("/api/speakers"),
-  saveSpeakers: payload => put("/api/speakers", payload),          // { names }
-  rememberSpeakers: payload => post("/api/speakers", payload),     // { names }
+  rememberPersons: payload => post("/api/glossary/persons", payload),  // { names }
 
   // ---- 問答 / 搜尋 / 翻譯 ----
   ask: payload => post("/api/ask", payload),

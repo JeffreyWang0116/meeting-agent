@@ -131,17 +131,14 @@ def test_one_account_cannot_open_anothers_meeting(tmp_path):
     assert client.get(f"/api/meetings/{meeting_id}", headers=as_user(None, "bob")).status_code == 404
 
 
-def test_glossary_and_speakers_are_per_account(tmp_path):
+def test_glossary_is_per_account(tmp_path):
     client, _ = make_app(tmp_path)
     client.put(
         "/api/glossary",
         json={"terms": [{"term": "王霖翔", "note": "人名"}]},
         headers=as_user(None, "alice"),
     )
-    client.put("/api/speakers", json={"names": ["Alice"]}, headers=as_user(None, "alice"))
-
     assert client.get("/api/glossary", headers=as_user(None, "bob")).json()["terms"] == []
-    assert client.get("/api/speakers", headers=as_user(None, "bob")).json()["names"] == []
     assert client.get("/api/glossary", headers=as_user(None, "alice")).json()["terms"]
 
 

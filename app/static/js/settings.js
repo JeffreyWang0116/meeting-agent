@@ -53,6 +53,7 @@ function renderGlossary() {
   $("glosList").innerHTML = glosTerms.length
     ? glosTerms.map((t, i) => `<div class="glos-item">
         <b>${esc(t.term)}</b>
+        ${t.person ? `<span class="glos-note">人名</span>` : ""}
         ${t.note ? `<span class="glos-note">${esc(t.note)}</span>` : ""}
         <button class="del-btn" data-i="${i}" title="刪除此詞彙" aria-label="刪除">${icon("x", "i-sm")}</button>
       </div>`).join("")
@@ -102,9 +103,14 @@ $("glossaryModal").addEventListener("click", e => {
 $("btnGlosAdd").addEventListener("click", () => {
   const term = $("glosTerm").value.trim();
   if (!term) return;
-  glosTerms.push({ term, note: $("glosNote").value.trim() });
+  glosTerms.push({
+    term,
+    note: $("glosNote").value.trim(),
+    person: $("glosPerson").checked,
+  });
   $("glosTerm").value = "";
   $("glosNote").value = "";
+  $("glosPerson").checked = false;
   saveGlossary();
   $("glosTerm").focus();
 });
@@ -117,66 +123,14 @@ $("glosList").addEventListener("click", e => {
   saveGlossary();
 });
 
-// ---- 講者名冊管理 ----
-// 名冊只影響「講者辨識」時的姓名寫法，與自訂詞彙是兩件事，所以分開一個視窗。
-let rosterNames = [];
-
-function renderRoster() {
-  $("rosterList").innerHTML = rosterNames.length
-    ? rosterNames.map((n, i) => `<div class="glos-item">
-        <b>${esc(n)}</b>
-        <button class="del-btn" data-i="${i}" title="從名冊移除" aria-label="刪除">${icon("x", "i-sm")}</button>
-      </div>`).join("")
-    : `<p class="empty-note">尚無講者</p>`;
-}
-
-async function saveRoster() {
-  try {
-    const r = await api.saveSpeakers({ names: rosterNames });
-    rosterNames = r.names;
-  } catch (err) {
-    showError("儲存講者名冊失敗：" + err.message);
-    rosterNames = (await api.speakers()).names;  // 退回伺服器版本
-  }
-  renderRoster();
-}
-
-// 記一個剛用到的姓名（手動改講者名時呼叫）。名冊記不記得起來都不影響改名本身，
-// 所以失敗只當沒發生，不打擾使用者
+// ---- 手動改講者名時，把姓名記進詞彙表（標成人名）----
+// 名冊已併入詞彙表：使用者只維護一份清單，而那些名字同時也會餵進轉錄。
+// 記不記得起來都不影響改名本身，所以失敗只當沒發生，不打擾使用者。
 async function rememberSpeaker(name) {
   try {
-    await api.rememberSpeakers({ names: [name] });
-  } catch (err) { /* 名冊是加分項，靜靜略過 */ }
+    await api.rememberPersons({ names: [name] });
+  } catch (err) { /* 順手記一筆，靜靜略過 */ }
 }
-
-$("btnRoster").addEventListener("click", async () => {
-  $("settingsMenu").classList.remove("open");
-  $("rosterModal").classList.add("open");
-  try {
-    rosterNames = (await api.speakers()).names;
-    renderRoster();
-  } catch (err) { /* 讀取失敗仍可新增 */ }
-  $("rosterName").focus();
-});
-$("btnRosterClose").addEventListener("click", () => $("rosterModal").classList.remove("open"));
-$("rosterModal").addEventListener("click", e => {
-  if (e.target === $("rosterModal")) $("rosterModal").classList.remove("open");
-});
-$("btnRosterAdd").addEventListener("click", () => {
-  const name = $("rosterName").value.trim();
-  if (!name) return;
-  rosterNames.unshift(name);  // 新加的排最前面，與「最近用到的在前」一致
-  $("rosterName").value = "";
-  saveRoster();
-  $("rosterName").focus();
-});
-$("rosterName").addEventListener("keydown", e => { if (e.key === "Enter") $("btnRosterAdd").click(); });
-$("rosterList").addEventListener("click", e => {
-  const btn = e.target.closest(".del-btn");
-  if (!btn) return;
-  rosterNames.splice(Number(btn.dataset.i), 1);
-  saveRoster();
-});
 
 // ---- PWA：註冊 service worker（讓手機可「加入主畫面」以近原生方式使用） ----
 if ("serviceWorker" in navigator) {
@@ -191,4 +145,4 @@ if ("serviceWorker" in navigator) {
   }, { passive: true });
 })();
 
-export { glosTerms, rememberSpeaker, renderGlossary, renderRoster, rosterNames, saveGlossary, saveRoster };
+export { glosTerms, rememberSpeaker, renderGlossary, saveGlossary };
