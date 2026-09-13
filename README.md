@@ -346,6 +346,7 @@ app/static/
 | `auth.js` | Google 登入（伺服器有設 Firebase 才作用） |
 | `router.js` | 版面路由：側欄一次只顯示一個 view（`showView`） |
 | `setup.js` | 全域初始化：會議日期、會議種類、功能勾選、本次專用詞彙、麥克風選擇 |
+| `speakers.js` | 行首「XXX：」算不算講者：代號一律算、像名字的出現兩次以上或在出席名單上才算（純函式，`tests/test_speaker_labels_js.py` 用 node 測） |
 | `transcript.js` | 逐字稿渲染（時間欄＋講者＋內文）、時間/引用句跳轉 |
 | `result.js` | 分析結果：摘要、會議重點、決議、代辦、確認信、種類專屬區塊 |
 | `calendar.js` | 代辦寫進 Google 行事曆 |

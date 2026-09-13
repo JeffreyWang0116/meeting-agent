@@ -6,7 +6,8 @@ import { refreshReminders, remindersLoaded, renderReminders } from "./reminders.
 import { copyWithFeedback } from "./result.js";
 import { correctTypos, nameSpeakers } from "./setup.js";
 import { allTasks, refreshTasks, renderTasks, tasksLoaded } from "./tasks.js";
-import { SPEAKER_RE, TIME_RE, jumpToTranscript, renderChat } from "./transcript.js";
+import { speakerLabels } from "./speakers.js";
+import { TIME_RE, jumpToTranscript, renderChat } from "./transcript.js";
 
 let meetingsLoaded = false;
 
@@ -29,13 +30,10 @@ function meetingLabel(id) {
   return { title: m.meeting?.title || "（未命名會議）", date: m.meeting?.date || "" };
 }
 
-function detectSpeakers(text) {
-  const found = new Set();
-  for (const line of String(text || "").split("\n")) {
-    const m = line.trim().replace(TIME_RE, "").match(SPEAKER_RE);
-    if (m) found.add(m[1].trim());
-  }
-  return [...found].slice(0, 12);
+// 講者改名清單：與逐字稿畫面同一套判斷，「重點：」這種行首不會被列進來
+function detectSpeakers(text, knownNames = []) {
+  const lines = String(text || "").split("\n").map(l => l.trim().replace(TIME_RE, ""));
+  return [...speakerLabels(lines, knownNames)].slice(0, 12);
 }
 
 function meetingDetailHtml(id) {
@@ -64,7 +62,7 @@ function meetingDetailHtml(id) {
         <span class="hl-text">${esc(h.text)}</span>
         ${h.time ? `<span class="hl-time">${esc(h.time)}</span>` : ""}
       </li>`).join("");
-  const speakers = detectSpeakers(d.transcript);
+  const speakers = detectSpeakers(d.transcript, d.meeting.attendees);
   return `<div class="meeting-detail">
       ${d.meeting.summary ? `<h4>AI 摘要 <button class="ghost trans-detail" data-id="${esc(id)}">翻譯</button></h4>
       <p class="detail-summary">${esc(d.meeting.summary)}</p>
@@ -180,7 +178,7 @@ function renderMeetings() {
   const view = document.getElementById("dTranscriptView");
   const d = meetingDetailCache[expandedMeetingId];
   if (view && d) {
-    if (d.transcript) renderChat(view, d.transcript);
+    if (d.transcript) renderChat(view, d.transcript, d.meeting.attendees);
     else view.innerHTML = `<p class="empty-note">此會議沒有存逐字稿全文</p>`;
   }
   renderHome();

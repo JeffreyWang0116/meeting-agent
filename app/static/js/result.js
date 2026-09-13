@@ -98,9 +98,11 @@ function renderResult(result, transcript) {
   $("rTransSec").style.display = currentTranscript ? "block" : "none";
   // 雙欄版面下逐字稿是常駐對照欄，預設攤開；單欄（窄螢幕）才收起來免得洗版
   $("rTransSec").open = WIDE.matches;
-  renderChat($("rTranscript"), currentTranscript);
-  renderCorrections(result.corrections || []);
   const a = result.analysis, m = a.meeting;
+  // 出席者＋本次對應出的講者姓名：只講一句話的人也要掛得上名字
+  const knownNames = [...(m.attendees || []), ...(result.speaker_names || []).map(s => s.name)];
+  renderChat($("rTranscript"), currentTranscript, knownNames);
+  renderCorrections(result.corrections || []);
   // 成效指標：這場會議 AI 幫你做了多少事、花了多久
   const elapsed = analysisStartTime ? ((Date.now() - analysisStartTime) / 1000).toFixed(1) : null;
   analysisStartTime = null;

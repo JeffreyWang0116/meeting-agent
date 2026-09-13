@@ -1,13 +1,13 @@
 import { $, esc } from "./core.js";
+import { LABEL_RE, matchSpeaker, speakerLabels } from "./speakers.js";
 
 /* ==================================================================
    3. 逐字稿：連續文件式渲染（時間欄＋講者＋內文）與時間/引用句跳轉
    ================================================================== */
 // ---- 連續文件式逐字稿渲染 ----
-// 偵測行首「[1:02]」時間標記與「講者：」「Kevin:」等講者前綴。
+// 偵測行首「[1:02]」時間標記與「講者A：」「王小明：」等講者前綴（哪些算講者見 speakers.js）。
 // 帶時間標記的行自成一句（時間軸不能被合併吃掉）；沒有時間標記時維持
 // 「同講者連續行合併」——轉錄結果常常一句一行，不合併會太碎。
-const SPEAKER_RE = /^([^：:\n]{1,12})[：:]\s*/;
 // 各段放寬成 1~2 位數：模型會吐出 [00]（漏掉「0:」）和 [0:1]（秒數一位數），
 // 嚴格比對的話那些行會整個看不到時間（後端 segments.py 是同一套規則）
 const TIME_RE = /^\[(\d{1,2}(?::\d{1,2}){0,2})\]\s*/;
@@ -17,23 +17,27 @@ function timeLabelToSeconds(label) {
   return String(label).split(":").reduce((acc, p) => acc * 60 + Number(p), 0);
 }
 
-function parseChatMessages(text) {
-  const msgs = [];
-  let lastSpeaker = null;
+// knownNames：出席者、已對應的講者姓名——只講過一句話的人也要認得出來
+function parseChatMessages(text, knownNames = []) {
+  const rows = [];
   for (const rawLine of String(text || "").split("\n")) {
     let line = rawLine.trim();
     if (!line) continue;
     const tm = line.match(TIME_RE);
-    const time = tm ? tm[1] : null;
     if (tm) line = line.slice(tm[0].length).trim();
-    if (!line) continue;
-    const m = line.match(SPEAKER_RE);
+    if (line) rows.push({ time: tm ? tm[1] : null, line });
+  }
+  const labels = speakerLabels(rows.map(r => r.line), knownNames);
+  const msgs = [];
+  let lastSpeaker = null;
+  for (const { time, line } of rows) {
+    const m = matchSpeaker(line, labels);
     // 轉錄模型只在「換人講」時標註講者，同一人連續發言的後續行不再重複標籤
     // （逐字稿的標準慣例）。沒有標籤就沿用上一行的講者，否則那些續行會失去
     // 顏色分組、還會讓下一行重複顯示已經出現過的名字
-    const speaker = m ? m[1].trim() : lastSpeaker;
+    const speaker = m ? m.speaker : lastSpeaker;
     if (speaker) lastSpeaker = speaker;
-    const content = m ? line.slice(m[0].length) : line;
+    const content = m ? m.rest : line;
     const last = msgs[msgs.length - 1];
     if (!time && last && last.speaker === speaker) {
       last.text += (last.text ? " " : "") + content;
@@ -47,20 +51,20 @@ function parseChatMessages(text) {
 
 // speakerMap：跨段落維持同講者同色（即時聆聽逐段附加時傳入同一個 map）
 // translation：對應的譯文（可選）。行數對得上就逐句雙語對照，對不上就整段附在最後。
-function chatHtml(text, speakerMap, translation) {
+function chatHtml(text, speakerMap, translation, knownNames = []) {
   const map = speakerMap || {};
   const colorOf = s => {
     if (!(s in map)) map[s] = Object.keys(map).length;
     return map[s] % 5;
   };
-  const msgs = parseChatMessages(text);
+  const msgs = parseChatMessages(text, knownNames);
   // 譯文沒有時間標記、合併方式可能與原文不同：先切成非空行，行數與原文
   // 總行數一致時，照原文每句合併的行數分組對齊
   let transTexts = null;
   if (translation) {
     const tLines = String(translation).split("\n")
       .map(l => l.trim().replace(TIME_RE, "")).filter(Boolean)
-      .map(l => { const m = l.match(SPEAKER_RE); return m ? l.slice(m[0].length) : l; });
+      .map(l => { const m = l.match(LABEL_RE); return m ? l.slice(m[0].length) : l; });
     const total = msgs.reduce((n, m) => n + m.lines, 0);
     if (msgs.length && tLines.length === total) {
       transTexts = []; let i = 0;
@@ -84,8 +88,8 @@ function chatHtml(text, speakerMap, translation) {
   return html;
 }
 
-function renderChat(container, text) {
-  container.innerHTML = chatHtml(text, {});
+function renderChat(container, text, knownNames = []) {
+  container.innerHTML = chatHtml(text, {}, null, knownNames);
 }
 
 // ---- 逐字稿跳轉：依時間節點（優先）或引用句找到對應行，標亮並捲到可視範圍 ----
@@ -128,4 +132,4 @@ function jumpToTranscript(container, timeLabel, quote) {
   return true;
 }
 
-export { SPEAKER_RE, TIME_RE, chatHtml, findLineByQuote, jumpToTranscript, parseChatMessages, renderChat, timeLabelToSeconds };
+export { TIME_RE, chatHtml, findLineByQuote, jumpToTranscript, parseChatMessages, renderChat, timeLabelToSeconds };
