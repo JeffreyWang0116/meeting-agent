@@ -140,7 +140,7 @@ def test_known_speakers_passed_as_hint_to_next_chunk(tmp_path):
     sid = mgr.start()
     mgr.add_chunk(sid, b"a")
     mgr.add_chunk(sid, b"b")
-    assert tr.hints[0] is None  # 第一段沒有先前講者
+    assert "講者A" not in tr.hints[0]  # 第一段沒有先前講者可沿用
     assert tr.hints[1] and "講者A" in tr.hints[1]  # 第二段帶入已知講者
 
 
@@ -176,7 +176,7 @@ def test_terms_are_scoped_to_their_own_session(tmp_path):
     with_terms = mgr.start(terms=[{"term": "Kessel 專案", "note": ""}])
     without = mgr.start()
     mgr.add_chunk(without, b"a")
-    assert tr.hints[0] is None
+    assert "Kessel 專案" not in (tr.hints[0] or "")
     mgr.add_chunk(with_terms, b"b")
     assert "Kessel 專案" in tr.hints[1]
 
@@ -355,8 +355,13 @@ class FakeMatcher:
 
 
 def _mgr_with_matcher(tmp_path, texts, matcher):
+    # spawn 改成原地執行：提早比對平常跑在背景執行緒，測試要的是「比了幾次、
+    # 比出什麼」，交給執行緒排程會讓斷言時有時無
     return LiveSessionManager(
-        HintRecordingTranscriber(texts), tmp_path, voice_matcher=matcher
+        HintRecordingTranscriber(texts),
+        tmp_path,
+        voice_matcher=matcher,
+        spawn=lambda fn: fn(),
     )
 
 
@@ -456,3 +461,168 @@ def test_enroll_rejects_a_duplicate_name(tmp_path):
         mgr.enroll(sid, "王小明", b"b")
     with pytest.raises(ValueError):
         mgr.enroll(sid, "  王小明  ", b"b")  # 前後空白不算不同的人
+
+
+def test_voice_mapping_is_cached_so_retrying_the_analysis_keeps_the_names(tmp_path):
+    """分析失敗後按「重試分析」，比對結果必須還在。
+
+    finish() 會刪掉整個 session 目錄（樣本與錄音段都在裡面），但 session 物件
+    本身留著等 TTL 回收。沒有快取的話，第二次 voice_mapping 會拿著已經不存在
+    的檔案路徑去比對，例外被吞掉之後回空 dict——使用者看到的是第一次有姓名、
+    重試後整份退回「講者A」，而且沒有任何訊息說明為什麼。
+    """
+    matcher = FakeMatcher({"講者A": "王小明"})
+    mgr = _mgr_with_matcher(tmp_path, ["[0:01] 講者A：大家好"], matcher)
+    sid = mgr.start()
+    mgr.enroll(sid, "王小明", b"sample")
+    mgr.add_chunk(sid, b"audio", offset_seconds=0)
+
+    assert mgr.voice_mapping(sid) == {"講者A": "王小明"}
+    mgr.finish(sid)
+
+    assert mgr.voice_mapping(sid) == {"講者A": "王小明"}
+    assert len(matcher.calls) == 1  # 音檔都沒了，不該再白打一次 API
+
+
+def test_early_voice_match_runs_once_enough_chunks_are_in(tmp_path):
+    """開完一小時才發現預錄沒生效已經來不及——前幾段就先比一次。
+
+    比對結果隨當段回傳，前端才能當場顯示「已認出王小明」。
+    """
+    matcher = FakeMatcher({"講者A": "王小明"})
+    mgr = _mgr_with_matcher(
+        tmp_path, ["[0:01] 講者A：大家好", "[0:50] 講者A：那我們開始"], matcher
+    )
+    sid = mgr.start()
+    mgr.enroll(sid, "王小明", b"sample")
+
+    first = mgr.add_chunk(sid, b"audio-1", offset_seconds=0)
+    assert first["names"] == {}  # 才一段，還不夠比
+    assert matcher.calls == []
+
+    second = mgr.add_chunk(sid, b"audio-2", offset_seconds=45)
+    assert second["names"] == {"講者A": "王小明"}
+    assert len(matcher.calls) == 1
+
+
+def test_early_match_is_not_repeated_on_every_later_chunk(tmp_path):
+    """比對用的是強模型，一場會議打太多次既慢又燒額度。"""
+    matcher = FakeMatcher({"講者A": "王小明"})
+    mgr = _mgr_with_matcher(tmp_path, ["[0:01] 講者A：一"] * 4, matcher)
+    sid = mgr.start()
+    mgr.enroll(sid, "王小明", b"sample")
+    for i in range(4):
+        mgr.add_chunk(sid, b"audio", offset_seconds=i * 45)
+    assert len(matcher.calls) == 1
+
+
+def test_early_match_never_blocks_the_chunk_response(tmp_path):
+    """比對是背景工作：轉錄結果要立刻回給前端，不能等比對跑完。"""
+    started = threading.Event()
+    release = threading.Event()
+
+    class SlowMatcher(FakeMatcher):
+        def match(self, enrollments, evidence):
+            started.set()
+            release.wait(2)
+            return super().match(enrollments, evidence)
+
+    matcher = SlowMatcher({"講者A": "王小明"})
+    mgr = LiveSessionManager(  # 用預設的背景執行緒，不注入 inline spawn
+        HintRecordingTranscriber(["[0:01] 講者A：一", "[0:50] 講者A：二"]),
+        tmp_path,
+        voice_matcher=matcher,
+    )
+    sid = mgr.start()
+    mgr.enroll(sid, "王小明", b"sample")
+    mgr.add_chunk(sid, b"a", offset_seconds=0)
+    mgr.add_chunk(sid, b"b", offset_seconds=45)  # 比對卡在 release 上也必須回得來
+
+    assert started.wait(2)
+    release.set()
+
+
+def test_final_mapping_merges_what_the_early_match_already_found(tmp_path):
+    """後半場才發言的人要補上，前半場認出來的不能被覆蓋掉。"""
+    matcher = FakeMatcher({"講者A": "王小明"})
+    mgr = _mgr_with_matcher(
+        tmp_path,
+        ["[0:01] 講者A：一", "[0:50] 講者A：二", "[1:40] 講者B：我是後來才到的"],
+        matcher,
+    )
+    sid = mgr.start()
+    mgr.enroll(sid, "王小明", b"s1")
+    mgr.enroll(sid, "李美華", b"s2")
+    mgr.add_chunk(sid, b"a", offset_seconds=0)
+    mgr.add_chunk(sid, b"b", offset_seconds=45)  # 這裡提早比出講者A
+    mgr.add_chunk(sid, b"c", offset_seconds=90)
+
+    matcher.result = {"講者B": "李美華"}  # 最後一次比對只認出後來的人
+    assert mgr.voice_mapping(sid) == {"講者A": "王小明", "講者B": "李美華"}
+
+
+def test_merging_drops_a_name_that_would_land_on_two_labels(tmp_path):
+    """同一個姓名掛在兩個代號上，下游 apply_speaker_names 會整批放棄。
+
+    後一次比對看到的證據比較多，衝突時留新的、丟舊的，其他正確的對應才保得住。
+    """
+    matcher = FakeMatcher({"講者A": "王小明"})
+    mgr = _mgr_with_matcher(
+        tmp_path, ["[0:01] 講者A：一", "[0:50] 講者A：二", "[1:40] 講者B：三"], matcher
+    )
+    sid = mgr.start()
+    mgr.enroll(sid, "王小明", b"s1")
+    mgr.add_chunk(sid, b"a", offset_seconds=0)
+    mgr.add_chunk(sid, b"b", offset_seconds=45)
+    mgr.add_chunk(sid, b"c", offset_seconds=90)
+
+    matcher.result = {"講者B": "王小明"}
+    assert mgr.voice_mapping(sid) == {"講者B": "王小明"}
+
+
+def test_enrolled_names_are_reported_for_the_finish_summary(tmp_path):
+    """要能告訴使用者「預錄的 4 位認出了哪 2 位」，就得拿得到完整名單。"""
+    mgr = _mgr_with_matcher(tmp_path, [], FakeMatcher())
+    sid = mgr.start()
+    mgr.enroll(sid, "王小明", b"a")
+    mgr.enroll(sid, "李美華", b"b")
+    assert mgr.enrolled_names(sid) == ["王小明", "李美華"]
+
+
+# ---- 分段重疊：不讓一句話被 45 秒的硬切點剁成兩半 ----
+
+def test_overlapping_seconds_are_dropped_from_the_next_chunk(tmp_path):
+    """重疊那幾秒會被轉錄兩次，依絕對時間濾掉重複的行。"""
+    tr = HintRecordingTranscriber(
+        ["[0:00] 講者A：大家好", "[0:00] 講者A：大家好\n[0:05] 講者A：今天要談排程"]
+    )
+    mgr = LiveSessionManager(tr, tmp_path)
+    sid = mgr.start()
+    mgr.add_chunk(sid, b"a", offset_seconds=0)
+    # 第二段的音訊從 42 秒開始（往前多抓 3 秒），新內容從 45 秒起
+    second = mgr.add_chunk(sid, b"b", offset_seconds=42, overlap_seconds=3)
+    assert second["text"] == "[0:47] 講者A：今天要談排程"
+    assert "[0:42]" not in second["transcript"]
+
+
+def test_chunk_hint_carries_the_previous_segments_tail(tmp_path):
+    """只給講者名單，模型沒聽過前一段，無從知道「講者B」是哪個嗓音。
+
+    附上重疊處的逐字稿當對照樣本，它才對得回既有標籤（與長檔分段同一招）。
+    """
+    tr = HintRecordingTranscriber(["[0:01] 講者A：我是主席", "[0:50] 講者B：收到"])
+    mgr = LiveSessionManager(tr, tmp_path)
+    sid = mgr.start()
+    mgr.add_chunk(sid, b"a", offset_seconds=0)
+    mgr.add_chunk(sid, b"b", offset_seconds=45)
+    assert "我是主席" in tr.hints[1]
+
+
+def test_first_chunk_is_told_to_label_even_a_single_speaker(tmp_path):
+    """開場常是主席一個人講；模型省略標註的話，第一段就沒有任何標籤，
+    後續段也拿不到可沿用的講者清單，跨段一致性整條失效。"""
+    tr = HintRecordingTranscriber(["[0:01] 講者A：大家好"])
+    mgr = LiveSessionManager(tr, tmp_path)
+    sid = mgr.start()
+    mgr.add_chunk(sid, b"a", offset_seconds=0)
+    assert tr.hints[0] and "標註講者" in tr.hints[0]

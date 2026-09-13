@@ -258,6 +258,20 @@
   .enroll-row.done .enroll-state { color: var(--accent); }
   /* 錄到的樣本幾乎沒有聲音：紅字明講，否則使用者要等整場開完、分析不出名字才發現 */
   .enroll-row.silent .enroll-state { color: var(--danger, #d9534f); }
+  .enroll-row .enroll-file { display: none; }
+
+  /* 音量表：錄之前就看得到「這支麥克風現在收到多大聲」，不必錄完再驗屍 */
+  .enroll-meter-row { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+  .enroll-meter {
+    flex: 1 1 auto; height: 8px; min-width: 60px; overflow: hidden;
+    background: var(--card-2); border: 1px solid var(--border); border-radius: 999px;
+  }
+  .enroll-meter-fill {
+    width: 0%; height: 100%; background: var(--accent); border-radius: 999px;
+    transition: width .08s linear;
+  }
+  /* 音量到得了「聽得清楚」的程度才轉綠，使用者不必猜多大聲才夠 */
+  .enroll-meter-fill.ok { background: var(--ok, #3aa76d); }
 
   /* ---- 訊息橫幅（錯誤／一般提示） ---- */
   .banner {

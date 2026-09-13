@@ -159,6 +159,41 @@ async function populateSysSources(interactive) {
 $("liveSysSource").addEventListener("change", () =>
   localStorage.setItem("liveSysSource", $("liveSysSource").value));
 
+// ---- 麥克風來源 ----
+// 聲音樣本與正式聆聽一律共用這一支。同一個人用不同裝置錄（樣本貼著手機、
+// 開會用桌上型陣列麥克風），音色差距足以讓聲紋比對失效；而且錄之前就選定
+// 裝置，比錄完才發現「收音的是另一支沒開的麥克風」早得多。
+function micDeviceId() { return $("liveMicDevice").value || ""; }
+
+// getUserMedia 的 audio 約束。沒指定裝置就維持原本的 { audio: true }
+function micConstraints() {
+  const id = micDeviceId();
+  return { audio: id ? { deviceId: { exact: id } } : true };
+}
+
+async function populateMicDevices(interactive) {
+  const sel = $("liveMicDevice");
+  if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) return;
+  const remembered = localStorage.getItem("liveMicDevice") || "";
+  try {
+    let mics = (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === "audioinput");
+    if (interactive && mics.length && !mics[0].label) {  // 沒標籤＝還沒授權過
+      try { (await navigator.mediaDevices.getUserMedia({ audio: true })).getTracks().forEach(t => t.stop()); } catch (e) {}
+      mics = (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === "audioinput");
+    }
+    if (!mics.length || !mics[0].label) return;  // 尚未授權：先留「系統預設」，等使用者互動再補
+    sel.innerHTML = "";
+    sel.appendChild(new Option("系統預設麥克風", ""));
+    for (const d of mics) sel.appendChild(new Option(d.label, d.deviceId));
+    sel.value = remembered;
+    if (sel.value !== remembered) sel.value = "";  // 裝置換了就退回系統預設
+  } catch (e) { /* 列舉失敗就維持系統預設，不擋操作 */ }
+}
+$("liveMicDevice").addEventListener("focus", () => populateMicDevices(true));
+$("liveMicDevice").addEventListener("change", () =>
+  localStorage.setItem("liveMicDevice", $("liveMicDevice").value));
+populateMicDevices(false);
+
 // 即時翻譯目標：記住上次的選擇
 (function () {
   const saved = localStorage.getItem("liveTranslate");
@@ -199,4 +234,4 @@ async function loadHealth() {
 }
 loadHealth();
 
-export { FEATURE_BOX, LOOPBACK_RE, applyKindDefaults, chunkSeconds, correctTypos, enrollMaxSpeakers, featuresTouched, kindDefaults, kindHints, loadHealth, maybePromoteTerms, meetingTerms, nameSpeakers, populateSysSources, selectedFeatures, sysSourceValue, wantSystemAudio };
+export { FEATURE_BOX, LOOPBACK_RE, applyKindDefaults, chunkSeconds, correctTypos, enrollMaxSpeakers, featuresTouched, kindDefaults, kindHints, loadHealth, maybePromoteTerms, meetingTerms, micConstraints, nameSpeakers, populateMicDevices, populateSysSources, selectedFeatures, sysSourceValue, wantSystemAudio };

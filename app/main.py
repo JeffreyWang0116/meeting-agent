@@ -573,6 +573,7 @@ def create_app(
         name_speakers: bool = False,
         terms: list[dict] | None = None,
         speaker_prior: dict[str, str] | None = None,
+        attendees: list[str] | None = None,
     ) -> dict:
         usage.record("analysis")
         if correct_typos:
@@ -593,6 +594,7 @@ def create_app(
                 terms=terms,
                 user=current_user(),
                 speaker_prior=speaker_prior,
+                attendees=attendees,
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc))
@@ -1135,6 +1137,9 @@ def create_app(
         session_id: str,
         file: UploadFile = File(...),
         offset: Optional[float] = Form(None),  # 本段在整場會議中的開始秒數
+        # 本段開頭與前一段重疊了幾秒。前端刻意讓兩個錄音器重疊一小段，一句話
+        # 才不會被硬切點剁成兩半；重疊處會被轉錄兩次，後端依絕對時間濾掉
+        overlap: Optional[float] = Form(None),
     ):
         suffix = Path(file.filename or "chunk.webm").suffix or ".webm"
         data = read_capped(file.file, max_upload_bytes)
@@ -1146,6 +1151,7 @@ def create_app(
                 suffix=suffix,
                 offset_seconds=offset,
                 user=current_user(),
+                overlap_seconds=overlap,
             )
         except SessionNotFound as exc:
             raise HTTPException(status_code=404, detail=str(exc))
@@ -1182,8 +1188,10 @@ def create_app(
         try:
             # 聲紋比對務必在 finish 之前：finish 會刪掉整個 session 目錄，
             # 樣本與會議音檔都在裡面，之後就沒有聲音可比了。
-            # 沒註冊樣本時這行回 {} 且不打任何 API
+            # 沒註冊樣本時這行回 {} 且不打任何 API。
+            # 重試分析會再走一次這裡，那時音檔已經沒了，靠 session 裡的快取回答
             speaker_prior = live_manager.voice_mapping(session_id, user=current_user())
+            enrolled = live_manager.enrolled_names(session_id, user=current_user())
             transcript = live_manager.finish(session_id, user=current_user())
         except SessionNotFound as exc:
             raise HTTPException(status_code=404, detail=str(exc))
@@ -1202,9 +1210,18 @@ def create_app(
             name_speakers=bool(req and req.name_speakers),
             terms=validate_terms(req.terms if req else None),
             speaker_prior=speaker_prior,
+            # 會前登記的人＝使用者親自指認「這些人在場、姓名這樣寫」
+            attendees=enrolled,
         )
-        # result 帶著校正後的 transcript，放在後面覆蓋原始版本
-        return {"transcript": transcript, **result}
+        # result 帶著校正後的 transcript，放在後面覆蓋原始版本。
+        # speakers_matched/unmatched 讓前端說得出「預錄的 4 位認出了哪 2 位」——
+        # 沒認出來的那幾位才是使用者需要知道的
+        return {
+            "transcript": transcript,
+            **result,
+            "speakers_matched": speaker_prior,
+            "speakers_unmatched": [n for n in enrolled if n not in speaker_prior.values()],
+        }
 
     return app
 

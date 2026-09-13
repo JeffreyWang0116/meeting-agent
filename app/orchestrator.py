@@ -51,6 +51,7 @@ class Orchestrator:
         terms: list[dict] | None = None,
         user: str = DEFAULT_USER,
         speaker_prior: dict[str, str] | None = None,
+        attendees: list[str] | None = None,
     ) -> dict:
         text = self.parser.parse(raw_text)
         corrections: list[dict] = []
@@ -70,6 +71,9 @@ class Orchestrator:
         analysis = self.decision.analyze(
             text, meeting_date=meeting_date, kind=kind, features=features,
             extra_terms=terms, user=user,
+            # attendees：會前錄過聲音樣本的人，等於使用者指認的出席名單。
+            # 只用於補全 attendees 與統一姓名寫法，不得用來猜 owner（見 build_prompt）
+            attendees=attendees,
         )
         meeting_id = self.executor.execute(
             analysis, transcript=text, kind=kind, terms=terms, user=user

@@ -31,10 +31,13 @@ from app.glossary import terms_hint_line
 from app.stores.base import DEFAULT_USER
 from app.transcription.segments import (
     TIME_PREFIX_RE,
+    chunk_hint,
     collect_speakers,
+    drop_lines_before,
     pick_evidence_chunks,
     shift_timestamps,
-    speaker_hint,
+    speaker_of,
+    transcript_tail,
 )
 
 
@@ -58,6 +61,11 @@ class LiveSession:
     enrollments: list[dict] = field(default_factory=list)
     # index → 該段音檔路徑。副檔名由上傳決定，所以要記下來而不是事後拼字串
     chunk_paths: dict[int, Path] = field(default_factory=dict)
+    # 目前已比對出的 {代號: 姓名}。這份快取是 finish() 刪掉音檔之後唯一還在的
+    # 結果——「重試分析」靠它才不會把整組姓名賠掉
+    voice_result: dict[str, str] = field(default_factory=dict)
+    voice_attempts: int = 0  # 已完成幾次比對（提早比對只做一次）
+    voice_matching: bool = False  # 背景比對進行中
 
 
 class LiveSessionManager:
@@ -71,6 +79,10 @@ class LiveSessionManager:
     # 最多拿幾段會議錄音當比對證據（見 pick_evidence_chunks）
     MAX_EVIDENCE_CHUNKS = 4
 
+    # 收到幾段「有講者標籤」的逐字稿之後，先在背景比對一次。開完一小時才發現
+    # 預錄沒生效已經來不及；提早比一次，使用者當場就看得到認出了誰
+    EARLY_MATCH_AFTER_CHUNKS = 2
+
     def __init__(
         self,
         transcriber,
@@ -78,6 +90,7 @@ class LiveSessionManager:
         translator=None,
         now: Callable[[], float] = time.monotonic,
         voice_matcher=None,
+        spawn: Callable[[Callable[[], None]], None] | None = None,
     ):
         self._transcriber = transcriber
         self._translator = translator
@@ -86,6 +99,11 @@ class LiveSessionManager:
         self._voice_matcher = voice_matcher
         self._work_dir = Path(work_dir)
         self._now = now  # 單調時鐘；可注入，測試不必真的等兩小時
+        # 提早比對怎麼跑。預設丟背景執行緒——比對是強模型、要好幾秒，擋在
+        # add_chunk 裡會讓那一段的字幕跟著延遲。可注入以便測試原地執行
+        self._spawn = spawn or (
+            lambda fn: threading.Thread(target=fn, daemon=True).start()
+        )
         self._sessions: dict[str, LiveSession] = {}
         self._lock = threading.Lock()
 
@@ -135,7 +153,14 @@ class LiveSessionManager:
         suffix: str = ".webm",
         offset_seconds: float | None = None,
         user: str = DEFAULT_USER,
+        overlap_seconds: float | None = None,
     ) -> dict:
+        """收下一段音訊並轉錄。
+
+        overlap_seconds：本段開頭與前一段重疊了幾秒。前端刻意讓兩個錄音器
+        重疊一小段，一句話才不會被硬切點剁成兩半；重疊處會被轉錄兩次，
+        這裡依絕對時間濾掉重複的行。
+        """
         session = self._get(session_id, user)
         # 配位＋佔槽＋算提示，全在鎖內完成，避免多段並發時互相踩踏
         with self._lock:
@@ -156,12 +181,27 @@ class LiveSessionManager:
         text = self._transcribe(chunk_path, hint, session.user).strip()
         if text:
             text = shift_timestamps(text, offset_seconds)
+            # 重疊的那幾秒前一段已經轉過，依絕對時間濾掉，逐字稿才不會出現
+            # 兩句一模一樣的話（用字不會完全相同，但時間軸是同一條）
+            if overlap_seconds and offset_seconds is not None:
+                text = drop_lines_before(
+                    text, float(offset_seconds) + float(overlap_seconds)
+                ).strip()
 
         with self._lock:
             session.parts[index] = text
             if text:
                 collect_speakers(text, session.speakers)
             transcript = _join(session.parts)
+            start_match = self._should_early_match_locked(session)
+            if start_match:
+                session.voice_matching = True
+        # 比對要好幾秒（強模型＋上傳音檔），丟到背景跑：這一段的字幕必須
+        # 立刻回給前端，不能等比對
+        if start_match:
+            self._spawn(lambda: self._run_match(session_id, session.user))
+        with self._lock:
+            names = dict(session.voice_result)
 
         translation = None
         if text and session.translate_to and self._translator:
@@ -172,7 +212,14 @@ class LiveSessionManager:
             except Exception:  # 翻譯失敗不擋逐字稿主流程
                 translation = None
 
-        return {"text": text, "translation": translation, "transcript": transcript}
+        # names：目前已比對出的 {代號: 姓名}。前端拿它當「預錄有沒有生效」的
+        # 當場回饋，不必等整場開完才知道
+        return {
+            "text": text,
+            "translation": translation,
+            "transcript": transcript,
+            "names": names,
+        }
 
     def _transcribe(self, path: Path, hint: str | None, user: str = DEFAULT_USER) -> str:
         """轉錄一段。transcriber 是注入的鴨子型別，簽名不一定收 hint/user，
@@ -195,6 +242,40 @@ class LiveSessionManager:
         if takes("user"):
             kwargs["user"] = user
         return fn(path, **kwargs)
+
+    def _should_early_match_locked(self, session: LiveSession) -> bool:
+        """要不要在這一段之後先比對一次。必須在鎖內呼叫。
+
+        只做一次：比對用的是強模型，每段都比既慢又燒額度。沒註冊樣本、
+        沒有比對器、已經比過或正在比，一律不做——這個功能沒開就不該有成本。
+        """
+        if not self._voice_matcher or not session.enrollments:
+            return False
+        if session.voice_attempts or session.voice_matching or session.closed:
+            return False
+        return _labelled_chunks(session.parts) >= self.EARLY_MATCH_AFTER_CHUNKS
+
+    def _run_match(self, session_id: str, user: str) -> None:
+        """背景比對。失敗一律吞掉：這是加分項，不能讓聆聽本身跟著出事。"""
+        try:
+            self.voice_mapping(session_id, user)
+        except Exception:
+            pass
+        finally:
+            with self._lock:
+                session = self._sessions.get(session_id)
+                if session is not None:
+                    session.voice_matching = False
+
+    def enrolled_names(self, session_id: str, user: str = DEFAULT_USER) -> list[str]:
+        """這場註冊過樣本的姓名（依錄製順序）。
+
+        結束時要能告訴使用者「預錄的 4 位認出了哪 2 位」——沒認出來的那幾位
+        才是使用者需要知道的，不然他只會看到有些人有名字、有些人沒有。
+        """
+        session = self._get(session_id, user)
+        with self._lock:
+            return [e["name"] for e in session.enrollments]
 
     def transcript(self, session_id: str, user: str = DEFAULT_USER) -> str:
         with self._lock:
@@ -255,6 +336,7 @@ class LiveSessionManager:
         """
         session = self._get(session_id, user)
         with self._lock:
+            cached = dict(session.voice_result)
             enrollments = list(session.enrollments)
             if not enrollments or not self._voice_matcher:
                 return {}
@@ -262,13 +344,21 @@ class LiveSessionManager:
                 {"path": session.chunk_paths[i], "transcript": session.parts[i]}
                 for i in pick_evidence_chunks(session.parts, self.MAX_EVIDENCE_CHUNKS)
                 if i in session.chunk_paths and session.parts[i]
+                and session.chunk_paths[i].exists()
             ]
-        if not evidence:
-            return {}
+        # finish() 之後樣本與錄音段都被刪了，沒有聲音可比。此時快取是唯一還在的
+        # 結果——「重試分析」正是走到這裡，拿不到快取就等於整組姓名憑空消失
+        if not evidence or not all(Path(e["path"]).exists() for e in enrollments):
+            return cached
         try:
-            return self._voice_matcher.match(enrollments, evidence) or {}
+            fresh = self._voice_matcher.match(enrollments, evidence) or {}
         except Exception:
-            return {}
+            fresh = {}
+        merged = _merge_mappings(cached, fresh)
+        with self._lock:
+            session.voice_result = merged
+            session.voice_attempts += 1
+        return merged
 
     def finish(self, session_id: str, user: str = DEFAULT_USER) -> str:
         session = self._get(session_id, user)
@@ -284,17 +374,59 @@ class LiveSessionManager:
         return transcript
 
 
-def _chunk_hint(session: LiveSession) -> str | None:
+def _chunk_hint(session: LiveSession) -> str:
     """這一段轉錄要帶的提示：跨段講者一致性 ＋ 本次專用詞彙。
 
     兩者是不同面向——前者管講者標籤別重新編號，後者管內文用字別聽錯——所以
-    併著送。都沒有時回 None（而不是空字串），_transcribe 才會走「不帶 hint」
-    那條路，行為與加詞彙功能之前完全一致。
+    併著送。
+
+    講者那半改用長檔分段的同一套 chunk_hint：除了已出現的講者清單，還附上
+    前一段結尾的逐字稿（本段開頭的重疊音訊就是那些內容）。只給清單沒有用，
+    模型沒聽過前一段，無從知道「講者B」是哪個嗓音，只能從自己這段重新編號。
+    它也會要求「即使只有一位講者也要標註」——開場常是主席單人宣讀，第一段
+    一旦沒有任何標籤，後續段就沒有可沿用的清單，跨段一致性整條失效。
     """
-    combined = (speaker_hint(session.speakers) or "") + terms_hint_line(
+    return chunk_hint(session.speakers, _previous_tail(session)) + terms_hint_line(
         session.terms, "本次會議專用詞彙"
     )
-    return combined or None
+
+
+def _previous_tail(session: LiveSession) -> str:
+    """最近一段「已辨識完」的逐字稿結尾。
+
+    parts 可能有還在辨識中的空洞（None），由後往前找第一段有內容的即可——
+    那正是本段開頭重疊到的那一段。
+    """
+    for text in reversed(session.parts):
+        if text:
+            return transcript_tail(text)
+    return ""
+
+
+def _labelled_chunks(parts: list[str | None]) -> int:
+    """有講者標籤的段落數。沒有標籤的段落給不出「代號↔嗓音」的對應關係，
+    當比對證據只會干擾判斷，所以不算數。"""
+    return sum(
+        1
+        for text in parts
+        if text and any(speaker_of(line) for line in text.splitlines())
+    )
+
+
+def _merge_mappings(cached: dict[str, str], fresh: dict[str, str]) -> dict[str, str]:
+    """把新一次的比對結果併進既有的。
+
+    後一次看到的證據比較多（整場 vs 前兩段），衝突時以新的為準；舊的只用來
+    補新一次沒認出來的代號——後半場才發言的人與前半場的人本來就分屬不同次。
+
+    合併後同一個姓名不可以落在兩個代號上：下游 apply_speaker_names 遇到重複
+    姓名會整批放棄，連正確的那幾筆一起賠掉。
+    """
+    merged = {**cached, **fresh}
+    for label, name in list(merged.items()):
+        if label not in fresh and name in fresh.values():
+            del merged[label]  # 舊的那筆讓位給新的
+    return merged
 
 
 def _join(parts: list[str | None]) -> str:

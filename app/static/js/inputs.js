@@ -1,7 +1,7 @@
 import { api } from "./api.js";
 import { $, clearError, esc, showError, showNotice } from "./core.js";
 import { hideResultSkeleton, markAnalysisStart, renderResult, showResultSkeleton } from "./result.js";
-import { chunkSeconds, correctTypos, meetingTerms, nameSpeakers, selectedFeatures, sysSourceValue, wantSystemAudio } from "./setup.js";
+import { chunkSeconds, correctTypos, meetingTerms, micConstraints, nameSpeakers, populateMicDevices, selectedFeatures, sysSourceValue, wantSystemAudio } from "./setup.js";
 import { chatHtml, renderChat } from "./transcript.js";
 
 /* ==================================================================
@@ -112,6 +112,8 @@ $("btnUpload").addEventListener("click", async () => {
 let liveStream = null, liveRecorder = null, liveSessionId = null;
 let liveMicStream = null, liveSysStream = null, liveMixCtx = null;
 let liveRecording = false, liveSegTimer = null, uploadsInFlight = 0, liveStartTime = null, liveTickTimer = null;
+// 目前在錄的錄音器。相鄰兩段刻意重疊幾秒，所以重疊期間會同時有兩個
+let liveRecorders = [];
 let liveSegIndex = 0, liveSentCount = 0, liveWakeLock = null, liveStarting = false;
 
 // 取得要錄的串流。withSystemAudio 為真時，額外抓耳機／系統音源（對方的聲音），
@@ -170,7 +172,8 @@ function micPermissionMessage(e) {
 
 async function buildLiveStream(withSystemAudio) {
   try {
-    liveMicStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    // 與錄樣本同一支麥克風：換裝置錄的樣本，音色差距足以讓聲紋比對失效
+    liveMicStream = await navigator.mediaDevices.getUserMedia(micConstraints());
   } catch (e) {
     throw new Error(micPermissionMessage(e));
   }
@@ -253,7 +256,7 @@ function releaseWakeLock() {
 document.addEventListener("visibilitychange", () => {
   if (!liveRecording || document.visibilityState !== "visible") return;
   acquireWakeLock();  // 切回前景時螢幕鎖會被系統釋放，要重新取得
-  if (liveRecorder && liveRecorder.state === "inactive") recordSegment();  // 錄音若被系統中斷則自動接續
+  if (!liveRecorders.length) recordSegment();  // 錄音若被系統中斷則自動接續
 });
 
 function pickMime() {
@@ -387,18 +390,33 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 // 或這段音訊後端根本不收，重試只會拖慢結束流程
 const worthRetrying = err => !(err.status >= 400 && err.status < 500);
 
-async function postLiveChunk(blob, offsetSeconds) {
+// 已經當場回報過「認出某某人」的名字，同一個人不重複打擾
+const announcedNames = new Set();
+
+// 預錄有沒有生效，開完一小時才知道就太晚了。後端在前幾段之後會先比對一次，
+// 結果隨當段回傳，這裡當場講出來——來得及重錄樣本，或至少心裡有底
+function noteRecognisedNames(names) {
+  const fresh = Object.values(names || {}).filter(n => n && !announcedNames.has(n));
+  if (!fresh.length) return;
+  fresh.forEach(n => announcedNames.add(n));
+  showNotice(`已用預錄的聲音樣本認出：${fresh.join("、")}。結束分析時會把逐字稿的講者代號換成姓名。`);
+}
+
+async function postLiveChunk(blob, offsetSeconds, overlapSeconds) {
   const ext = blob.type.includes("mp4") ? ".mp4" : ".webm";
   const form = new FormData();
   form.append("file", blob, "chunk" + ext);
   // 本段在整場會議中的開始秒數：後端把段內相對時間戳平移成整場時間
   if (offsetSeconds != null) form.append("offset", offsetSeconds);
+  // 本段開頭與前一段重疊了幾秒，後端據此濾掉被轉錄兩次的那幾行
+  if (overlapSeconds) form.append("overlap", overlapSeconds);
   const r = await api.liveChunk(liveSessionId, form);
   if (r.transcript) liveTranscriptText = r.transcript;
   if (r.text) appendCaption(r.text, r.translation);
+  noteRecognisedNames(r.names);
 }
 
-async function uploadLiveChunk(blob, offsetSeconds) {
+async function uploadLiveChunk(blob, offsetSeconds, overlapSeconds) {
   // uploadsInFlight 要涵蓋整個重試過程：結束會議時會等它歸零才送出分析，
   // 不然重試中的那一段就趕不上，等於還是掉了
   uploadsInFlight++;
@@ -406,13 +424,13 @@ async function uploadLiveChunk(blob, offsetSeconds) {
   try {
     for (let attempt = 0; ; attempt++) {
       try {
-        await postLiveChunk(blob, offsetSeconds);
+        await postLiveChunk(blob, offsetSeconds, overlapSeconds);
         return;
       } catch (e) {
         if (attempt >= RETRY_DELAYS_MS.length || !worthRetrying(e)) {
           // 還沒放棄：排進佇列，結束會議前會再試一輪
           if (pendingChunks.length < MAX_PENDING_CHUNKS) {
-            pendingChunks.push({ blob, offsetSeconds });
+            pendingChunks.push({ blob, offsetSeconds, overlapSeconds });
           } else {
             droppedChunks++;
           }
@@ -433,51 +451,121 @@ async function flushPendingChunks() {
   pendingChunks = [];
   const stillFailed = [];
   for (const c of queue) {
-    try { await postLiveChunk(c.blob, c.offsetSeconds); }
+    try { await postLiveChunk(c.blob, c.offsetSeconds, c.overlapSeconds); }
     catch (e) { stillFailed.push(c); }
   }
   return stillFailed.length + droppedChunks;
 }
 
+// 相鄰兩段刻意重疊幾秒：下一段的錄音器提早這麼久開始錄，一句話才不會被
+// 硬切點剁成兩半（stop 與 start 之間還有幾十毫秒是真的沒錄到）。重疊那幾秒
+// 會被轉錄兩次，後端依絕對時間濾掉（見 /api/live/{id}/chunk 的 overlap）。
+// 模型也因此聽得到前一段的聲音，跨段沿用同一組講者標籤才有依據。
+const LIVE_OVERLAP_SECONDS = 3;
+// 同一份串流同時掛兩個 MediaRecorder，絕大多數瀏覽器沒問題，但不是規格保證。
+// 真的不行時要能退回「停了才開下一段」的老路——重疊只是加分，賠掉整段錄音
+// 就本末倒置了。偵測到一次失敗就整場不再重疊
+let overlapWorks = true;
+
 // 每段用「新的 MediaRecorder」錄，確保每段都有完整檔頭、可獨立解碼。
 // liveStarting 旗標＋「已在錄就不重啟」的檢查，避免 onstop 與 visibilitychange
 // 同時觸發時建立兩個錄音器造成段落重複。
-function recordSegment() {
+// scheduled=true 代表這是「重疊計時器」排定的下一段：此時本段仍在錄，
+// 正是預期中的重疊，不可以被「已在錄就不重啟」的守衛擋掉。其餘呼叫者
+// （中斷後補接、切回前景）則維持原本的守衛，避免同一段被錄兩次
+function recordSegment(scheduled) {
   if (!liveRecording || liveStarting) return;
-  if (liveRecorder && liveRecorder.state === "recording") return;
+  if (!scheduled && liveRecorders.some(r => r.state === "recording")) return;
   liveStarting = true;
   const chunks = [];
   const mime = pickMime();
-  const recorder = new MediaRecorder(liveStream, mime ? { mimeType: mime } : undefined);
+  let recorder;
+  try {
+    recorder = new MediaRecorder(liveStream, mime ? { mimeType: mime } : undefined);
+  } catch (e) {
+    // liveStarting 卡在 true 的話，之後每一次 recordSegment 都會直接 return——
+    // 錄音就此靜悄悄地停住，而且完全沒有錯誤訊息
+    liveStarting = false;
+    if (scheduled) { overlapWorks = false; return; }  // 老路（onstop）會接手
+    showError("無法開始錄音：" + (e.message || e));
+    return;
+  }
   liveRecorder = recorder;
+  liveRecorders.push(recorder);
   const segStart = Math.floor((Date.now() - liveStartTime) / 1000);  // 本段在整場中的開始秒數
+  // 只有「重疊計時器排定的下一段」開頭才真的與前一段重疊。第一段沒有前段，
+  // 中斷後補接的那一段也沒有（前一段早就停了）——那兩種情況記成 3 秒的話，
+  // 後端會把開頭三秒當成重複刪掉，那幾句就真的消失了
+  const overlap = scheduled ? LIVE_OVERLAP_SECONDS : 0;
   recorder.ondataavailable = e => { if (e.data.size) chunks.push(e.data); };
   recorder.onerror = e => showError("錄音發生錯誤：" + ((e.error && e.error.message) || "未知原因"));
   recorder.onstop = () => {
-    if (liveRecording) recordSegment();  // 先無縫接錄下一段，再上傳
+    clearTimeout(recorder.stopTimer);
+    clearTimeout(recorder.nextTimer);
+    liveRecorders = liveRecorders.filter(r => r !== recorder);
+    // 正常情況下，下一段早在重疊計時器裡就開錄了；這裡是錄音被系統中斷
+    // （來電、切到背景）之後的補接，不然整場會就此靜悄悄地停住
+    if (liveRecording && !liveRecorders.length) recordSegment();
     const blob = new Blob(chunks, { type: recorder.mimeType });
-    if (blob.size > 0) uploadLiveChunk(blob, segStart);
+    if (blob.size > 0) {
+      uploadLiveChunk(blob, segStart, overlap);
+    } else if (overlap) {
+      // 排程開的那一顆錄出空白：同上，之後不再重疊（這一段已經賠掉了）
+      overlapWorks = false;
+      console.log("[live] 重疊錄音錄到空白，改回不重疊");
+    }
   };
-  recorder.start();
+  try {
+    recorder.start();
+  } catch (e) {
+    liveStarting = false;
+    liveRecorders = liveRecorders.filter(r => r !== recorder);
+    if (scheduled) { overlapWorks = false; return; }
+    showError("無法開始錄音：" + (e.message || e));
+    return;
+  }
   liveStarting = false;
+  // 排程開的那一顆沒真的錄起來＝這個瀏覽器不接受兩個錄音器並存。當場收掉它，
+  // 讓前一段的 onstop 照老路接續，否則這 45 秒會整段消失
+  if (scheduled && recorder.state !== "recording") {
+    overlapWorks = false;
+    liveRecorders = liveRecorders.filter(r => r !== recorder);
+    console.log("[live] 這個瀏覽器不支援重疊錄音，改回不重疊");
+    return;
+  }
   // 第一段縮短到 12 秒：讓使用者快速看到第一句逐字稿，確認「真的有在聽」
   const secs = liveSegIndex === 0 ? Math.min(12, chunkSeconds) : chunkSeconds;
   liveSegIndex++;
-  liveSegTimer = setTimeout(() => {
+  // 下一段提早 LIVE_OVERLAP_SECONDS 開錄，與本段重疊。退回不重疊模式時就不排，
+  // 改由本段的 onstop 接續（＝這個功能出現之前的行為）
+  if (overlapWorks) {
+    recorder.nextTimer = setTimeout(
+      () => { if (liveRecording) recordSegment(true); },
+      Math.max(1, secs - LIVE_OVERLAP_SECONDS) * 1000
+    );
+  }
+  recorder.stopTimer = liveSegTimer = setTimeout(() => {
     if (recorder.state !== "inactive") recorder.stop();
   }, secs * 1000);
 }
 
 // ---- 預錄聲音辨識人（選用功能）----
-// 會前請每位與會者各錄一小段話，按下「開始聆聽」時連同 session 一起送到後端；
-// 結束分析時由聲紋比對把逐字稿的「講者A/B/C」換成真實姓名。
+// 會前請每位與會者各錄一小段話（或改上傳一段既有音檔），按下「開始聆聽」時
+// 在背景送到後端；聆聽到第二段左右就會先比對一次，結束分析時把逐字稿的
+// 「講者A/B/C」換成真實姓名。
 //
 // 沒勾這個功能就完全不執行：不開麥克風、不上傳、不多打任何 API，整條路徑與
 // 這個功能不存在時相同。錄音失敗或上傳失敗也一律只降級成「維持講者代號」，
 // 絕不擋住聆聽本身——會議內容遠比名字重要。
+//
+// 限制：錄樣本只錄得到本機麥克風。線上會議中「在對面」的人請改用「用音檔」，
+// 上傳一段他的語音訊息當樣本。
 const ENROLL_SECONDS = 10;  // 太短聲紋特徵不足、太長浪費額度；實測 10 秒足夠
 let enrollPeople = [];      // 依序對應畫面上每一列：{ name, blob }
 let enrollBusy = false;     // 同時只錄一個人，避免兩列搶同一支麥克風
+// 背景上傳中的樣本。開始聆聽時不等它（等於白掉開場那幾秒），但結束分析前
+// 一定要等到——沒送達的樣本比對不到，那個人就白錄了
+let enrollUploads = null;
 
 function enrollOn() {
   return $("liveEnrollOn").checked;
@@ -489,26 +577,124 @@ function syncEnrollPeople() {
   enrollPeople.length = n;  // 人數調少時，多出來的樣本一併丟掉
 }
 
-// 樣本幾乎沒有聲音時要當場擋下來。收到靜音（裝置選錯、麥克風被靜音、離太遠）
-// 的樣本一樣有檔案大小，光看 blob.size 看不出來；使用者會一路開完整場會，
-// 直到分析結果沒有半個名字才發現白錄。RMS 0.01 約 -40dBFS，正常說話遠高於此。
-const ENROLL_SILENT_RMS = 0.01;
+// ---- 樣本品質把關 ----
+// 不能用的樣本要當場擋下來。裝置選錯、麥克風被靜音、離太遠、或整整 10 秒
+// 只在最後講了一句——這些樣本一樣有檔案大小，光看 blob.size 看不出來；
+// 使用者會一路開完整場會，直到分析結果沒有半個名字才發現白錄。
+const ENROLL_SPEECH_RMS = 0.02;       // 單框 RMS 高於此值算「這一瞬間有人在講話」
+const ENROLL_MIN_SPEECH_RATIO = 0.25; // 有聲時間要佔四分之一以上，嗓音特徵才夠
+const ENROLL_MIN_SECONDS = 3;         // 再短的樣本比對不出東西
+const ENROLL_CLIP_RATIO = 0.01;       // 破音超過 1%：削平的波形一樣比不準
 
-async function isTooQuiet(blob) {
+// 回傳 { ok, reason }。測不了（瀏覽器解不了這個編碼）就一律放行，交給後端
+// 比對去判斷——寧可漏擋，也不要擋掉其實可用的樣本
+async function checkSample(blob) {
   try {
     const Ctx = window.AudioContext || window.webkitAudioContext;
-    if (!Ctx) return false;  // 測不了就別擋人，交給後端比對去判斷
+    if (!Ctx) return { ok: true };
     const ctx = new Ctx();
     const buf = await ctx.decodeAudioData(await blob.arrayBuffer());
-    const data = buf.getChannelData(0);
-    let sum = 0;
-    for (let i = 0; i < data.length; i++) sum += data[i] * data[i];
     ctx.close();
-    return Math.sqrt(sum / data.length) < ENROLL_SILENT_RMS;
-  } catch {
-    return false;  // 這個瀏覽器解不了這個編碼就不擋
+    if (buf.duration < ENROLL_MIN_SECONDS) return { ok: false, reason: "太短" };
+    const data = buf.getChannelData(0);
+    const frame = Math.max(1, Math.round(buf.sampleRate * 0.025));  // 25ms 一框
+    let frames = 0, speech = 0, clipped = 0;
+    for (let i = 0; i + frame <= data.length; i += frame) {
+      let sum = 0;
+      for (let j = i; j < i + frame; j++) {
+        sum += data[j] * data[j];
+        if (Math.abs(data[j]) > 0.99) clipped++;
+      }
+      frames++;
+      if (Math.sqrt(sum / frame) > ENROLL_SPEECH_RMS) speech++;
+    }
+    if (!frames) return { ok: true };
+    // 整段平均音量看不出「只在最後講了一句」——那種樣本平均值一樣過關，
+    // 但可用的嗓音只有一兩秒。改看「有聲音的時間佔多少」
+    const ratio = speech / frames;
+    if (ratio < 0.05) return { ok: false, reason: "幾乎沒有聲音" };
+    if (ratio < ENROLL_MIN_SPEECH_RATIO) return { ok: false, reason: "說話時間太少" };
+    if (clipped / data.length > ENROLL_CLIP_RATIO) return { ok: false, reason: "破音" };
+    return { ok: true };
+  } catch (e) {
+    return { ok: true };  // 這個瀏覽器解不了這個編碼就不擋
   }
 }
+
+// 把一段樣本（錄的或上傳的）收進某一列，順便驗品質
+async function acceptSample(index, blob) {
+  const person = enrollPeople[index];
+  if (!person || !blob || !blob.size) return;
+  person.blob = blob;
+  const verdict = await checkSample(blob);
+  person.bad = verdict.ok ? "" : verdict.reason;
+  renderEnrollRows();
+}
+
+// ---- 音量表 ----
+// 錄之前就看得到「這支麥克風現在收到多大聲」，比錄完再驗屍早得多。
+// 測試鈕與錄音中共用同一組元件
+let meterCtx = null, meterRaf = 0, meterStream = null;
+
+function startMeter(stream, ownStream) {
+  const Ctx = window.AudioContext || window.webkitAudioContext;
+  if (!Ctx) return;
+  stopMeter();
+  try {
+    meterCtx = new Ctx();
+    meterStream = ownStream ? stream : null;  // 自己開的串流才由自己關掉
+    const analyser = meterCtx.createAnalyser();
+    analyser.fftSize = 512;
+    meterCtx.createMediaStreamSource(stream).connect(analyser);
+    const data = new Uint8Array(analyser.frequencyBinCount);
+    const bar = $("liveEnrollMeter");
+    const pump = () => {
+      meterRaf = requestAnimationFrame(pump);
+      analyser.getByteFrequencyData(data);
+      let sum = 0;
+      for (let i = 0; i < data.length; i++) sum += (data[i] / 255) * (data[i] / 255);
+      const level = Math.min(1, Math.sqrt(sum / data.length) * 4.5);
+      bar.style.width = Math.round(level * 100) + "%";
+      bar.classList.toggle("ok", level > 0.18);  // 到得了「聽得清楚」才轉綠
+    };
+    pump();
+  } catch (e) {
+    meterCtx = null;  // 音量表壞掉不影響錄音
+  }
+}
+
+function stopMeter() {
+  cancelAnimationFrame(meterRaf);
+  meterRaf = 0;
+  if (meterCtx) meterCtx.close().catch(() => {});
+  meterCtx = null;
+  if (meterStream) meterStream.getTracks().forEach(t => t.stop());
+  meterStream = null;
+  const bar = $("liveEnrollMeter");
+  bar.style.width = "0%";
+  bar.classList.remove("ok");
+}
+
+$("btnEnrollMicTest").addEventListener("click", async () => {
+  if (enrollBusy || liveRecording) return;
+  const availErr = micAvailabilityError();
+  if (availErr) { showError(availErr); return; }
+  const hint = $("liveEnrollMeterHint");
+  let stream;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia(micConstraints());
+  } catch (e) {
+    showError("無法使用麥克風：" + micPermissionMessage(e));
+    return;
+  }
+  populateMicDevices(false);  // 授權後才拿得到裝置名稱，順手補進下拉選單
+  hint.textContent = "說說看，綠色代表音量足夠…";
+  startMeter(stream, true);
+  setTimeout(() => {
+    stopMeter();
+    hint.textContent = "測試結束。音量太小就靠近一點，或換一支麥克風。";
+  }, 8000);
+});
 
 // 試聽：錄完只寫「已錄好」的話，使用者沒辦法確認到底錄到了什麼
 function playEnrollment(index) {
@@ -526,14 +712,14 @@ function clearEnrollment(index) {
   const p = enrollPeople[index];
   if (!p) return;
   p.blob = null;
-  p.silent = false;
+  p.bad = "";
   renderEnrollRows();
 }
 
 function renderEnrollRows() {
   syncEnrollPeople();
   $("liveEnrollList").innerHTML = enrollPeople.map((p, i) => `
-    <div class="enroll-row${p.blob ? " done" : ""}${p.silent ? " silent" : ""}">
+    <div class="enroll-row${p.blob ? " done" : ""}${p.bad ? " silent" : ""}">
       <span class="enroll-no">${i + 1}.</span>
       <input type="text" id="enrollName${i}" maxlength="20"
              placeholder="第 ${i + 1} 位的姓名" value="${esc(p.name)}">
@@ -541,74 +727,90 @@ function renderEnrollRows() {
         <svg class="i-sm" aria-hidden="true"><use href="/static/icons.svg#mic"/></svg>
         ${p.blob ? "重錄" : "錄音"}
       </button>
+      <button class="ghost" type="button" id="enrollPick${i}" title="改用既有音檔當樣本：線上會議中在對面的人，可以傳一段語音訊息給你">用音檔</button>
+      <input type="file" class="enroll-file" id="enrollFile${i}" accept="audio/*">
       ${p.blob ? `
       <button class="ghost" type="button" id="enrollPlay${i}" title="試聽這段樣本">試聽</button>
       <button class="ghost" type="button" id="enrollDel${i}" title="刪掉這段樣本">清除</button>` : ""}
       <span class="enroll-state" id="enrollState${i}">${
-        p.silent ? "幾乎沒聲音" : p.blob ? "已錄好" : "未錄"
+        p.bad ? esc(p.bad) : p.blob ? "已錄好" : "未錄"
       }</span>
     </div>`).join("");
   enrollPeople.forEach((p, i) => {
     // 姓名寫回資料模型，重繪（換人數、錄完音）時才不會把使用者打的字弄丟
     $(`enrollName${i}`).addEventListener("input", e => { p.name = e.target.value; });
     $(`enrollRec${i}`).addEventListener("click", () => recordEnrollment(i));
+    $(`enrollPick${i}`).addEventListener("click", () => $(`enrollFile${i}`).click());
+    $(`enrollFile${i}`).addEventListener("change", e => {
+      const file = e.target.files && e.target.files[0];
+      if (file) acceptSample(i, file);
+    });
     if (p.blob) {
       $(`enrollPlay${i}`).addEventListener("click", () => playEnrollment(i));
       $(`enrollDel${i}`).addEventListener("click", () => clearEnrollment(i));
     }
   });
   const ready = enrollPeople.filter(p => p.name.trim() && p.blob).length;
-  const silent = enrollPeople.filter(p => p.blob && p.silent).length;
-  $("liveEnrollHint").textContent =
-    `每人錄約 ${ENROLL_SECONDS} 秒，說一兩句話即可（例如自我介紹）。`
-    + `目前 ${ready} / ${enrollPeople.length} 位已備妥；`
+  const bad = enrollPeople.filter(p => p.blob && p.bad).length;
+  $("liveEnrollHint").innerHTML =
+    `每人錄約 ${ENROLL_SECONDS} 秒，請每個人唸<b>同一段話</b>`
+    + "（例如「大家好，我是○○○，今天由我負責這個項目」），唸滿整段不要留白"
+    + "——固定句子涵蓋的發音較齊全，比隨口一句好比對。"
+    + "<br>錄樣本請用<b>開會時的同一支麥克風、同樣的距離</b>；用手機貼著嘴錄、"
+    + "開會卻用遠處的桌上型麥克風，聲音差距足以讓比對失效。"
+    + `<br>目前 ${ready} / ${enrollPeople.length} 位已備妥；`
     + "沒填姓名或沒錄音的人會被略過，那些人在逐字稿中維持講者代號。"
-    + (silent ? `　⚠ 有 ${silent} 位錄到的內容幾乎沒有聲音，建議按「試聽」確認後重錄。` : "");
+    + (bad ? `　⚠ 有 ${bad} 位的樣本可能不能用，建議按「試聽」確認後重錄。` : "");
 }
 
 // 固定錄 ENROLL_SECONDS 秒後自動停止：比「按開始再按停止」少一半操作，
 // 也保證每個人的樣本長度一致，聲紋比對的條件才公平
 async function recordEnrollment(index) {
   if (enrollBusy || liveRecording) return;
-  const state = $(`enrollState${index}`);
-  const availErr = micAvailabilityError();
-  if (availErr) { showError(availErr); return; }
-  let stream;
-  try {
-    stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-  } catch (e) {
-    showError("無法使用麥克風錄製聲音樣本：" + micPermissionMessage(e));
-    return;
-  }
+  // 旗標要在第一個 await 之前就立起來：檢查與設定之間隔著 getUserMedia 的話，
+  // 連點兩列會同時通過檢查，兩個錄音器一起搶麥克風——正是這個旗標要防的事
   enrollBusy = true;
   // 錄音中把人數鎖住：中途調少人數會把正在錄的這一列從 enrollPeople 抽掉，
   // onstop 就會踩到 undefined，enrollBusy 永遠留在 true——之後整頁都錄不了
   // 任何人，而且完全沒有錯誤訊息
   $("liveEnrollCount").disabled = true;
+  const release = () => { $("liveEnrollCount").disabled = false; enrollBusy = false; };
+  const state = $(`enrollState${index}`);
+  const availErr = micAvailabilityError();
+  if (availErr) { showError(availErr); release(); return; }
+  let stream;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia(micConstraints());
+  } catch (e) {
+    showError("無法使用麥克風錄製聲音樣本：" + micPermissionMessage(e));
+    release();
+    return;
+  }
+  populateMicDevices(false);  // 授權後裝置名稱才看得到
   const chunks = [];
   const mime = pickMime();
   const rec = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined);
+  let tick = 0;
   rec.ondataavailable = e => { if (e.data.size) chunks.push(e.data); };
   rec.onerror = () => {
     showError("錄製聲音樣本時發生錯誤，請再試一次。");
     if (rec.state !== "inactive") rec.stop();  // 觸發 onstop 收尾，別卡在錄音中
   };
   rec.onstop = async () => {
+    // 提早停止（錯誤、裝置被拔掉）時倒數還在跑。不清掉的話它會一直寫進已經
+    // 被重繪掉的節點，而且每重錄一次就多疊一個計時器
+    clearInterval(tick);
+    stopMeter();
     stream.getTracks().forEach(t => t.stop());  // 立刻還回麥克風，別佔著
-    const blob = new Blob(chunks, { type: rec.mimeType });
-    if (blob.size && enrollPeople[index]) {
-      enrollPeople[index].blob = blob;
-      // 靜音樣本一樣有檔案大小，不當場驗就會一路錯到會議結束
-      enrollPeople[index].silent = await isTooQuiet(blob);
-    }
-    $("liveEnrollCount").disabled = false;
-    enrollBusy = false;
+    await acceptSample(index, new Blob(chunks, { type: rec.mimeType }));
+    release();
     renderEnrollRows();
   };
   rec.start();
+  startMeter(stream, false);  // 串流由 onstop 統一關，音量表不要重複關
   let left = ENROLL_SECONDS;
   state.textContent = `錄音中 ${left}`;
-  const tick = setInterval(() => {
+  tick = setInterval(() => {
     left -= 1;
     if (left > 0) { state.textContent = `錄音中 ${left}`; return; }
     clearInterval(tick);
@@ -616,7 +818,22 @@ async function recordEnrollment(index) {
   }, 1000);
 }
 
-// 回傳實際上傳成功的人數。任何失敗都只降級成「維持講者代號」，不丟例外出去
+// 樣本的副檔名。後端用它決定送進比對的音訊型別，標錯會讓那個人比不出來。
+// 上傳的檔案優先沿用原檔名的副檔名（.ogg / .flac / .m4a 都可能），
+// 自己錄的則依 MediaRecorder 實際產生的 mime 判斷
+function sampleExt(blob) {
+  const fromName = (blob.name || "").match(/\.[a-z0-9]{2,4}$/i);
+  if (fromName) return fromName[0].toLowerCase();
+  const type = blob.type || "";
+  if (type.includes("mp4") || type.includes("m4a") || type.includes("aac")) return ".mp4";
+  if (type.includes("mpeg")) return ".mp3";
+  if (type.includes("wav")) return ".wav";
+  if (type.includes("ogg")) return ".ogg";
+  return ".webm";
+}
+
+// 回傳實際上傳成功的人數。任何失敗都只降級成「維持講者代號」，不丟例外出去。
+// 併行上傳：四個人在手機網路下逐一上傳要十幾秒，而那段時間會議已經在進行
 async function uploadEnrollments(sessionId) {
   if (!enrollOn()) return 0;
   const ready = enrollPeople.filter(p => p.name.trim() && p.blob);
@@ -629,32 +846,32 @@ async function uploadEnrollments(sessionId) {
     showNotice("預錄聲音辨識人已勾選，但沒有任何一位同時填了姓名並錄好音，這場會維持講者代號。");
     return 0;
   }
-  // 開始聆聽前最後一次提醒：靜音的樣本比對不出東西，那個人等於白錄
-  const silent = ready.filter(p => p.silent).map(p => p.name.trim());
-  if (silent.length) {
+  // 最後一次提醒：不能用的樣本比對不出東西，那個人等於白錄
+  const bad = ready.filter(p => p.bad).map(p => `${p.name.trim()}（${p.bad}）`);
+  if (bad.length) {
     showNotice(
-      `「${silent.join("」「")}」的樣本幾乎沒有聲音，很可能比對不出來（那些人會維持講者代號）。`
+      `「${bad.join("」「")}」的樣本可能不能用，很可能比對不出來（那些人會維持講者代號）。`
       + "如果不是故意的，建議先按「結束會議」重錄再開始。"
     );
   }
-  let done = 0;
-  for (const p of ready) {
+  const results = await Promise.all(ready.map(async p => {
     const form = new FormData();
-    form.append("file", p.blob, "enroll" + (p.blob.type.includes("mp4") ? ".mp4" : ".webm"));
+    form.append("file", p.blob, "enroll" + sampleExt(p.blob));
     form.append("name", p.name.trim());
     try {
       await api.liveEnroll(sessionId, form);
-      done++;
+      return 1;
     } catch (e) {
       showNotice(`「${p.name.trim()}」的聲音樣本上傳失敗（${e.message}），這個人會維持講者代號。`);
+      return 0;
     }
-  }
-  return done;
+  }));
+  return results.reduce((a, b) => a + b, 0);
 }
 
 $("liveEnrollOn").addEventListener("change", () => {
   $("liveEnrollBox").style.display = enrollOn() ? "" : "none";
-  if (enrollOn()) renderEnrollRows();
+  if (enrollOn()) { renderEnrollRows(); populateMicDevices(false); }
 });
 $("liveEnrollCount").addEventListener("change", renderEnrollRows);
 
@@ -678,19 +895,23 @@ $("btnLiveStart").addEventListener("click", async () => {
     })).session_id;
   } catch (e) { releaseLiveStreams(); showError(e.message); return; }
 
-  // 樣本必須趕在第一段音訊之前送達：後端結束時才比對得出誰是誰。
-  // 這裡失敗只會少幾個名字，不影響聆聽本身
-  if (enrollOn()) $("liveStatus").textContent = "上傳聲音樣本…";
-  await uploadEnrollments(liveSessionId);
+  // 樣本改成背景併行上傳，不 await：四個人在手機網路下要十幾秒，而開場
+  // 正好是自我介紹、最有身分線索的一段——那幾秒不能拿來等上傳。
+  // 後端只要求樣本趕在「結束」之前送達，所以結束分析前再等它（見 btnLiveStop）
+  enrollUploads = enrollOn()
+    ? uploadEnrollments(liveSessionId).catch(() => 0)
+    : null;
 
   liveRecording = true;
   liveStartTime = Date.now();
+  liveRecorders = [];  // 上一場若有錄音器沒收乾淨，會擋掉這一場的第一段
   liveSegIndex = 0;
   liveSentCount = 0;
   pendingChunks = [];
   droppedChunks = 0;
   liveSpeakers = {};
   liveTranscriptText = "";
+  announcedNames.clear();  // 新的一場重新回報，別沿用上一場認出的人
   acquireWakeLock();  // 保持螢幕常亮，避免手機鎖屏中斷錄音
   $("btnLiveStart").disabled = true;
   $("btnLiveStop").disabled = false;
@@ -716,7 +937,9 @@ $("btnLiveStop").addEventListener("click", async () => {
   $("btnLiveStop").disabled = true;
   $("liveStatus").textContent = "整理最後一段錄音…";
 
-  if (liveRecorder && liveRecorder.state !== "inactive") liveRecorder.stop();  // 觸發最後一段上傳
+  // 重疊期間同時有兩個錄音器，兩個都要停：漏停的那個會在 session 關掉之後
+  // 才觸發上傳（400），最後那幾秒就永久消失了
+  liveRecorders.slice().forEach(r => { if (r.state !== "inactive") r.stop(); });
   releaseLiveStreams();  // 關掉麥克風、系統音源與混音器
 
   // 等所有音訊段上傳完成（含最後一段），最多等 3 分鐘
@@ -735,8 +958,33 @@ $("btnLiveStop").addEventListener("click", async () => {
   const caret = $("liveCaret");
   if (caret) caret.remove();  // 收起打字游標
 
+  // 樣本是在背景上傳的。沒送達就 finish 的話，後端沒有樣本可比，等於整個
+  // 預錄功能白做——所以這裡一定要等它（失敗也只是少幾個名字，不擋分析）
+  if (enrollUploads) {
+    $("liveStatus").textContent = "整理聲音樣本…";
+    try { await enrollUploads; } catch (e) { /* 失敗已在上傳時提示過 */ }
+    enrollUploads = null;
+  }
+
   await finishLiveSession();
 });
+
+// 預錄了幾位、實際認出幾位。沒有這份回報，畫面上只是「有些人有名字、有些
+// 人沒有」，使用者無從判斷是自己樣本錄壞了，還是這個功能根本沒生效
+function reportEnrollOutcome(result) {
+  const matched = Object.values(result.speakers_matched || {});
+  const missed = result.speakers_unmatched || [];
+  if (!matched.length && !missed.length) return;  // 這場沒有預錄任何人
+  const parts = [];
+  if (matched.length) parts.push(`認出 ${matched.join("、")}`);
+  if (missed.length) {
+    parts.push(
+      `沒認出 ${missed.join("、")}（在逐字稿中維持講者代號）——`
+      + "多半是樣本太小聲、與開會用的麥克風不同，或那個人整場沒講幾句話"
+    );
+  }
+  showNotice("預錄聲音辨識：" + parts.join("；") + "。");
+}
 
 // 結束彙整分析：失敗時「不」丟掉 session id，讓使用者可按「重試分析」再試，
 // 不會因為一次額度/網路錯誤就白錄整場會議。
@@ -770,6 +1018,7 @@ async function finishLiveSession() {
       // 寧可講清楚，也不要讓使用者以為分析的是完整的一場會議
       showNotice("聆聽 session 已遺失（伺服器可能重啟過），已改用瀏覽器保留的逐字稿分析。請核對逐字稿結尾是否完整。");
     }
+    reportEnrollOutcome(result);
     $("liveStatus").textContent = "完成";
     liveSessionId = null;
     $("btnLiveStart").disabled = false;

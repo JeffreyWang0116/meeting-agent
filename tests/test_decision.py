@@ -452,3 +452,31 @@ def test_side_tables_only_mention_kinds_that_exist():
 
     for kind in {**KIND_SECTIONS, **KIND_DEFAULT_FEATURES}:
         assert kind in MEETING_KINDS, f"「{kind}」已不在選單裡"
+
+
+def test_prompt_lists_confirmed_attendees():
+    """會前錄過聲音樣本的人＝確定在場，姓名寫法也確定。
+
+    模型從逐字稿的「小明」「王先生」猜不出完整姓名，attendees 因此常缺漏或
+    寫法不一；把已登記的名單給它，這兩件事一次解決。
+    """
+    from app.agents.decision_agent import build_prompt
+
+    prompt = build_prompt("測試", MEETING_DATE, attendees=["王小明", "李美華"])
+    assert "王小明、李美華" in prompt
+    assert "出席者" in prompt
+    # 沒有名單就完全不出現這個段落
+    assert "已確認出席者" not in build_prompt("測試", MEETING_DATE)
+
+
+def test_attendee_line_forbids_guessing_owner_from_the_roster():
+    """「在場」不等於「負責」。
+
+    名單只有兩個人時，模型很容易把找不到負責人的代辦事項硬塞給其中一位——
+    那比 owner 留空更糟，因為看起來像有憑有據。與詞彙表同一條紅線。
+    """
+    from app.agents.decision_agent import build_prompt
+
+    prompt = build_prompt("測試", MEETING_DATE, attendees=["王小明"])
+    assert "owner" in prompt.split("已確認出席者")[1].split("務必遵守")[0]
+    assert "禁止" in prompt.split("已確認出席者")[1].split("務必遵守")[0]

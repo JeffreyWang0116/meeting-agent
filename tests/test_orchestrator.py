@@ -134,3 +134,24 @@ def test_pipeline_works_without_a_namer(orchestrator):
     )
     assert "講者A：" in result["transcript"]
     assert result["speaker_names"] == []
+
+
+# ---- 出席者名單（預錄聲音樣本的人）----
+
+def test_attendees_reach_the_decision_agent(tmp_path):
+    """出席者名單要一路帶到分析：只停在 API 層等於沒做。"""
+    captured = {}
+    store = LocalJsonStore(tmp_path / "db.json")
+
+    def fake_generate(prompt):
+        captured["prompt"] = prompt
+        return valid_json()
+
+    pipeline = Orchestrator(
+        parser=ParserAgent(),
+        decision=DecisionAgent(generate=fake_generate),
+        executor=ExecutorAgent(store),
+        notifier=NotifierAgent(tmp_path / "notifications"),
+    )
+    pipeline.process_transcript("[0:05] 講者A：大家好", attendees=["王小明"])
+    assert "王小明" in captured["prompt"]

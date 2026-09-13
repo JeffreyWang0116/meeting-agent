@@ -983,3 +983,163 @@ def test_enrolled_voices_rename_the_speaker_labels(tmp_path):
     assert "王小明：" in body["transcript"]
     assert "講者A" not in body["transcript"]
     assert body["speaker_names"] == [{"label": "講者A", "name": "王小明", "count": 1}]
+
+
+# ---- 即時聆聽：預錄聲音辨識人 ----
+
+class LabelledTranscriber:
+    """回傳帶時間戳與講者代號的假逐字稿，讓聲紋比對的證據挑得出來。"""
+
+    device = "cpu"
+    model_size = "fake"
+
+    def __init__(self, texts=None):
+        self.texts = list(texts or [])
+
+    def transcribe(self, path, on_progress=None, hint=None, user=None):
+        return self.texts.pop(0) if self.texts else "[0:01] 講者A：大家好"
+
+
+class FakeVoiceMatcher:
+    def __init__(self, result):
+        self.result = result
+
+    def match(self, enrollments, evidence):
+        return dict(self.result)
+
+
+def _live_app(tmp_path, transcriber, matcher=None, on_prompt=None):
+    from app.transcription.live_session import LiveSessionManager
+
+    settings = Settings(gemini_api_key=None, data_dir=tmp_path)
+    store = LocalJsonStore(tmp_path / "db.json")
+
+    def generate(prompt):
+        if on_prompt:
+            on_prompt(prompt)
+        return valid_json()
+
+    orchestrator = Orchestrator(
+        parser=ParserAgent(),
+        decision=DecisionAgent(generate=generate),
+        executor=ExecutorAgent(store),
+        notifier=NotifierAgent(tmp_path / "notifications"),
+    )
+    live_manager = LiveSessionManager(
+        transcriber,
+        tmp_path / "live",
+        voice_matcher=matcher,
+        spawn=lambda fn: fn(),  # 提早比對原地執行，測試才不必跟執行緒賽跑
+    )
+    app = create_app(
+        settings,
+        store=store,
+        orchestrator=orchestrator,
+        transcriber=transcriber,
+        live_manager=live_manager,
+    )
+    return TestClient(app)
+
+
+def _chunk(client, sid, data=b"audio", **form):
+    return client.post(
+        f"/api/live/{sid}/chunk",
+        files={"file": ("c.webm", io.BytesIO(data), "audio/webm")},
+        data=form,
+    )
+
+
+def test_live_chunk_drops_the_overlapping_seconds(tmp_path):
+    """前端讓相鄰兩段重疊幾秒，一句話才不會被硬切點剁成兩半。
+
+    重疊處會被轉錄兩次，後端依絕對時間濾掉——否則逐字稿每 45 秒就出現一句重複。
+    """
+    tr = LabelledTranscriber(
+        ["[0:00] 講者A：大家好", "[0:00] 講者A：大家好\n[0:05] 講者A：今天談排程"]
+    )
+    c = _live_app(tmp_path, tr)
+    sid = c.post("/api/live/start").json()["session_id"]
+    _chunk(c, sid, offset="0")
+    body = _chunk(c, sid, offset="42", overlap="3").json()
+
+    assert body["text"] == "[0:47] 講者A：今天談排程"
+    assert body["transcript"].count("大家好") == 1
+
+
+def test_live_finish_reports_who_was_recognised_and_who_was_not(tmp_path):
+    """預錄了 2 位只認出 1 位時，使用者要知道是哪一位沒認出來。
+
+    沒有這份回報，畫面上只是「有些人有名字、有些人沒有」，使用者無從判斷是
+    自己樣本錄壞了，還是功能根本沒生效。
+    """
+    c = _live_app(
+        tmp_path,
+        LabelledTranscriber(["[0:01] 講者A：大家好"] * 3),
+        matcher=FakeVoiceMatcher({"講者A": "王小明"}),
+    )
+    sid = c.post("/api/live/start").json()["session_id"]
+    for name in ("王小明", "李美華"):
+        assert c.post(
+            f"/api/live/{sid}/enroll",
+            files={"file": ("e.webm", io.BytesIO(b"sample"), "audio/webm")},
+            data={"name": name},
+        ).status_code == 200
+    _chunk(c, sid, offset="0")
+
+    body = c.post(f"/api/live/{sid}/finish").json()
+    assert body["speakers_matched"] == {"講者A": "王小明"}
+    assert body["speakers_unmatched"] == ["李美華"]
+
+
+def test_retrying_the_analysis_keeps_the_voiceprint_names(tmp_path):
+    """finish 會刪掉音檔，重試時已經沒有聲音可比——比對結果必須沿用快取。
+
+    沒快取的話，第一次分析失敗、重試成功的使用者會看到整份逐字稿退回代號。
+    """
+    calls = []
+
+    class CountingMatcher(FakeVoiceMatcher):
+        def match(self, enrollments, evidence):
+            calls.append(1)
+            return super().match(enrollments, evidence)
+
+    c = _live_app(
+        tmp_path,
+        LabelledTranscriber(["[0:01] 講者A：大家好"] * 3),
+        matcher=CountingMatcher({"講者A": "王小明"}),
+    )
+    sid = c.post("/api/live/start").json()["session_id"]
+    c.post(
+        f"/api/live/{sid}/enroll",
+        files={"file": ("e.webm", io.BytesIO(b"sample"), "audio/webm")},
+        data={"name": "王小明"},
+    )
+    _chunk(c, sid, offset="0")
+
+    assert c.post(f"/api/live/{sid}/finish").json()["speakers_matched"] == {
+        "講者A": "王小明"
+    }
+    again = c.post(f"/api/live/{sid}/finish").json()  # 前端的「重試分析」
+    assert again["speakers_matched"] == {"講者A": "王小明"}
+    assert len(calls) == 1  # 音檔都沒了，不該再白打一次
+
+
+def test_enrolled_people_are_given_to_the_analysis_as_attendees(tmp_path):
+    """會前登記的人＝使用者親自指認的出席名單，分析時用得上。"""
+    prompts = []
+    c = _live_app(
+        tmp_path,
+        LabelledTranscriber(["[0:01] 講者A：大家好"] * 3),
+        matcher=FakeVoiceMatcher({}),
+        on_prompt=prompts.append,
+    )
+    sid = c.post("/api/live/start").json()["session_id"]
+    c.post(
+        f"/api/live/{sid}/enroll",
+        files={"file": ("e.webm", io.BytesIO(b"sample"), "audio/webm")},
+        data={"name": "李美華"},
+    )
+    _chunk(c, sid, offset="0")
+    c.post(f"/api/live/{sid}/finish")
+
+    assert prompts and "李美華" in prompts[0]

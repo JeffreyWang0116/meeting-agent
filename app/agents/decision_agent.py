@@ -191,7 +191,7 @@ def default_features_for_kind(kind: str | None) -> set[str]:
 
 PROMPT_TEMPLATE = """你是「會議助手」的決策模組。以下是一場會議的逐字稿或文字紀錄，內容可能中英夾雜、口語且混亂。請仔細閱讀並萃取結構化資訊。
 
-會議日期：{meeting_date}（星期{weekday}）{kind_line}{glossary_line}
+會議日期：{meeting_date}（星期{weekday}）{kind_line}{glossary_line}{attendee_line}
 
 務必遵守的規則：
 1. 只輸出一個 JSON 物件。不要 markdown 圍欄、不要任何額外說明文字。
@@ -227,6 +227,7 @@ def build_prompt(
     glossary: list[dict] | None = None,
     features: set[str] | None = None,
     extra_terms: list[dict] | None = None,
+    attendees: list[str] | None = None,
 ) -> str:
     # features=None：向後相容，等同全部功能都開（沒有勾選框限制的舊行為）
     features = FEATURE_KEYS if features is None else features
@@ -243,6 +244,19 @@ def build_prompt(
             f"但這只是拼字對照，不代表這個人這場會議有出席或發言——"
             f"逐字稿裡沒有依據時，禁止把詞彙表的人名拿來猜 owner、attendees "
             f"或任何欄位）：{terms}。"
+        )
+    # 已確認出席者：會前錄過聲音樣本的人，等於使用者親自指認「這些人在場、
+    # 姓名是這樣寫」。模型從逐字稿的「小明」「王先生」還原不出完整姓名，
+    # attendees 因此常缺漏或寫法不一，這份名單一次解決兩個問題。
+    # 與詞彙表同一條紅線：在場不等於負責，不可以拿來猜 owner
+    attendee_line = ""
+    names = [n.strip() for n in (attendees or []) if n and n.strip()]
+    if names:
+        attendee_line = (
+            f"\n已確認出席者（會前登記並錄了聲音樣本，確定在場）：{'、'.join(names)}。"
+            f"這些人一律列入 attendees，逐字稿提到他們時姓名以此寫法為準。"
+            f"但「在場」不等於「負責」——逐字稿裡沒有明確指派時，"
+            f"禁止把這些姓名填進 owner 或用來猜測任何其他欄位。"
         )
     # 規則編號接在 PROMPT_TEMPLATE 的第 10 條之後，而且不能跳號——
     # 模型看到 10 之後直接跳 12，會以為自己漏讀了一條
@@ -264,6 +278,7 @@ def build_prompt(
         weekday=_WEEKDAY_ZH[meeting_date.weekday()],
         kind_line=kind_line,
         glossary_line=glossary_line,
+        attendee_line=attendee_line,
         feature_note=feature_note,
         schema=_schema_example(features, list(sections_for_kind(kind))),
         transcript=transcript,
@@ -326,6 +341,7 @@ class DecisionAgent:
         features: set[str] | None = None,
         extra_terms: list[dict] | None = None,
         user: str = DEFAULT_USER,
+        attendees: list[str] | None = None,
     ) -> MeetingAnalysis:
         meeting_date = meeting_date or date.today()
         # features=None：向後相容，等同全部功能都開
@@ -337,6 +353,7 @@ class DecisionAgent:
             glossary=self._glossary(user) if self._glossary else None,
             features=features,
             extra_terms=extra_terms,
+            attendees=attendees,
         )
 
         prompt = base_prompt
