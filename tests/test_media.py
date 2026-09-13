@@ -127,3 +127,45 @@ def test_cut_clip_default_output_names_include_span_and_are_distinct(monkeypatch
     a = media.cut_clip(src, 20.0, 28.0)
     b = media.cut_clip(src, 40.0, 48.0)
     assert a != b
+
+
+# ---- 講者分離上傳用的壓縮音檔 ----
+
+def test_encode_for_diarization_builds_opus_command(monkeypatch, tmp_path):
+    captured = {}
+
+    def fake_run(cmd, **kwargs):
+        captured["cmd"] = cmd
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(media.subprocess, "run", fake_run)
+    src = tmp_path / "meeting.wav"
+    out = media.encode_for_diarization(src)
+
+    assert out == tmp_path / "meeting_diarize.ogg"
+    cmd = captured["cmd"]
+    assert cmd[cmd.index("-i") + 1] == str(src)
+    # PoC 實測：Opus 32kbps 是 16k FLAC 的 1/6，分群結果逐 0.1 秒 99.6% 一致
+    assert cmd[cmd.index("-c:a") + 1] == "libopus"
+    assert cmd[cmd.index("-b:a") + 1] == "32k"
+    assert cmd[cmd.index("-ac") + 1] == "1"
+    assert "-vn" in cmd
+    assert cmd[-1] == str(out)
+
+
+def test_encode_for_diarization_custom_output_path(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        media.subprocess, "run",
+        lambda cmd, **kw: subprocess.CompletedProcess(cmd, 0, stdout="", stderr=""),
+    )
+    dest = tmp_path / "x" / "custom.ogg"
+    assert media.encode_for_diarization(tmp_path / "a.mp4", dest) == dest
+
+
+def test_encode_for_diarization_failure_raises_media_error(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        media.subprocess, "run",
+        lambda cmd, **kw: subprocess.CompletedProcess(cmd, 1, stdout="", stderr="Unknown encoder 'libopus'"),
+    )
+    with pytest.raises(media.MediaError, match="libopus"):
+        media.encode_for_diarization(tmp_path / "a.wav")

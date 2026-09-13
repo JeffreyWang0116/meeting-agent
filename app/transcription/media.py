@@ -69,6 +69,35 @@ def extract_audio(input_path: str | Path, output_path: str | Path | None = None)
     return output_path
 
 
+def encode_for_diarization(
+    input_path: str | Path, output_path: str | Path | None = None
+) -> Path:
+    """壓成單聲道 Opus 32kbps，給 pyannote 講者分離上傳用。
+
+    PoC（77 分鐘協商）：16k FLAC 108MB 上傳 189 秒，Opus 18MB 只要 24 秒，
+    分群結果逐 0.1 秒比對 99.6% 一致。講者分離只需要嗓音特徵，不需要無損音質；
+    上傳才是整段流程裡最慢的一步。
+    """
+    input_path = Path(input_path)
+    output_path = (
+        Path(output_path)
+        if output_path
+        else input_path.parent / f"{input_path.stem}_diarize.ogg"
+    )
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    cmd = [
+        _ffmpeg_cmd() or "ffmpeg", "-y",
+        "-i", str(input_path),
+        "-vn", "-ac", "1", "-ar", "16000",
+        "-c:a", "libopus", "-b:a", "32k", "-application", "voip",
+        str(output_path),
+    ]
+    proc = subprocess.run(cmd, capture_output=True, text=True, errors="replace")
+    if proc.returncode != 0:
+        raise MediaError(f"ffmpeg 壓縮音檔失敗：{(proc.stderr or '').strip()[-500:]}")
+    return output_path
+
+
 def audio_duration(path: str | Path) -> float | None:
     """音檔長度（秒）。取不到就回 None——呼叫端據此決定要不要分段。"""
     probe = _ffprobe_cmd()
