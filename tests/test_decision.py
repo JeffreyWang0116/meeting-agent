@@ -285,18 +285,56 @@ def test_per_meeting_terms_work_without_a_global_glossary():
     assert "Kessel" in prompt
 
 
-# ---- 種類專屬輸出區塊（目前只有銷售拜訪的 BANT）----
+# ---- 種類專屬輸出區塊 ----
 
-def test_kind_sections_appear_in_schema_and_instructions():
+@pytest.mark.parametrize(
+    "kind", ["銷售拜訪", "一對一", "面試", "需求訪談", "專案會議", "語音備忘錄"]
+)
+def test_kind_sections_appear_in_schema_and_instructions(kind):
     from app.agents.decision_agent import KIND_SECTIONS, build_prompt
 
-    prompt = build_prompt("逐字稿", date(2026, 8, 10), kind="銷售拜訪")
+    prompt = build_prompt("逐字稿", date(2026, 8, 10), kind=kind)
     assert "sections" in prompt  # schema 範例
     # 光有 schema 不夠：要有明確的指示告訴模型只能用這幾個 label、每個都要輸出
     assert "sections 只能有下列" in prompt
-    for label, desc in KIND_SECTIONS["銷售拜訪"].items():
+    for label, desc in KIND_SECTIONS[kind].items():
         assert label in prompt
         assert desc in prompt  # 每個區塊要裝什麼也要講清楚
+
+
+def test_only_the_generic_kinds_go_without_sections():
+    """「一般會議」與「其它」刻意不給專屬區塊。
+
+    它們是收容所：內容什麼形狀都有可能。硬塞固定欄位只會逼模型對著
+    不存在的主題生出空區塊，或更糟——編一個出來填滿。
+    """
+    from app.agents.decision_agent import KIND_SECTIONS, MEETING_KINDS
+
+    assert set(KIND_SECTIONS) == MEETING_KINDS - {"一般會議", "其它"}
+
+
+def test_section_labels_never_shadow_the_generic_blocks():
+    """區塊是用來裝通用欄位裝不下的東西。
+
+    再開一份「代辦」或「決議」區塊，同一件事會出現兩次，而且只有通用的
+    todos 進得了任務庫——使用者會以為區塊裡那份也排程了。
+    """
+    from app.agents.decision_agent import KIND_SECTIONS
+
+    for kind, spec in KIND_SECTIONS.items():
+        for label in spec:
+            assert not any(
+                dup in label for dup in ("代辦", "待辦", "決議", "摘要", "行動")
+            ), f"「{kind}」的區塊「{label}」和通用欄位重疊"
+
+
+def test_section_labels_stay_short_enough_for_a_heading():
+    """label 直接當卡片標題與 Markdown 的 ## 標題渲染，長句會撐破版面。"""
+    from app.agents.decision_agent import KIND_SECTIONS
+
+    for kind, spec in KIND_SECTIONS.items():
+        for label in spec:
+            assert 2 <= len(label) <= 8, f"「{kind}」的區塊「{label}」不適合當標題"
 
 
 def test_section_rule_is_numbered_right_after_the_last_rule():
