@@ -63,6 +63,16 @@ def clean_terms(terms: list[dict], max_terms: int = MAX_TERMS) -> list[dict]:
 
 
 class Glossary:
+    """user 一律必填，刻意不給預設值。
+
+    給了 DEFAULT_USER 當預設值的話，少傳一個參數不會報錯，而是安靜地讀到
+    另一個人的詞彙表——轉錄、校正、分析四條路徑曾經同時中這一刀，壞了一個
+    月都沒有徵兆，因為症狀只是「別人的人名出現在我的會議裡」。
+
+    這一層的回傳值會直接進 prompt，所以寧可在呼叫端就 TypeError：CI 當場
+    擋下來，好過變成線上的跨帳號資料外洩。
+    """
+
     def __init__(self, store):
         self._store = store
         self._lock = threading.Lock()
@@ -101,17 +111,17 @@ class Glossary:
             self._store.save_speaker_roster([], user=user)  # 搬完清空，不再搬第二次
         return terms
 
-    def terms(self, user: str = DEFAULT_USER) -> list[dict]:
+    def terms(self, user: str) -> list[dict]:
         with self._lock:
             if user not in self._cache:
                 self._cache[user] = self._load(user)
             return [dict(t) for t in self._cache[user]]
 
-    def person_names(self, user: str = DEFAULT_USER) -> list[str]:
+    def person_names(self, user: str) -> list[str]:
         """標成人名的詞彙——餵給 SpeakerNamerAgent，讓姓名寫法跨會議一致。"""
         return [t["term"] for t in self.terms(user) if t.get("person")]
 
-    def replace(self, terms: list[dict], user: str = DEFAULT_USER) -> list[dict]:
+    def replace(self, terms: list[dict], user: str) -> list[dict]:
         """整份取代（前端每次送完整清單，邏輯最單純）。回傳清理後的結果。"""
         cleaned = clean_terms(terms)
         with self._lock:

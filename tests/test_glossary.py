@@ -2,7 +2,11 @@
 import pytest
 
 from app.glossary import Glossary, glossary_prompt_line, terms_hint_line
+from app.stores.base import DEFAULT_USER
 from app.stores.local_store import LocalJsonStore
+
+# user 必填（見 Glossary 的說明），測試也照 production 的形狀明講是誰
+U = "uid-test"
 
 
 def make_glossary(tmp_path):
@@ -10,19 +14,19 @@ def make_glossary(tmp_path):
 
 
 def test_empty_glossary(tmp_path):
-    assert make_glossary(tmp_path).terms() == []
+    assert make_glossary(tmp_path).terms(U) == []
 
 
 def test_replace_and_reload(tmp_path):
     path = tmp_path / "db.json"
     g = Glossary(LocalJsonStore(path))
-    saved = g.replace([{"term": "林佳蓉", "note": "人名"}, {"term": "TaskHub", "note": ""}])
+    saved = g.replace([{"term": "林佳蓉", "note": "人名"}, {"term": "TaskHub", "note": ""}], U)
     assert saved == [
         {"term": "林佳蓉", "note": "人名", "person": False},
         {"term": "TaskHub", "note": "", "person": False},
     ]
     # 重新載入（等同重啟服務）要還在——證明有進資料庫
-    assert Glossary(LocalJsonStore(path)).terms() == saved
+    assert Glossary(LocalJsonStore(path)).terms(U) == saved
 
 
 def test_replace_strips_and_dedupes(tmp_path):
@@ -30,14 +34,14 @@ def test_replace_strips_and_dedupes(tmp_path):
     saved = g.replace([
         {"term": "  林佳蓉 ", "note": None},
         {"term": "林佳蓉", "note": "重複的會被跳過"},
-    ])
+    ], U)
     assert saved == [{"term": "林佳蓉", "note": "", "person": False}]
 
 
 def test_empty_term_rejected(tmp_path):
     g = make_glossary(tmp_path)
     with pytest.raises(ValueError):
-        g.replace([{"term": "   "}])
+        g.replace([{"term": "   "}], U)
 
 
 def test_prompt_line_formats_terms_with_notes():
@@ -84,8 +88,8 @@ def test_person_names_only_returns_people(tmp_path):
         {"term": "TaskHub", "note": "產品名"},
         {"term": "林佳蓉", "person": True},
         {"term": "李四", "person": True},
-    ])
-    assert g.person_names() == ["林佳蓉", "李四"]
+    ], U)
+    assert g.person_names(U) == ["林佳蓉", "李四"]
 
 
 def test_legacy_roster_is_migrated_into_the_glossary(tmp_path):
@@ -99,7 +103,7 @@ def test_legacy_roster_is_migrated_into_the_glossary(tmp_path):
     store.save_speaker_roster(["林佳蓉", "李四"])
 
     g = Glossary(store)
-    assert g.person_names() == ["林佳蓉", "李四"]
+    assert g.person_names(DEFAULT_USER) == ["林佳蓉", "李四"]
     assert store.get_speaker_roster() == []  # 搬完清空，不會再搬第二次
 
 
@@ -136,3 +140,19 @@ def test_terms_are_isolated_per_account(tmp_path):
     assert terms_hint_line(g.terms(user="uid-B")) == ""
     assert g.person_names(user="uid-B") == []
     assert g.terms(user="uid-A")[0]["term"] == "TaskHub"
+
+
+def test_user_is_required_so_forgetting_it_fails_loudly(tmp_path):
+    """Glossary 的三個對外方法都不給 user 預設值。
+
+    這是「詞彙表讀到別人那一桶」那個 bug 的根本原因：user 有預設值
+    （DEFAULT_USER）時，少傳一個參數不會報錯，而是安靜地讀到另一個人的資料
+    ——四條 prompt 路徑同時中招，壞了一個月沒有任何徵兆。
+
+    回傳值會直接進 prompt 的這一層，寧可在呼叫端就 TypeError：CI 當場擋下來，
+    好過變成線上的跨帳號資料外洩。
+    """
+    g = make_glossary(tmp_path)
+    for call in (lambda: g.terms(), lambda: g.person_names(), lambda: g.replace([])):
+        with pytest.raises(TypeError):
+            call()
