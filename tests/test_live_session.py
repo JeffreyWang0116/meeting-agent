@@ -1,5 +1,6 @@
 """即時聆聽 session 管理測試。"""
 import threading
+from pathlib import Path
 
 import pytest
 
@@ -832,23 +833,6 @@ def test_waiting_retry_falls_back_when_the_first_attempt_fails(tmp_path):
 
 # ---- voiceprint 停用（PYANNOTE_VOICEPRINT_ENABLED 預設關）----
 
-def test_enrolled_session_skips_pyannote_when_voiceprints_are_disabled(tmp_path):
-    """voiceprint 試用只有 10 個、按個計費。停用時有預錄樣本的場次整場照舊走 Gemini：
-    pyannote 純分群給不出姓名，重標後 Gemini 認出的名字又對不上新代號，會整組消失。"""
-    diarizer = FakeLiveDiarizer(prior={"講者B": "王小明"})
-    diarizer.voiceprints_enabled = False
-    matcher = FakeMatcher({"講者A": "李大華"})
-    mgr = _diarized_mgr(tmp_path, ["[0:01] 講者A：一"], diarizer, matcher)
-    sid = mgr.start()
-    mgr.enroll(sid, "李大華", b"voice")
-    mgr.add_chunk(sid, b"a", offset_seconds=0)
-
-    assert mgr.diarize_session(sid) is None
-    assert diarizer.calls == []
-    assert mgr.voice_mapping(sid) == {"講者A": "李大華"}  # Gemini 比對照常
-    assert mgr.finish(sid) == "[0:01] 講者A：一"
-
-
 def test_session_without_enrollments_still_uses_pyannote_when_voiceprints_are_disabled(tmp_path):
     diarizer = FakeLiveDiarizer()
     diarizer.voiceprints_enabled = False
@@ -857,3 +841,61 @@ def test_session_without_enrollments_still_uses_pyannote_when_voiceprints_are_di
     mgr.add_chunk(sid, b"a", offset_seconds=0)
     assert mgr.diarize_session(sid) == {}
     assert len(diarizer.calls) == 1
+
+
+# ---- voiceprint 停用時：pyannote 重標後，再用 Gemini 聲紋比對把姓名對上新代號 ----
+
+RELABELLED = "[0:01] 講者A：主席開場\n[0:50] 講者B：委員發言"
+
+
+def test_enrolled_session_is_relabelled_then_names_matched_on_new_labels(tmp_path):
+    """voiceprint 按個計費、先停用。預錄的姓名改由 Gemini 聲紋比對，但比對的是 pyannote
+    重標後的代號——聆聽中 Gemini 提早認出的名字掛在它自己的代號上，重標後就對不上了。"""
+    diarizer = FakeLiveDiarizer(text=RELABELLED, prior={"講者Z": "不該出現"})
+    diarizer.voiceprints_enabled = False
+    matcher = FakeMatcher({"講者B": "王小明"})
+    mgr = _diarized_mgr(tmp_path, ["[0:01] 講者A：主席開場", "[0:50] 講者A：委員發言"], diarizer, matcher)
+    sid = mgr.start()
+    mgr.enroll(sid, "王小明", b"voice")
+    mgr.add_chunk(sid, b"a", suffix=".webm", offset_seconds=0)
+    mgr.add_chunk(sid, b"b", suffix=".webm", offset_seconds=45, overlap_seconds=3)
+    matcher.calls.clear()  # 聆聽中第 2 段的提早比對（Gemini 舊代號）不算
+
+    prior = mgr.diarize_session(sid)
+
+    (_, _, enrollments_sent), = diarizer.calls
+    assert enrollments_sent == []  # 不建任何 voiceprint
+    (enrollments, evidence), = matcher.calls
+    assert [e["name"] for e in enrollments] == ["王小明"]
+    # 證據是「重標後」各段的逐字稿，搭配該段的錄音檔
+    assert {(Path(e["path"]).name, e["transcript"]) for e in evidence} == {
+        ("chunk_000.webm", "[0:01] 講者A：主席開場"),
+        ("chunk_001.webm", "[0:50] 講者B：委員發言"),
+    }
+    assert prior == {"講者B": "王小明"}
+    assert mgr.finish(sid) == RELABELLED
+    assert mgr.voice_mapping(sid) == {"講者B": "王小明"}  # 重試分析沿用
+
+
+def test_name_matching_failure_keeps_the_relabelled_transcript(tmp_path):
+    diarizer = FakeLiveDiarizer(text=RELABELLED)
+    diarizer.voiceprints_enabled = False
+    matcher = FakeMatcher(error=RuntimeError("gemini 503"))
+    mgr = _diarized_mgr(tmp_path, ["[0:01] 講者A：主席開場"], diarizer, matcher)
+    sid = mgr.start()
+    mgr.enroll(sid, "王小明", b"voice")
+    mgr.add_chunk(sid, b"a", offset_seconds=0)
+
+    assert mgr.diarize_session(sid) == {}
+    assert mgr.finish(sid) == RELABELLED
+
+
+def test_voiceprint_enabled_path_does_not_call_gemini_matcher(tmp_path):
+    diarizer = FakeLiveDiarizer(text=RELABELLED, prior={"講者B": "王小明"})
+    matcher = FakeMatcher({"講者B": "李大華"})
+    mgr = _diarized_mgr(tmp_path, ["[0:01] 講者A：主席開場"], diarizer, matcher)
+    sid = mgr.start()
+    mgr.enroll(sid, "王小明", b"voice")
+    mgr.add_chunk(sid, b"a", offset_seconds=0)
+    assert mgr.diarize_session(sid) == {"講者B": "王小明"}
+    assert matcher.calls == []

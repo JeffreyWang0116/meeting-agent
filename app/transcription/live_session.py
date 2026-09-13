@@ -40,6 +40,7 @@ from app.transcription.segments import (
     speaker_of,
     transcript_tail,
 )
+from app.transcription.speaker_align import split_by_starts
 
 
 logger = logging.getLogger(__name__)
@@ -427,11 +428,6 @@ class LiveSessionManager:
             enrollments = list(session.enrollments)
         if not transcript.strip():
             return None
-        # voiceprint 停用時，有預錄樣本的場次整場照舊走 Gemini：pyannote 純分群給不出
-        # 姓名，而 Gemini 認出的名字掛在它自己的代號上，重標後對不上——名字會整組消失。
-        # 使用者錄了樣本就是要看到名字，寧可講者分得差一點
-        if enrollments and not getattr(self._diarizer, "voiceprints_enabled", True):
-            return None
         pieces = []
         for index in sorted(paths):
             offset, overlap = timing.get(index, (None, 0.0))
@@ -448,15 +444,49 @@ class LiveSessionManager:
         if not pieces:
             return None
         enrollments = [e for e in enrollments if Path(e["path"]).exists()]
+        # voiceprint 按個計費、可關閉。關閉時 pyannote 只負責分講者，姓名在重標之後
+        # 另外交給 Gemini 聲紋比對（_match_names_after_relabel）
+        use_voiceprints = getattr(self._diarizer, "voiceprints_enabled", True)
         try:
-            text, prior = self._diarizer.relabel_session(transcript, pieces, enrollments)
+            text, prior = self._diarizer.relabel_session(
+                transcript, pieces, enrollments if use_voiceprints else []
+            )
         except Exception as exc:
             logger.warning("即時聆聽講者分離失敗，沿用 Gemini 的代號與比對：%s", exc)
             return None
+        if enrollments and not use_voiceprints:
+            prior = self._match_names_after_relabel(text, pieces, enrollments)
         with self._lock:
             session.diarized_transcript = text
             session.voice_result = dict(prior)
         return dict(prior)
+
+    def _match_names_after_relabel(
+        self, text: str, pieces: list[dict], enrollments: list[dict]
+    ) -> dict[str, str]:
+        """pyannote 重標之後，用 Gemini 聲紋比對把預錄的姓名對上「新」代號。
+
+        聆聽中 Gemini 提早認出的名字掛在 Gemini 自己的代號上，重標換了一套代號就對
+        不上，所以要重比一次：證據是「每段錄音＋重標後那段的逐字稿」。pyannote 的代號
+        全場一致，比對時同一個人不會在不同段被標成不同代號，證據也比重標前乾淨。
+
+        比對失敗只少了姓名，重標後的逐字稿照樣可用，回 {}。
+        """
+        if not self._voice_matcher:
+            return {}
+        parts = split_by_starts(text, [piece["start"] for piece in pieces])
+        evidence = [
+            {"path": pieces[index]["path"], "transcript": parts[index]}
+            for index in pick_evidence_chunks(parts, self.MAX_EVIDENCE_CHUNKS)
+            if parts[index].strip()
+        ]
+        if not evidence:
+            return {}
+        try:
+            return self._voice_matcher.match(enrollments, evidence) or {}
+        except Exception as exc:
+            logger.warning("重標後的姓名比對失敗，逐字稿維持講者代號：%s", exc)
+            return {}
 
     def finish(self, session_id: str, user: str = DEFAULT_USER) -> str:
         session = self._get(session_id, user)

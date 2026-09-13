@@ -6,6 +6,7 @@ Gemini 分段轉錄沒有跨段記憶，講者代號跨段會亂跳；pyannote �
 from app.transcription.speaker_align import (
     code_map,
     relabel,
+    split_by_starts,
     speaker_prior_from_identify,
     to_session_time,
 )
@@ -200,4 +201,30 @@ def test_to_session_time_splits_segment_crossing_chunk_boundary():
     segments = [seg("SPEAKER_00", 40, 50)]
     assert to_session_time(segments, placements) == [
         seg("SPEAKER_00", 40, 45), seg("SPEAKER_00", 50, 55),
+    ]
+
+
+# ---- 重標後的逐字稿切回各段錄音（給聲紋比對當證據）----
+
+def test_split_by_starts_puts_each_line_in_the_chunk_covering_its_time():
+    text = "[0:01] 講者A：一\n[0:40] 講者B：二\n[0:50] 講者B：三\n[1:40] 講者A：四"
+    assert split_by_starts(text, [0.0, 48.0, 93.0]) == [
+        "[0:01] 講者A：一\n[0:40] 講者B：二",
+        "[0:50] 講者B：三",
+        "[1:40] 講者A：四",
+    ]
+
+
+def test_split_by_starts_keeps_continuation_lines_with_their_owner():
+    text = "[0:01] 講者A：一\n續行\n[0:50] 講者B：二"
+    assert split_by_starts(text, [0.0, 48.0]) == ["[0:01] 講者A：一\n續行", "[0:50] 講者B：二"]
+
+
+def test_split_by_starts_leaves_empty_chunks_empty():
+    assert split_by_starts("[1:40] 講者A：四", [0.0, 48.0, 93.0]) == ["", "", "[1:40] 講者A：四"]
+
+
+def test_split_by_starts_lines_before_first_start_go_to_first_chunk():
+    assert split_by_starts("開頭沒時間\n[0:05] 講者A：一", [3.0, 48.0]) == [
+        "開頭沒時間\n[0:05] 講者A：一", "",
     ]

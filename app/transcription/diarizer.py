@@ -48,7 +48,8 @@ class Diarizer:
         self._duration = duration
         self._concat = concat
         self.voiceprint_threshold = voiceprint_threshold
-        # voiceprint 按建立次數計費（試用只有 10 個），預設不建。見 Settings.pyannote_voiceprint_enabled
+        # voiceprint 按建立次數計費（試用只有 10 個），預設不建；姓名改由 LiveSessionManager
+        # 在重標後交給 Gemini 比對。見 Settings.pyannote_voiceprint_enabled
         self.voiceprints_enabled = voiceprints_enabled
         self._submit = submit or ThreadPoolExecutor(
             max_workers=_MAX_PARALLEL_JOBS, thread_name_prefix="diarize"

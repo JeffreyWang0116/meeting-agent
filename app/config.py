@@ -106,8 +106,8 @@ class Settings:
     # 不是本人 16~28 分；API 預設 0 會把缺席者硬配給某位只講 4 秒的人
     voiceprint_match_threshold: float = 50
     # 預錄聲音辨識人要不要改用 pyannote voiceprint 比對姓名。預設關：試用只有 10 個、
-    # 按建立次數計費（每預錄一人扣一個）。關閉時有預錄樣本的即時聆聽整場照舊走
-    # Gemini（標講者＋比對姓名）；沒預錄的場次與上傳檔案照常用 pyannote 分講者
+    # 按建立次數計費（每預錄一人扣一個）。關閉時照樣用 pyannote 整場重標講者，姓名在
+    # 重標之後改由 Gemini 聲紋比對對上新代號（實測與 voiceprint 認出同一人）
     pyannote_voiceprint_enabled: bool = False
     # 速率限制（app/ratelimit.py）：每位使用者、每種耗額度的操作有每分鐘／每天上限。
     # 預設跟著 is_public_deploy 走（比照認證）：公開網址開、本機開發關

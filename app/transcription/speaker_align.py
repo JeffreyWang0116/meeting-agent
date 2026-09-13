@@ -167,3 +167,28 @@ def to_session_time(
                     "end": end - chunk_start + offset,
                 })
     return result
+
+
+def split_by_starts(text: str, starts: list[float]) -> list[str]:
+    """把整場（已重標的）逐字稿依時間切回各段錄音，回傳與 starts 等長的 list。
+
+    starts：各段保留部分在整場的起點（遞增）。每行歸給「起點 ≤ 行時間」的最後一段；
+    沒時間戳的續行跟著上一行走，第一個時間戳之前的行歸第一段。
+
+    用途：voiceprint 停用時，預錄姓名改由 Gemini 聲紋比對，它要「一段錄音＋那段的
+    逐字稿」當證據。重標前各段的逐字稿是 Gemini 的舊代號，必須換成重標後的版本，
+    比對出來的名字才掛得上 pyannote 的代號。
+    """
+    buckets: list[list[str]] = [[] for _ in starts]
+    current = 0
+    for line in text.split("\n"):
+        matched = TIME_PREFIX_RE.match(line)
+        if matched:
+            seconds = parse_time_label(matched.group(1))
+            current = 0
+            for index, start in enumerate(starts):
+                if start <= seconds:
+                    current = index
+        if buckets:
+            buckets[current].append(line)
+    return ["\n".join(lines) for lines in buckets]
