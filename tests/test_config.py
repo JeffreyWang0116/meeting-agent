@@ -179,3 +179,16 @@ def test_pyannote_env_vars(monkeypatch):
 def test_blank_pyannote_key_counts_as_unset(monkeypatch):
     monkeypatch.setenv("PYANNOTE_API_KEY", "  ")
     assert get_settings().pyannote_api_key is None
+
+
+def test_voiceprint_threshold_defaults_to_fifty(monkeypatch):
+    """實測（77 分鐘協商）：本人 89 分，不是本人 16~28 分；
+    門檻 0 時缺席者被硬配給一位只講 4 秒的人。"""
+    monkeypatch.setattr("app.config.load_dotenv", lambda *a, **k: None)
+    monkeypatch.delenv("VOICEPRINT_MATCH_THRESHOLD", raising=False)
+    assert get_settings().voiceprint_match_threshold == 50
+
+
+def test_voiceprint_threshold_env_var(monkeypatch):
+    monkeypatch.setenv("VOICEPRINT_MATCH_THRESHOLD", "70")
+    assert get_settings().voiceprint_match_threshold == 70

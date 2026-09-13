@@ -14,12 +14,20 @@ from typing import Callable
 
 from app.transcription import media
 from app.transcription.pyannote_client import PyannoteClient
-from app.transcription.speaker_align import relabel
+from app.transcription.speaker_align import (
+    code_map,
+    relabel,
+    speaker_prior_from_identify,
+    to_session_time,
+)
 
 logger = logging.getLogger(__name__)
 
 # 同時進行的分群工作上限。瓶頸在上傳頻寬與 pyannote 端，不在本機 CPU
 _MAX_PARALLEL_JOBS = 2
+
+# pyannote 建 voiceprint 的樣本上限；「用音檔」上傳的樣本可能是一整段錄音
+VOICEPRINT_MAX_SECONDS = 30
 
 
 class Diarizer:
@@ -27,14 +35,18 @@ class Diarizer:
         self,
         client: PyannoteClient,
         on_call: Callable[[], None] | None = None,
-        encode: Callable[[Path], Path] = media.encode_for_diarization,
+        encode: Callable[..., Path] = media.encode_for_diarization,
         duration: Callable[[Path], float | None] = media.audio_duration,
         submit: Callable[[Callable[[], dict]], Future] | None = None,
+        concat: Callable[..., list[float]] = media.concat_for_diarization,
+        voiceprint_threshold: float | None = 50,
     ):
         self.client = client
         self._on_call = on_call
         self._encode = encode
         self._duration = duration
+        self._concat = concat
+        self.voiceprint_threshold = voiceprint_threshold
         self._submit = submit or ThreadPoolExecutor(
             max_workers=_MAX_PARALLEL_JOBS, thread_name_prefix="diarize"
         ).submit
@@ -55,13 +67,73 @@ class Diarizer:
         logger.info("講者分離對齊：%s", stats)
         return text
 
+    def relabel_session(
+        self, transcript: str, pieces: list[dict], enrollments: list[dict]
+    ) -> tuple[str, dict[str, str]]:
+        """即時聆聽結束時整場重標，回傳 (重標後逐字稿, {講者代號: 姓名})。
+
+        pieces：[{"path": 錄音段, "skip": 開頭略過秒數, "start": 保留部分在整場的起點}]
+        enrollments：[{"name", "path"}] 會前錄的聲音樣本；有的話建 voiceprint 並比對。
+
+        失敗直接丟出：由 LiveSessionManager 決定退回 Gemini 的代號與聲紋比對。
+        """
+        session_audio = Path(pieces[0]["path"]).parent / "diarize_session.ogg"
+        temporary = [session_audio]
+        try:
+            durations = self._concat(
+                [(p["path"], p["skip"]) for p in pieces], session_audio
+            )
+            placements, cursor = [], 0.0
+            for piece, length in zip(pieces, durations):
+                placements.append((cursor, cursor + length, float(piece["start"])))
+                cursor += length
+
+            voiceprints: dict[str, str] = {}
+            for person in enrollments:
+                # 一個人建不起來（樣本太短、錄壞）只少那一個名字，其他人照做
+                try:
+                    sample = self._encode(person["path"], max_seconds=VOICEPRINT_MAX_SECONDS)
+                    temporary.append(sample)
+                    self._report()
+                    voiceprints[person["name"]] = self.client.voiceprint(sample)
+                except Exception as exc:
+                    logger.warning("「%s」的 voiceprint 建立失敗，這個人維持代號：%s", person["name"], exc)
+
+            self._report()
+            if voiceprints:
+                output = self.client.identify(
+                    session_audio, voiceprints, self.voiceprint_threshold
+                )
+            else:
+                output = self.client.diarize(session_audio)
+        finally:
+            for path in temporary:
+                Path(path).unlink(missing_ok=True)
+
+        raw = output.get("exclusiveDiarization") or output.get("diarization") or []
+        segments = to_session_time(raw, placements)
+        if not segments:
+            return transcript, {}
+        duration = max(start + (end - begin) for begin, end, start in placements)
+        text, stats = relabel(transcript, segments, duration)
+        logger.info("即時聆聽講者分離對齊：%s", stats)
+        # 只有真的比對過聲紋才有姓名；純分群的結果不該被當成誰的名字
+        prior = (
+            speaker_prior_from_identify(output.get("voiceprints") or [], code_map(segments))
+            if voiceprints else {}
+        )
+        return text, prior
+
+    def _report(self) -> None:
+        if self._on_call:
+            self._on_call()
+
     def _run(self, audio_path: Path) -> tuple[list[dict], float | None]:
         # 音檔長度用原檔量：丟掉「時間戳超出音檔長度」的幻覺行靠的就是它
         duration = self._duration(audio_path)
         encoded = self._encode(audio_path)
         try:
-            if self._on_call:
-                self._on_call()
+            self._report()
             output = self.client.diarize(encoded)
         finally:
             Path(encoded).unlink(missing_ok=True)
@@ -81,4 +153,6 @@ def build_diarizer(settings, on_call: Callable[[], None] | None = None) -> Diari
         model=settings.pyannote_model,
         timeout_seconds=settings.diarize_timeout_seconds,
     )
-    return Diarizer(client, on_call=on_call)
+    return Diarizer(
+        client, on_call=on_call, voiceprint_threshold=settings.voiceprint_match_threshold
+    )

@@ -6,6 +6,8 @@
 from concurrent.futures import Future
 from pathlib import Path
 
+import pytest
+
 from app.config import Settings
 from app.transcription.diarizer import Diarizer, build_diarizer
 from app.transcription.pyannote_client import PyannoteError
@@ -31,6 +33,9 @@ class FakeClient:
         }
         self.error = error
         self.diarized: list[Path] = []
+        self.voiceprinted: list[Path] = []
+        self.identified: list[tuple] = []
+        self.voiceprint_errors: dict[str, Exception] = {}
 
     def diarize(self, path):
         self.diarized.append(Path(path))
@@ -38,10 +43,26 @@ class FakeClient:
             raise self.error
         return self.output
 
+    def voiceprint(self, path):
+        self.voiceprinted.append(Path(path))
+        for marker, error in self.voiceprint_errors.items():
+            if marker in Path(path).name:
+                raise error
+        return f"vp-of-{Path(path).stem}"
 
-def fake_encode(tmp_path):
-    def encode(src):
-        out = tmp_path / "encoded.ogg"
+    def identify(self, path, voiceprints, threshold=None):
+        self.identified.append((Path(path), dict(voiceprints), threshold))
+        if self.error:
+            raise self.error
+        return self.output
+
+
+def fake_encode(tmp_path, calls=None):
+    def encode(src, max_seconds=None):
+        if calls is not None:
+            calls.append((Path(src), max_seconds))
+        name = "encoded.ogg" if max_seconds is None else f"{Path(src).stem}_vp.ogg"
+        out = tmp_path / name
         out.write_bytes(b"ogg")
         return out
     return encode
@@ -146,3 +167,141 @@ def test_build_diarizer_passes_model_and_timeout():
     ))
     assert diarizer.client.model == "community-1"
     assert diarizer.client.timeout_seconds == 120
+
+
+# ---- 即時聆聽：整場串接後重標 ----
+
+def fake_concat(durations, calls):
+    def concat(pieces, dest):
+        calls.append((list(pieces), Path(dest)))
+        Path(dest).write_bytes(b"ogg")
+        return durations
+    return concat
+
+
+def live_pieces(tmp_path):
+    # 第二段前端回報從 45 秒開始、與前一段重疊 3 秒 → 串接時略過開頭 3 秒，
+    # 保留下來的部分從整場 48 秒開始
+    return [
+        {"path": tmp_path / "chunk_000.webm", "skip": 0.0, "start": 0.0},
+        {"path": tmp_path / "chunk_001.webm", "skip": 3.0, "start": 48.0},
+    ]
+
+
+LIVE_TRANSCRIPT = "[0:10] 講者A：第一段\n[0:53] 講者A：第二段"
+# 串接檔時間：SPEAKER_01 在第一段 5~15 秒；SPEAKER_00 在串接檔 50~55 秒，
+# 落在第二段（串接檔 45 秒起）的第 5~10 秒＝整場 53~58 秒
+LIVE_OUTPUT = {
+    "exclusiveDiarization": [
+        {"speaker": "SPEAKER_01", "start": 5, "end": 15},
+        {"speaker": "SPEAKER_00", "start": 50, "end": 55},
+    ],
+    "voiceprints": [
+        {"speaker": "SPEAKER_00", "match": "王小明", "confidence": {"王小明": 89}},
+        {"speaker": "SPEAKER_01", "match": None, "confidence": {"王小明": 20}},
+    ],
+}
+
+
+def test_relabel_session_concats_chunks_skipping_overlap_then_diarizes(tmp_path):
+    concat_calls = []
+    client = FakeClient(output=LIVE_OUTPUT)
+    diarizer = make(tmp_path, client, concat=fake_concat([45.0, 42.0], concat_calls))
+
+    text, prior = diarizer.relabel_session(LIVE_TRANSCRIPT, live_pieces(tmp_path), [])
+
+    (pieces, dest), = concat_calls
+    assert pieces == [(tmp_path / "chunk_000.webm", 0.0), (tmp_path / "chunk_001.webm", 3.0)]
+    assert client.diarized == [dest]
+    # 沒有預錄樣本：不比對聲紋，也不建任何 voiceprint（按個計費）
+    assert client.identified == [] and client.voiceprinted == []
+    assert text == "[0:10] 講者A：第一段\n[0:53] 講者B：第二段"
+    assert prior == {}
+
+
+def test_relabel_session_with_enrollments_identifies_and_returns_names(tmp_path):
+    encode_calls = []
+    client = FakeClient(output=LIVE_OUTPUT)
+    diarizer = make(
+        tmp_path, client,
+        encode=fake_encode(tmp_path, encode_calls),
+        concat=fake_concat([45.0, 42.0], []),
+        voiceprint_threshold=50,
+    )
+    enrollments = [{"name": "王小明", "path": tmp_path / "enroll_00.webm"}]
+
+    text, prior = diarizer.relabel_session(LIVE_TRANSCRIPT, live_pieces(tmp_path), enrollments)
+
+    assert encode_calls == [(tmp_path / "enroll_00.webm", 30)]  # voiceprint 樣本上限 30 秒
+    assert client.voiceprinted == [tmp_path / "enroll_00_vp.ogg"]
+    (_, voiceprints, threshold), = client.identified
+    assert voiceprints == {"王小明": "vp-of-enroll_00_vp"}
+    assert threshold == 50
+    assert client.diarized == []
+    assert prior == {"講者B": "王小明"}
+    assert text.endswith("講者B：第二段")
+
+
+def test_relabel_session_skips_a_person_whose_voiceprint_fails(tmp_path):
+    client = FakeClient(output=LIVE_OUTPUT)
+    client.voiceprint_errors = {"enroll_01": PyannoteError("too short")}
+    diarizer = make(tmp_path, client, concat=fake_concat([45.0, 42.0], []))
+    enrollments = [
+        {"name": "王小明", "path": tmp_path / "enroll_00.webm"},
+        {"name": "李大華", "path": tmp_path / "enroll_01.webm"},
+    ]
+    diarizer.relabel_session(LIVE_TRANSCRIPT, live_pieces(tmp_path), enrollments)
+    (_, voiceprints, _), = client.identified
+    assert list(voiceprints) == ["王小明"]
+
+
+def test_relabel_session_falls_back_to_plain_diarize_when_no_voiceprint_survives(tmp_path):
+    client = FakeClient(output=LIVE_OUTPUT)
+    client.voiceprint_errors = {"enroll": PyannoteError("HTTP 402")}
+    diarizer = make(tmp_path, client, concat=fake_concat([45.0, 42.0], []))
+    _, prior = diarizer.relabel_session(
+        LIVE_TRANSCRIPT, live_pieces(tmp_path),
+        [{"name": "王小明", "path": tmp_path / "enroll_00.webm"}],
+    )
+    assert client.identified == [] and len(client.diarized) == 1
+    assert prior == {}
+
+
+def test_relabel_session_reports_every_pyannote_job(tmp_path):
+    calls = []
+    client = FakeClient(output=LIVE_OUTPUT)
+    diarizer = make(
+        tmp_path, client, on_call=lambda: calls.append(1),
+        concat=fake_concat([45.0, 42.0], []),
+    )
+    enrollments = [
+        {"name": "王小明", "path": tmp_path / "enroll_00.webm"},
+        {"name": "李大華", "path": tmp_path / "enroll_01.webm"},
+    ]
+    diarizer.relabel_session(LIVE_TRANSCRIPT, live_pieces(tmp_path), enrollments)
+    assert len(calls) == 3  # 兩個 voiceprint＋一次 identify
+
+
+def test_relabel_session_deletes_its_temporary_audio(tmp_path):
+    client = FakeClient(output=LIVE_OUTPUT)
+    diarizer = make(tmp_path, client, concat=fake_concat([45.0, 42.0], []))
+    diarizer.relabel_session(
+        LIVE_TRANSCRIPT, live_pieces(tmp_path),
+        [{"name": "王小明", "path": tmp_path / "enroll_00.webm"}],
+    )
+    assert list(tmp_path.rglob("*.ogg")) == []
+
+
+def test_relabel_session_raises_so_the_caller_can_fall_back(tmp_path):
+    client = FakeClient(error=PyannoteError("HTTP 402"))
+    diarizer = make(tmp_path, client, concat=fake_concat([45.0, 42.0], []))
+    with pytest.raises(PyannoteError):
+        diarizer.relabel_session(LIVE_TRANSCRIPT, live_pieces(tmp_path), [])
+    assert list(tmp_path.rglob("*.ogg")) == []
+
+
+def test_build_diarizer_passes_voiceprint_threshold():
+    diarizer = build_diarizer(Settings(
+        pyannote_api_key="k", transcribe_engine="gemini", voiceprint_match_threshold=65,
+    ))
+    assert diarizer.voiceprint_threshold == 65

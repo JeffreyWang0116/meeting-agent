@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 import inspect
+import logging
 import shutil
 import threading
 import time
@@ -39,6 +40,9 @@ from app.transcription.segments import (
     speaker_of,
     transcript_tail,
 )
+
+
+logger = logging.getLogger(__name__)
 
 
 class SessionNotFound(KeyError):
@@ -66,6 +70,12 @@ class LiveSession:
     voice_result: dict[str, str] = field(default_factory=dict)
     voice_attempts: int = 0  # 已完成幾次比對（提早比對只做一次）
     voice_matching: bool = False  # 背景比對進行中
+    # index → (前端回報的整場 offset, 與前一段重疊秒數)。pyannote 整場重標時
+    # 靠它把串接檔上的時間換回整場時間
+    timing: dict[int, tuple[float | None, float]] = field(default_factory=dict)
+    # pyannote 重標後的逐字稿。有值就代表代號已換成 pyannote 那套：finish() 回傳它、
+    # 「重試分析」沿用它，不再重打 API（音檔在 finish 後就刪了）
+    diarized_transcript: str | None = None
 
 
 class LiveSessionManager:
@@ -91,6 +101,7 @@ class LiveSessionManager:
         now: Callable[[], float] = time.monotonic,
         voice_matcher=None,
         spawn: Callable[[Callable[[], None]], None] | None = None,
+        diarizer=None,
     ):
         self._transcriber = transcriber
         self._translator = translator
@@ -104,6 +115,9 @@ class LiveSessionManager:
         self._spawn = spawn or (
             lambda fn: threading.Thread(target=fn, daemon=True).start()
         )
+        # pyannote 講者分離（選用，見 app/transcription/diarizer.py）。None＝結束時
+        # 不重標，講者與姓名照舊由 Gemini 轉錄與 voice_matcher 決定
+        self._diarizer = diarizer
         self._sessions: dict[str, LiveSession] = {}
         self._lock = threading.Lock()
 
@@ -177,6 +191,7 @@ class LiveSessionManager:
         with self._lock:
             # 聲紋比對要回頭取這段音檔，副檔名依上傳而異，記下來才找得到
             session.chunk_paths[index] = chunk_path
+            session.timing[index] = (offset_seconds, float(overlap_seconds or 0.0))
 
         text = self._transcribe(chunk_path, hint, session.user).strip()
         if text:
@@ -336,6 +351,10 @@ class LiveSessionManager:
         """
         session = self._get(session_id, user)
         with self._lock:
+            # pyannote 重標過：代號已經換了一套，Gemini 比對的代號對不上新逐字稿，
+            # 背景比對也不能再把它們寫回來
+            if session.diarized_transcript is not None:
+                return dict(session.voice_result)
             cached = dict(session.voice_result)
             enrollments = list(session.enrollments)
             if not enrollments or not self._voice_matcher:
@@ -356,9 +375,59 @@ class LiveSessionManager:
             fresh = {}
         merged = _merge_mappings(cached, fresh)
         with self._lock:
+            if session.diarized_transcript is not None:  # 比對期間 pyannote 已經重標完
+                return dict(session.voice_result)
             session.voice_result = merged
             session.voice_attempts += 1
         return merged
+
+    def diarize_session(
+        self, session_id: str, user: str = DEFAULT_USER
+    ) -> dict[str, str] | None:
+        """用 pyannote 把整場重標，回傳 {講者代號: 姓名}；做不到或失敗回 None。
+
+        None 代表「照舊」：呼叫端改走 voice_mapping（Gemini 比對），finish() 回傳
+        Gemini 標註的逐字稿。**務必在 finish() 之前呼叫**——要聽得到錄音段與樣本。
+
+        聆聽中的提早比對（Gemini）不受影響，照舊當場回報；這裡只在結束時做一次。
+        """
+        session = self._get(session_id, user)
+        if not self._diarizer:
+            return None
+        with self._lock:
+            if session.diarized_transcript is not None:  # 重試分析：沿用上次結果
+                return dict(session.voice_result)
+            transcript = _join(session.parts)
+            timing = dict(session.timing)
+            paths = dict(session.chunk_paths)
+            enrollments = list(session.enrollments)
+        if not transcript.strip():
+            return None
+        pieces = []
+        for index in sorted(paths):
+            offset, overlap = timing.get(index, (None, 0.0))
+            # 沒 offset＝舊版前端，逐字稿的時間戳已經被剝掉，分群結果對不回任何一行
+            if offset is None:
+                return None
+            if not paths[index].exists():
+                continue  # 上傳失敗沒落地的段：少一段聲音，其餘時間照樣對得上
+            pieces.append({
+                "path": paths[index],
+                "skip": overlap,  # 重疊的那幾秒前一段已經有了
+                "start": float(offset) + overlap,
+            })
+        if not pieces:
+            return None
+        enrollments = [e for e in enrollments if Path(e["path"]).exists()]
+        try:
+            text, prior = self._diarizer.relabel_session(transcript, pieces, enrollments)
+        except Exception as exc:
+            logger.warning("即時聆聽講者分離失敗，沿用 Gemini 的代號與比對：%s", exc)
+            return None
+        with self._lock:
+            session.diarized_transcript = text
+            session.voice_result = dict(prior)
+        return dict(prior)
 
     def finish(self, session_id: str, user: str = DEFAULT_USER) -> str:
         session = self._get(session_id, user)
@@ -367,7 +436,11 @@ class LiveSessionManager:
             # 不立刻移除：剛結束時遲到的音訊段要拿到「已結束」的明確訊息，
             # 而不是查無此 session。這筆殘留由 TTL 回收
             session.last_active = self._now()
-            transcript = _join(session.parts)
+            transcript = (
+                session.diarized_transcript
+                if session.diarized_transcript is not None
+                else _join(session.parts)
+            )
         # 錄音段與聲音樣本都不再需要，刪掉整個 session 目錄釋放磁碟（雲端暫時性
         # 磁碟很小）。聲紋是生物特徵資料，不落地保存也省掉一整類隱私問題
         shutil.rmtree(session.dir, ignore_errors=True)

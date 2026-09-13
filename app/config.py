@@ -102,6 +102,9 @@ class Settings:
     # 單一分群工作最多等幾秒。PoC 77 分鐘檔處理 44 秒，900 秒是很寬的上限——
     # 等不到就退回 Gemini 代號，不讓使用者的轉錄卡在第三方服務上
     diarize_timeout_seconds: int = 900
+    # 預錄聲音辨識人的聲紋比對門檻（0~100）。實測（77 分鐘協商）：本人 89 分、
+    # 不是本人 16~28 分；API 預設 0 會把缺席者硬配給某位只講 4 秒的人
+    voiceprint_match_threshold: float = 50
     data_dir: Path = field(default_factory=lambda: BASE_DIR / "data")
     # Firebase 金鑰：任一有值就用 Firestore 雲端儲存，否則用本地 JSON
     firebase_credentials_json: str | None = None  # service account JSON 字串（Render 用）
@@ -186,6 +189,9 @@ def get_settings() -> Settings:
         pyannote_api_key=os.environ.get("PYANNOTE_API_KEY", "").strip() or None,
         pyannote_model=os.environ.get("PYANNOTE_MODEL", "precision-2"),
         diarize_timeout_seconds=int(os.environ.get("DIARIZE_TIMEOUT_SECONDS", "900")),
+        voiceprint_match_threshold=float(
+            os.environ.get("VOICEPRINT_MATCH_THRESHOLD", "50")
+        ),
         data_dir=_under_base(os.environ.get("DATA_DIR")) or BASE_DIR / "data",
         firebase_credentials_json=os.environ.get("FIREBASE_CREDENTIALS_JSON") or None,
         firebase_credentials_file=(

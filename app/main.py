@@ -437,6 +437,10 @@ def create_app(
         on_call=record_call,
         model=settings.transcribe_model,
     )
+    # pyannote 講者分離（選用）：沒設 PYANNOTE_API_KEY 就是 None，講者照舊由轉錄模型標
+    diarizer = diarizer or build_diarizer(
+        settings, on_call=lambda: usage.record("diarize")
+    )
     if live_manager is None:
         # 預錄聲音辨識人（選用）：沒設定人數上限就整個不建，等同功能不存在
         voice_matcher = (
@@ -456,12 +460,9 @@ def create_app(
             settings.data_dir / "tmp" / "live",
             translator=translator,
             voice_matcher=voice_matcher,
+            diarizer=diarizer,
         )
         live_manager.MAX_ENROLLMENTS = settings.live_enroll_max_speakers
-    # pyannote 講者分離（選用）：沒設 PYANNOTE_API_KEY 就是 None，講者照舊由轉錄模型標
-    diarizer = diarizer or build_diarizer(
-        settings, on_call=lambda: usage.record("diarize")
-    )
     job_manager = job_manager or MediaJobManager(
         transcriber, orchestrator, settings.data_dir / "tmp", diarizer=diarizer
     )
@@ -1196,7 +1197,11 @@ def create_app(
             # 樣本與會議音檔都在裡面，之後就沒有聲音可比了。
             # 沒註冊樣本時這行回 {} 且不打任何 API。
             # 重試分析會再走一次這裡，那時音檔已經沒了，靠 session 裡的快取回答
-            speaker_prior = live_manager.voice_mapping(session_id, user=current_user())
+            # 有 pyannote：整場重標並用 voiceprint 比對姓名，finish() 會回傳重標後的
+            # 逐字稿；做不到或失敗回 None，照舊走 Gemini 的聲紋比對
+            speaker_prior = live_manager.diarize_session(session_id, user=current_user())
+            if speaker_prior is None:
+                speaker_prior = live_manager.voice_mapping(session_id, user=current_user())
             enrolled = live_manager.enrolled_names(session_id, user=current_user())
             transcript = live_manager.finish(session_id, user=current_user())
         except SessionNotFound as exc:

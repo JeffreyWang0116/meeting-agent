@@ -626,3 +626,148 @@ def test_first_chunk_is_told_to_label_even_a_single_speaker(tmp_path):
     sid = mgr.start()
     mgr.add_chunk(sid, b"a", offset_seconds=0)
     assert tr.hints[0] and "標註講者" in tr.hints[0]
+
+
+# ---- pyannote 講者分離：結束時整場重標 ----
+
+class FakeLiveDiarizer:
+    def __init__(self, text="[0:00] 講者B：pyannote 重標", prior=None, error=None):
+        self.calls = []
+        self.text = text
+        self.prior = prior if prior is not None else {}
+        self.error = error
+
+    def relabel_session(self, transcript, pieces, enrollments):
+        self.calls.append((transcript, pieces, enrollments))
+        if self.error:
+            raise self.error
+        return self.text, dict(self.prior)
+
+
+def _diarized_mgr(tmp_path, texts, diarizer, matcher=None):
+    return LiveSessionManager(
+        FakeTranscriber(texts), tmp_path, diarizer=diarizer, voice_matcher=matcher,
+        spawn=lambda fn: fn(),
+    )
+
+
+def test_diarize_session_without_diarizer_returns_none(tmp_path):
+    mgr = LiveSessionManager(FakeTranscriber(["[0:01] 講者A：嗨"]), tmp_path)
+    sid = mgr.start()
+    mgr.add_chunk(sid, b"a", offset_seconds=0)
+    assert mgr.diarize_session(sid) is None
+
+
+def test_diarize_session_passes_chunks_with_overlap_and_session_start(tmp_path):
+    diarizer = FakeLiveDiarizer()
+    mgr = _diarized_mgr(tmp_path, ["[0:01] 講者A：一", "[0:05] 講者A：二"], diarizer)
+    sid = mgr.start()
+    mgr.add_chunk(sid, b"a", suffix=".webm", offset_seconds=0)
+    mgr.add_chunk(sid, b"b", suffix=".webm", offset_seconds=45, overlap_seconds=3)
+
+    mgr.diarize_session(sid)
+
+    (transcript, pieces, enrollments), = diarizer.calls
+    assert transcript == "[0:01] 講者A：一\n[0:50] 講者A：二"
+    assert pieces == [
+        {"path": tmp_path / sid / "chunk_000.webm", "skip": 0.0, "start": 0.0},
+        {"path": tmp_path / sid / "chunk_001.webm", "skip": 3.0, "start": 48.0},
+    ]
+    assert enrollments == []
+
+
+def test_diarize_session_passes_enrollments(tmp_path):
+    diarizer = FakeLiveDiarizer()
+    mgr = _diarized_mgr(tmp_path, ["[0:01] 講者A：一"], diarizer)
+    sid = mgr.start()
+    mgr.enroll(sid, "王小明", b"voice")
+    mgr.add_chunk(sid, b"a", offset_seconds=0)
+    mgr.diarize_session(sid)
+    (_, _, enrollments), = diarizer.calls
+    assert [e["name"] for e in enrollments] == ["王小明"]
+
+
+def test_finish_returns_the_relabelled_transcript_and_prior_is_cached(tmp_path):
+    diarizer = FakeLiveDiarizer(prior={"講者B": "王小明"})
+    mgr = _diarized_mgr(tmp_path, ["[0:01] 講者A：一"], diarizer)
+    sid = mgr.start()
+    mgr.add_chunk(sid, b"a", offset_seconds=0)
+
+    assert mgr.diarize_session(sid) == {"講者B": "王小明"}
+    assert mgr.finish(sid) == "[0:00] 講者B：pyannote 重標"
+    # 「重試分析」：音檔已經刪了，不能重打 API，姓名與重標結果都要還在
+    assert mgr.diarize_session(sid) == {"講者B": "王小明"}
+    assert mgr.finish(sid) == "[0:00] 講者B：pyannote 重標"
+    assert len(diarizer.calls) == 1
+
+
+def test_diarized_names_replace_the_gemini_voice_cache(tmp_path):
+    """pyannote 重編過代號，Gemini 提早比對快取裡的「講者A」已經對不上新逐字稿。"""
+    diarizer = FakeLiveDiarizer(prior={"講者B": "王小明"})
+    matcher = FakeMatcher({"講者A": "李大華"})
+    mgr = _diarized_mgr(tmp_path, ["[0:01] 講者A：一", "[0:50] 講者A：二"], diarizer, matcher)
+    sid = mgr.start()
+    mgr.enroll(sid, "王小明", b"v1")
+    mgr.enroll(sid, "李大華", b"v2")
+    mgr.add_chunk(sid, b"a", offset_seconds=0)
+    mgr.add_chunk(sid, b"b", offset_seconds=45)  # 第 2 段觸發 Gemini 提早比對（照舊）
+    assert matcher.calls  # 提早比對這個既有功能沒有被動到
+
+    mgr.diarize_session(sid)
+    mgr.finish(sid)
+    assert mgr.voice_mapping(sid) == {"講者B": "王小明"}
+
+
+def test_diarize_session_gives_up_without_offsets(tmp_path):
+    # 舊版前端沒帶 offset：逐字稿的時間戳已經被剝掉，分群結果對不回任何一行
+    diarizer = FakeLiveDiarizer()
+    mgr = _diarized_mgr(tmp_path, ["講者A：一"], diarizer)
+    sid = mgr.start()
+    mgr.add_chunk(sid, b"a")
+    assert mgr.diarize_session(sid) is None
+    assert diarizer.calls == []
+
+
+def test_diarize_session_failure_falls_back_to_gemini_transcript(tmp_path):
+    diarizer = FakeLiveDiarizer(error=RuntimeError("pyannote down"))
+    mgr = _diarized_mgr(tmp_path, ["[0:01] 講者A：一"], diarizer)
+    sid = mgr.start()
+    mgr.add_chunk(sid, b"a", offset_seconds=0)
+    assert mgr.diarize_session(sid) is None
+    assert mgr.finish(sid) == "[0:01] 講者A：一"
+
+
+def test_diarize_session_skips_chunks_missing_on_disk(tmp_path):
+    diarizer = FakeLiveDiarizer()
+    mgr = _diarized_mgr(tmp_path, ["[0:01] 講者A：一", "[0:05] 講者A：二"], diarizer)
+    sid = mgr.start()
+    mgr.add_chunk(sid, b"a", offset_seconds=0)
+    mgr.add_chunk(sid, b"b", offset_seconds=45)
+    (tmp_path / sid / "chunk_000.webm").unlink()
+    mgr.diarize_session(sid)
+    (_, pieces, _), = diarizer.calls
+    assert [p["path"].name for p in pieces] == ["chunk_001.webm"]
+
+
+def test_diarize_session_without_any_speech_returns_none(tmp_path):
+    diarizer = FakeLiveDiarizer()
+    mgr = _diarized_mgr(tmp_path, [""], diarizer)
+    sid = mgr.start()
+    mgr.add_chunk(sid, b"a", offset_seconds=0)
+    assert mgr.diarize_session(sid) is None
+    assert diarizer.calls == []
+
+
+def test_voice_mapping_after_diarization_does_not_mix_in_gemini_labels(tmp_path):
+    """重標之後代號已換成 pyannote 那套；背景的 Gemini 比對再寫回舊代號，
+    姓名就會掛到錯的人身上。"""
+    diarizer = FakeLiveDiarizer(prior={"講者B": "王小明"})
+    matcher = FakeMatcher({"講者A": "李大華"})
+    mgr = _diarized_mgr(tmp_path, ["[0:01] 講者A：一"], diarizer, matcher)
+    sid = mgr.start()
+    mgr.enroll(sid, "王小明", b"v1")
+    mgr.add_chunk(sid, b"a", offset_seconds=0)
+
+    mgr.diarize_session(sid)
+    assert mgr.voice_mapping(sid) == {"講者B": "王小明"}  # 音檔還在，也不再用 Gemini 比
+    assert matcher.calls == []

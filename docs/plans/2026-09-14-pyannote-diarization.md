@@ -129,12 +129,18 @@
 > - 預錄比對現在**第 2 段就先在背景比一次**（Gemini `VoiceMatcher`）並快取在 `session.voice_result`、
 >   finish 時再比一次合併 → 聆聽中的提早回饋照舊走它；pyannote identify 只在 finish 做，
 >   結果**覆蓋**快取中同代號的姓名（代號已被 pyannote 重編，舊快取的代號對不上新逐字稿），並寫回 `voice_result` 讓「重試分析」沿用
-- [ ] 4.1 `LiveSession` 記錄每段 offset 與 overlap
-- [ ] 4.2 `tests/test_live_session.py`：`relabel_with_diarizer()` 串接→(voiceprint→identify | diarize)→重標→回 speaker_prior
-- [ ] 4.3 voiceprint 任一失敗 → 該人略過，其餘照做；全部失敗 → 純 diarize
-- [ ] 4.4 結果快取在 session：「重試分析」時不重打 API（session 目錄在 finish 後已刪）
-- [ ] 4.5 `main.py` `live_finish`：有 diarizer 走新路徑，否則走既有 `voice_mapping`
-- 檔案：`app/transcription/live_session.py`、`app/main.py`
+- [x] 4.1 `LiveSession.timing` 記錄每段 (offset, overlap)；`diarized_transcript` 快取重標結果
+- [x] 4.2 `LiveSessionManager.diarize_session()`：組 pieces（略過重疊、起點＝offset＋overlap）→ `Diarizer.relabel_session()`
+  （`media.concat_for_diarization` 串接→有樣本 voiceprint＋identify／無樣本 diarize→`to_session_time`→`relabel`）
+- [x] 4.3 某人 voiceprint 失敗只略過那人；全部失敗退回純 diarize；純 diarize 不產生姓名
+- [x] 4.4 快取：「重試分析」沿用重標逐字稿與姓名、不重打 API；重標後 Gemini 背景比對不得再寫回舊代號
+- [x] 4.5 `live_finish`：先 `diarize_session`，回 None 才走既有 `voice_mapping`；`finish()` 回傳重標版
+- [x] 聲紋門檻 `VOICEPRINT_MATCH_THRESHOLD=50`（實測：本人 89、非本人 16~28；門檻 0 時缺席者被誤配）
+- [x] 沒有 offset（舊前端）、沒有語音、錄音段都不在 → 回 None 照舊
+- 測試：diarizer 8＋live_session 10＋media 5＋client 1＋config 2＋API 接線 1，全套 793 綠
+- **真 API 端到端**：3 分鐘片段切 4 段 45s webm（重疊 3s）＋預錄王委員 → Gemini 逐段轉錄大多沒標講者，
+  pyannote 整場重標 **43/43 行命中**、**認出講者D＝王委員（內容確為民眾黨發言，正確）**，25 秒、2 個 pyannote 工作
+- 試用 voiceprint 已用 3/10
 
 ### Phase 5 — 清理與設定
 - [ ] 5.1 Gemini 端：有 diarizer 時 `label_retries=0`、`max_retry_calls=0`（講者交給 pyannote，不再為標註率燒額度）

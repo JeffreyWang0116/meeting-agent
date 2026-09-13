@@ -1178,3 +1178,58 @@ def test_media_upload_uses_injected_diarizer(tmp_path):
     job = wait_for_job(client, resp.json()["job_id"])
     assert job["status"] == "done"
     assert "pyannote 重標過" in job["transcript"]
+
+
+def _app_with_diarizer(tmp_path, diarizer):
+    settings = Settings(gemini_api_key=None, data_dir=tmp_path)
+    store = LocalJsonStore(tmp_path / "db.json")
+    orchestrator = Orchestrator(
+        parser=ParserAgent(),
+        decision=DecisionAgent(generate=lambda prompt: valid_json()),
+        executor=ExecutorAgent(store),
+        notifier=NotifierAgent(tmp_path / "notifications"),
+    )
+    app = create_app(
+        settings, store=store, orchestrator=orchestrator,
+        transcriber=FakeTranscriber(), diarizer=diarizer,
+    )
+    return TestClient(app)
+
+
+class SessionDiarizer:
+    def __init__(self):
+        self.calls = []
+
+    def start(self, path):
+        return None
+
+    def apply(self, future, transcript):
+        return transcript
+
+    def relabel_session(self, transcript, pieces, enrollments):
+        self.calls.append((transcript, pieces, enrollments))
+        return "[0:00] 講者B：pyannote 整場重標", {"講者B": "王小明"}
+
+
+def test_live_finish_uses_diarizer_for_transcript_and_names(tmp_path):
+    """釘住即時聆聽的接線：LiveSessionManager 要拿到 diarizer，live_finish 要用它的結果。"""
+    diarizer = SessionDiarizer()
+    client = _app_with_diarizer(tmp_path, diarizer)
+    sid = client.post("/api/live/start").json()["session_id"]
+    client.post(
+        f"/api/live/{sid}/enroll",
+        files={"file": ("enroll.webm", io.BytesIO(b"voice"), "audio/webm")},
+        data={"name": "王小明"},
+    )
+    client.post(
+        f"/api/live/{sid}/chunk",
+        files={"file": ("chunk.webm", io.BytesIO(b"audio"), "audio/webm")},
+        data={"offset": "0"},
+    )
+
+    body = client.post(f"/api/live/{sid}/finish").json()
+
+    assert len(diarizer.calls) == 1
+    assert "pyannote 整場重標" in body["transcript"]
+    assert body["speakers_matched"] == {"講者B": "王小明"}
+    assert body["speakers_unmatched"] == []
