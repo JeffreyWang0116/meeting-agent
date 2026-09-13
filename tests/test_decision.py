@@ -328,6 +328,18 @@ def test_section_labels_never_shadow_the_generic_blocks():
             ), f"「{kind}」的區塊「{label}」和通用欄位重疊"
 
 
+def test_interview_follow_ups_are_real_todos():
+    """面試後的跟進（寄作業、安排二面、回覆結果）是真待辦，要進任務庫。
+
+    原本用「關掉 todos」來避免把對人的判斷寫成任務，代價是連正當的跟進
+    事項也一起消失。該擋的是評價，那由 KIND_HINTS 明文禁止，不是靠拔掉欄位。
+    """
+    from app.agents.decision_agent import default_features_for_kind
+
+    assert "todos" in default_features_for_kind("面試")
+    assert "decisions" not in default_features_for_kind("面試")
+
+
 def test_section_labels_stay_short_enough_for_a_heading():
     """label 直接當卡片標題與 Markdown 的 ## 標題渲染，長句會撐破版面。"""
     from app.agents.decision_agent import KIND_SECTIONS

@@ -80,14 +80,14 @@ def test_no_kind_defaults_to_all_features_backward_compat(client):
 
 def test_kind_default_features_drop_the_blocks_that_type_never_has(client):
     """每種會議種類都會產出有意義的區塊，只挑掉那個種類本來就不會有的。
-    面試：有摘要與重點，但不該產出決議與代辦（避免把對人的判斷寫成任務）。"""
+    面試：有摘要、重點與跟進代辦，但不該產出決議（面試當場不拍板）。"""
     resp = client.post("/api/meetings", json={"text": "面試內容", "kind": "面試"})
     a = resp.json()["analysis"]
     assert a["meeting"]["summary"]
     assert a["decisions"] == []
-    assert a["todos"] == []
-    # 最重要的：任務庫真的沒被寫入任務，不只是畫面不顯示
-    assert client.get("/api/tasks").json()["tasks"] == []
+    assert a["todos"]
+    # 跟進事項要真的進任務庫，不只是畫面上看得到
+    assert len(client.get("/api/tasks").json()["tasks"]) == 1
 
 
 def test_legacy_kind_value_still_accepted(client):
@@ -136,8 +136,8 @@ def test_media_upload_respects_features(client):
     job = wait_for_job(client, resp.json()["job_id"])
     a = job["result"]["analysis"]
     assert a["meeting"]["summary"]
-    assert a["todos"] == []
-    assert client.get("/api/tasks").json()["tasks"] == []
+    assert a["decisions"] == []
+    assert len(client.get("/api/tasks").json()["tasks"]) == 1
 
 
 def test_media_upload_explicit_features_comma_separated(client):
@@ -174,17 +174,18 @@ def test_live_finish_respects_features(client):
 # ---- 重新分析：/api/meetings/{id}/reanalyze ----
 
 def test_reanalyze_defaults_features_from_stored_kind(client):
+    """重新分析沒帶 features 時，要回頭讀那場會議存下來的種類。"""
     meeting_id = client.post(
         "/api/meetings", json={"text": "面試內容", "kind": "面試"}
     ).json()["meeting_id"]
-    assert client.get("/api/tasks").json()["tasks"] == []
 
     resp = client.post(f"/api/meetings/{meeting_id}/reanalyze")
     assert resp.status_code == 200
     a = resp.json()["analysis"]
     assert a["meeting"]["summary"]
-    assert a["todos"] == []
-    assert client.get("/api/tasks").json()["tasks"] == []
+    assert a["decisions"] == []       # 面試預設不產決議——種類確實被沿用了
+    # 任務是整批換掉而不是疊上去，所以重跑完還是一筆
+    assert len(client.get("/api/tasks").json()["tasks"]) == 1
 
 
 # ---- 會議重點（highlights）----

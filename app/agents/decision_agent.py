@@ -109,13 +109,13 @@ LEGACY_KINDS = {
 MEETING_KINDS = set(KIND_HINTS)
 
 # 各種類預設產生哪些區塊；沒列到的＝四項全開。
-# 挑掉的是那個種類「本來就不會有」的東西（站會沒有正式決議、面試不該有代辦決議），
-# 使用者仍可自己勾回來。
+# 挑掉的是那個種類「本來就不會有」的東西——對外的場合不會當場拍板決議，
+# 單人備忘錄沒有「關鍵時刻」可挑。使用者仍可自己勾回來。
 KIND_DEFAULT_FEATURES = {
     "需求訪談": {"summary", "highlights", "todos"},
     "一對一": {"summary", "highlights", "todos"},
     "銷售拜訪": {"summary", "highlights", "todos"},
-    "面試": {"summary", "highlights"},
+    "面試": {"summary", "highlights", "todos"},
     "語音備忘錄": {"summary", "todos"},
     "其它": {"summary", "highlights", "todos"},
 }
