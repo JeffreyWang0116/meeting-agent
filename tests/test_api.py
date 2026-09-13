@@ -1233,3 +1233,48 @@ def test_live_finish_uses_diarizer_for_transcript_and_names(tmp_path):
     assert "pyannote 整場重標" in body["transcript"]
     assert body["speakers_matched"] == {"講者B": "王小明"}
     assert body["speakers_unmatched"] == []
+
+
+class RecordingGeminiTranscriber:
+    """取代 create_app 裡建的 GeminiTranscriber，只記下收到的參數。"""
+
+    instances: list = []
+
+    def __init__(self, **kwargs):
+        self.kwargs = kwargs
+        self.device = "gemini"
+        self.model_size = kwargs.get("model")
+        RecordingGeminiTranscriber.instances.append(self)
+
+
+def _gemini_settings(tmp_path, **overrides):
+    return Settings(
+        gemini_api_key="k", transcribe_engine="gemini", data_dir=tmp_path,
+        voice_relay_max_speakers=20, **overrides,
+    )
+
+
+def test_voice_relay_is_skipped_when_pyannote_relabels_speakers(tmp_path, monkeypatch):
+    """有 pyannote 時接力標出的代號最後會被整份重標蓋掉，卻要多花數百次上傳往返。"""
+    RecordingGeminiTranscriber.instances.clear()
+    monkeypatch.setattr("app.main.GeminiTranscriber", RecordingGeminiTranscriber)
+    create_app(_gemini_settings(tmp_path, pyannote_api_key="pk"))
+    (transcriber,) = RecordingGeminiTranscriber.instances
+    assert transcriber.kwargs["voice_relay_max_speakers"] == 0
+
+
+def test_voice_relay_unchanged_without_pyannote(tmp_path, monkeypatch):
+    RecordingGeminiTranscriber.instances.clear()
+    monkeypatch.setattr("app.main.GeminiTranscriber", RecordingGeminiTranscriber)
+    create_app(_gemini_settings(tmp_path, pyannote_api_key=None))
+    (transcriber,) = RecordingGeminiTranscriber.instances
+    assert transcriber.kwargs["voice_relay_max_speakers"] == 20
+
+
+def test_health_reports_whether_pyannote_is_active(tmp_path, monkeypatch):
+    """部署後從外部確認金鑰有沒有生效：填了卻沒啟用（例如引擎不是 gemini）要看得出來。"""
+    monkeypatch.setattr("app.main.GeminiTranscriber", RecordingGeminiTranscriber)
+    on = TestClient(create_app(_gemini_settings(tmp_path, pyannote_api_key="pk")))
+    assert on.get("/api/health").json()["speaker_diarization"] == "pyannote"
+    off = TestClient(create_app(_gemini_settings(tmp_path / "off", pyannote_api_key=None)))
+    assert off.get("/api/health").json()["speaker_diarization"] is None

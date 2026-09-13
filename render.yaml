@@ -30,6 +30,11 @@ services:
       # 留空則用本地 JSON（重啟會清空）
       - key: FIREBASE_CREDENTIALS_JSON
         sync: false
+      # 選填：專門的講者分離（pyannoteAI）。填了就用聲學模型重標講者、預錄樣本改用
+      # voiceprint 比對；留空則照舊由 Gemini 標講者。部署後打開 /api/health，
+      # speaker_diarization 是 "pyannote" 就是生效了
+      - key: PYANNOTE_API_KEY
+        sync: false
       # 共用鑰匙。generateValue＝Render 自己產一串隨機值，所以新部署一開始
       # 就是鎖上的：忘記填 ≠ 全世界都能讀寫刪除你的會議資料。
       # 要登入時到 Render 後台 Environment 分頁把值複製出來（首次開啟網站

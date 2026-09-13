@@ -398,6 +398,10 @@ def create_app(
             # 姓名進詞彙表只剩一條路：設定 → 自訂詞彙 → 手動新增。
         ),
     )
+    # pyannote 講者分離（選用）：沒設 PYANNOTE_API_KEY 就是 None，講者照舊由轉錄模型標
+    diarizer = diarizer or build_diarizer(
+        settings, on_call=lambda: usage.record("diarize")
+    )
     if transcriber is None:
         if settings.transcribe_engine == "gemini":
             # 雲端無 GPU：用 Gemini 直接聽音訊轉錄
@@ -422,7 +426,11 @@ def create_app(
                 # 不經過接力。代價是每段都要重傳全部樣本（重試也會重傳），一支
                 # 77 分鐘的檔約多 240~400 次上傳往返、多花數分鐘。要關掉設
                 # VOICE_RELAY_MAX_SPEAKERS=0。
-                voice_relay_max_speakers=settings.voice_relay_max_speakers,
+                # 有 pyannote 時跳過：講者會被整份重標，接力標出的代號最後都被蓋掉，
+                # 那幾百次上傳往返就白付了。沒金鑰時照原本的設定
+                voice_relay_max_speakers=(
+                    0 if diarizer else settings.voice_relay_max_speakers
+                ),
             )
         else:
             transcriber = Transcriber(
@@ -436,10 +444,6 @@ def create_app(
         api_keys=settings.gemini_api_keys,
         on_call=record_call,
         model=settings.transcribe_model,
-    )
-    # pyannote 講者分離（選用）：沒設 PYANNOTE_API_KEY 就是 None，講者照舊由轉錄模型標
-    diarizer = diarizer or build_diarizer(
-        settings, on_call=lambda: usage.record("diarize")
     )
     if live_manager is None:
         # 預錄聲音辨識人（選用）：沒設定人數上限就整個不建，等同功能不存在
@@ -664,6 +668,9 @@ def create_app(
             # 長音檔分段轉錄的每段秒數（0＝不分段）。放在 health 是為了能從
             # 外部確認部署版到底有沒有帶上這個功能
             "transcribe_chunk_seconds": settings.transcribe_chunk_seconds,
+            # 講者分離後端："pyannote"＝已啟用；None＝講者由轉錄模型標。部署後
+            # 從這裡確認金鑰有沒有生效（填了但引擎不是 gemini 也會是 None）
+            "speaker_diarization": "pyannote" if diarizer else None,
         }
 
     # ---- 輸入路徑 1：純文字 ----

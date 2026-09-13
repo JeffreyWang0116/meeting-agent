@@ -1,6 +1,6 @@
 # 講者辨識改用 pyannoteAI（混合式）實作計畫
 
-日期：2026-09-14　狀態：待批准
+日期：2026-09-14　狀態：Phase 0~5 完成（分支 `pyannote-diarization`）
 
 ## 決策紀錄
 
@@ -142,12 +142,13 @@
   pyannote 整場重標 **43/43 行命中**、**認出講者D＝王委員（內容確為民眾黨發言，正確）**，25 秒、2 個 pyannote 工作
 - 試用 voiceprint 已用 3/10
 
-### Phase 5 — 清理與設定
-- [ ] 5.1 Gemini 端：有 diarizer 時 `label_retries=0`、`max_retry_calls=0`（講者交給 pyannote，不再為標註率燒額度）
-- [ ] 5.2 ~~刪除聲紋跨段接力~~ 作廢（遠端已啟用，保留不動）。**使用者 2026-09-14 同意**：有 pyannote 金鑰時把 `voice_relay_max_speakers` 視為 0（接力結果反正會被重標覆蓋，卻多花 240~400 次上傳）；沒金鑰時行為完全不變
-- [ ] 5.3 `render.yaml` 加 `PYANNOTE_API_KEY`（sync: false，Render 後台手動填）；`VOICEPRINT_MATCH_THRESHOLD`（Phase 4 定）。（其餘設定已在 Phase 3 加）
-- [ ] 5.4 `.env.example`、README（引擎說明、費用、測試數）
-- [ ] 5.5 全套 `pytest` 綠、README 測試數對齊
+### Phase 5 — 清理與設定 ✅ 全套 796 綠
+- [ ] ~~5.1 有 diarizer 時 `label_retries=0`~~ **不做**：標註率低於 80% 除了「沒標講者」，也涵蓋「模型整段放棄轉內容、只吐時間戳」
+  （`speaker_label_ratio` 要求標籤與內容兼具）。關掉重試會連後者一起放掉，而那是 pyannote 補不回來的文字內容
+- [x] 5.2 有 pyannote 時 `voice_relay_max_speakers=0`（使用者 2026-09-14 同意）；沒金鑰照原設定。接線測試 2 支
+- [x] 5.3 `render.yaml` 加 `PYANNOTE_API_KEY`（sync: false）；`/api/health` 加 `speaker_diarization`（部署後確認金鑰生效）
+- [x] 5.4 `.env.example`、README（功能總覽、設定表 4 列、「專門的講者分離」一節含 PoC 數據／費用／隱私、Render 步驟、程式碼地圖、設計決策）
+- [x] 5.5 全套 `pytest` 796 綠、README 測試數 455→796
 
 ### 延後（本次不做）
 - voiceprint 依（使用者, 姓名）快取進講者名冊，重複與會者不再重複計費
