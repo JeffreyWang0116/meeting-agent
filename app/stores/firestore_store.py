@@ -40,11 +40,13 @@ class FirestoreStore(TaskStore):
         meetings: str = "meetings",
         tasks: str = "tasks",
         meta: str = "meta",
+        rag: str = "rag_records",
     ):
         self._db = db
         self._meetings = meetings
         self._tasks = tasks
         self._meta = meta
+        self._rag = rag
         self._lock = threading.Lock()
         self._backfill_lock = threading.Lock()  # 與 _lock 分開，才能在鎖內安全呼叫
         self._backfilled = False
@@ -300,6 +302,39 @@ class FirestoreStore(TaskStore):
         with self._lock:
             doc = scoped_write(self._meta_doc("glossary"), user, "terms", terms)
             self._db.collection(self._meta).document("glossary").set(doc)
+
+    # ---- 跨會議問答的向量索引（一筆記錄一個文件） ----
+    #
+    # 為什麼不塞進單一 meta 文件：Firestore 單一文件上限 1MB，而一筆記錄光
+    # 768 維向量就好幾 KB，幾十場會議就會撞上。文件 id 用「會議 id + 該場的
+    # 序號」，刪掉一場會議時才找得到要刪哪些。
+
+    def get_rag_records(self) -> dict:
+        records = []
+        for snap in self._db.collection(self._rag).stream():
+            data = snap.to_dict() or {}
+            data.pop("_i", None)
+            records.append(data)
+        return {"dim": self._meta_doc("rag").get("dim"), "records": records}
+
+    def save_rag_records(self, dim: int | None, records: list[dict]) -> None:
+        with self._lock:
+            col = self._db.collection(self._rag)
+            wanted, seen = {}, {}
+            for record in records:
+                meeting_id = record.get("meeting_id", "")
+                index = seen.get(meeting_id, 0)
+                seen[meeting_id] = index + 1
+                wanted[f"{meeting_id}_{index}"] = {**record, "_i": index}
+
+            existing = {snap.id for snap in col.stream()}
+            for doc_id in existing - set(wanted):
+                col.document(doc_id).delete()
+            # 全部重寫而不是只寫新的：會議編輯後會以同樣的 id 重新索引，
+            # 只憑 id 存在就跳過的話，留下的會是編輯前的舊向量
+            for doc_id, data in wanted.items():
+                col.document(doc_id).set(data)
+            self._db.collection(self._meta).document("rag").set({"dim": dim})
 
     # ---- 講者名冊（meta collection 底下單一 speakers 文件） ----
 

@@ -35,7 +35,7 @@
 | 輸入與解析 | `app/agents/parser_agent.py`、`app/transcription/` | 本地 faster-whisper（GPU）或雲端 Gemini 轉錄，可切換 | — |
 | 錯字校正（選用） | `app/agents/corrector_agent.py` | Gemini 找出同音錯字，回傳修正清單在本地套用 | — |
 | 檢索與決策 | `app/agents/decision_agent.py` | Gemini 產出結構化 JSON | — |
-| 跨會議問答（RAG） | `app/rag.py` | Gemini 向量嵌入 + 語意檢索，跨所有會議回答提問 | — |
+| 跨會議問答（RAG） | `app/rag.py` | Gemini 向量嵌入 + 語意檢索，跨所有會議回答提問；索引與會議／任務同一個 store（本地 JSON 或 Firestore） | — |
 | 資料庫與任務分發 | `app/agents/executor_agent.py`、`app/stores/` | 本地 JSON（`data/output/db.json`）；填 Firebase 金鑰即自動改用 Firestore 雲端持久化 | ✅ Firestore 已接（`FirestoreStore` 實作同一 `TaskStore` 介面） |
 | 時程同步與通知 | `app/agents/notifier_agent.py` | 產生信件草稿與事件 JSON 存本地 | 9 月串 Gmail / Google Calendar API |
 
@@ -139,7 +139,7 @@ repo 已附 `Dockerfile`（含 ffmpeg）、`requirements-cloud.txt`（精簡依�
 
 `render.yaml` 已預設好雲端需要的環境變數（`TRANSCRIBE_ENGINE=gemini`、轉錄與分析模型皆為 `gemini-flash-lite-latest`）；金鑰類（`GEMINI_API_KEY`、`FIREBASE_CREDENTIALS_JSON`）標記 `sync: false`，不進 repo、由你在 Render 後台填。`API_TOKEN` 例外：標記 `generateValue: true`，由 Render 自己產一串隨機值，所以**新部署一開始就是鎖上的**——要登入時到後台 Environment 分頁把值複製出來。
 
-> 免費方案注意：閒置一段時間後容器會休眠，下次連線需等約 30 秒冷啟動；檔案系統是暫時性的（重啟後 `db.json` 會清空）。要**永久保存任務資料**，加設 `FIREBASE_CREDENTIALS_JSON` 環境變數（見下方）即可切成 Firestore。
+> 免費方案注意：閒置一段時間後容器會休眠，下次連線需等約 30 秒冷啟動；檔案系統是暫時性的（重啟後 `db.json` 會清空）。要**永久保存任務資料**，加設 `FIREBASE_CREDENTIALS_JSON` 環境變數（見下方）即可切成 Firestore——跨會議問答的向量索引也一起存進去，所以重新部署之後不必把所有會議重新向量化。
 
 #### 加上 API 認證（部署後網址是公開的）
 

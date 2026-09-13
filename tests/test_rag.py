@@ -12,6 +12,12 @@ from tests.test_models import make_valid_payload
 from tests.test_stores import make_analysis
 
 
+def rag_store(tmp_path):
+    """索引的持久化後端。用獨立的 db 檔，同一個 tmp_path 重複建構會共用同一份
+    索引——測「重新載入」時就是在模擬重啟服務。"""
+    return LocalJsonStore(tmp_path / "ragdb.json")
+
+
 class FakeEmbedder:
     """關鍵字計數向量：同字多次出現 → 相似度高，決定性且不觸網。"""
 
@@ -94,7 +100,7 @@ def make_store_with_meeting(tmp_path, transcript="Kevin 說 API 由小明負責�
 
 def test_sync_indexes_new_meetings_and_search_finds_relevant(tmp_path):
     store = make_store_with_meeting(tmp_path)
-    index = RagIndex(tmp_path / "rag.json", embedder=FakeEmbedder())
+    index = RagIndex(rag_store(tmp_path), embedder=FakeEmbedder())
     assert index.sync(store) > 0
 
     hits = index.search("API 誰負責？", k=2)
@@ -106,7 +112,7 @@ def test_sync_indexes_new_meetings_and_search_finds_relevant(tmp_path):
 def test_sync_is_incremental(tmp_path):
     store = make_store_with_meeting(tmp_path)
     emb = FakeEmbedder()
-    index = RagIndex(tmp_path / "rag.json", embedder=emb)
+    index = RagIndex(rag_store(tmp_path), embedder=emb)
     index.sync(store)
     calls_after_first = emb.calls
     assert index.sync(store) == 0  # 沒有新會議 → 不重新向量化
@@ -118,7 +124,7 @@ def test_search_can_scope_to_selected_meetings(tmp_path):
     store = LocalJsonStore(tmp_path / "db.json")
     id1 = store.save_meeting(make_analysis(), transcript="Kevin：API 由小明負責。")
     id2 = store.save_meeting(make_analysis(), transcript="Amy：資料庫下週遷移。")
-    index = RagIndex(tmp_path / "rag.json", embedder=FakeEmbedder())
+    index = RagIndex(rag_store(tmp_path), embedder=FakeEmbedder())
     index.sync(store)
 
     hits = index.search("API 誰負責？", k=10, meeting_ids=[id2])
@@ -133,7 +139,7 @@ def test_drop_meeting_invalidates_index_and_resync_reembeds(tmp_path):
     """會議被編輯/刪除後索引要作廢，下次 sync 用新內容重建，問答才不會回舊資料。"""
     store = make_store_with_meeting(tmp_path)
     meeting_id = store.list_meetings()[0]["id"]
-    index = RagIndex(tmp_path / "rag.json", embedder=FakeEmbedder())
+    index = RagIndex(rag_store(tmp_path), embedder=FakeEmbedder())
     index.sync(store)
 
     assert index.drop_meeting(meeting_id) > 0
@@ -146,17 +152,17 @@ def test_drop_meeting_invalidates_index_and_resync_reembeds(tmp_path):
 
     # 作廢要落地：重新載入索引檔也不能殘留
     index.drop_meeting(meeting_id)
-    reloaded = RagIndex(tmp_path / "rag.json", embedder=FakeEmbedder())
+    reloaded = RagIndex(rag_store(tmp_path), embedder=FakeEmbedder())
     assert reloaded.search("API", k=5) == []
 
 
 def test_index_persists_to_disk(tmp_path):
     store = make_store_with_meeting(tmp_path)
     emb = FakeEmbedder()
-    RagIndex(tmp_path / "rag.json", embedder=emb).sync(store)
+    RagIndex(rag_store(tmp_path), embedder=emb).sync(store)
 
     emb2 = FakeEmbedder()
-    index2 = RagIndex(tmp_path / "rag.json", embedder=emb2)
+    index2 = RagIndex(rag_store(tmp_path), embedder=emb2)
     assert index2.sync(store) == 0  # 從磁碟載入，不重算
     assert index2.search("API", k=1)  # 查詢會 embed 問題本身
     assert emb2.calls == 1
@@ -172,33 +178,33 @@ def test_index_wiped_when_embedding_dim_changes(tmp_path):
     class Emb1536(FakeEmbedder):
         dim = 1536
 
-    RagIndex(tmp_path / "rag.json", embedder=Emb768()).sync(store)
+    RagIndex(rag_store(tmp_path), embedder=Emb768()).sync(store)
 
     # 用不同維度的 embedder 載入 → 舊索引視為失效（清空）
-    reloaded = RagIndex(tmp_path / "rag.json", embedder=Emb1536())
+    reloaded = RagIndex(rag_store(tmp_path), embedder=Emb1536())
     assert reloaded.search("API", k=5) == []
 
     # 同維度載入 → 仍保留（載入不會覆寫，檔案還是 768 維）
-    same = RagIndex(tmp_path / "rag.json", embedder=Emb768())
+    same = RagIndex(rag_store(tmp_path), embedder=Emb768())
     assert same.search("API", k=1)
 
 
 def test_reset_clears_index(tmp_path):
     store = make_store_with_meeting(tmp_path)
-    index = RagIndex(tmp_path / "rag.json", embedder=FakeEmbedder())
+    index = RagIndex(rag_store(tmp_path), embedder=FakeEmbedder())
     index.sync(store)
     assert index.search("API", k=1)
     index.reset()
     assert index.search("API", k=5) == []
     # 落地：重新載入也空
-    assert RagIndex(tmp_path / "rag.json", embedder=FakeEmbedder()).search("API", k=5) == []
+    assert RagIndex(rag_store(tmp_path), embedder=FakeEmbedder()).search("API", k=5) == []
 
 
 def test_summary_card_indexed_even_without_transcript(tmp_path):
     """舊會議沒存逐字稿，至少摘要/決議/代辦要可被檢索。"""
     store = LocalJsonStore(tmp_path / "db.json")
     store.save_meeting(make_analysis())  # 沒有 transcript
-    index = RagIndex(tmp_path / "rag.json", embedder=FakeEmbedder())
+    index = RagIndex(rag_store(tmp_path), embedder=FakeEmbedder())
     assert index.sync(store) > 0
     hits = index.search("介面", k=2)
     assert any("要不要支援英文介面" in h["text"] for h in hits)
@@ -211,7 +217,7 @@ def test_summary_card_handles_missing_summary(tmp_path):
     payload["meeting"]["summary"] = None
     store = LocalJsonStore(tmp_path / "db.json")
     store.save_meeting(MeetingAnalysis.model_validate(payload))
-    index = RagIndex(tmp_path / "rag.json", embedder=FakeEmbedder())
+    index = RagIndex(rag_store(tmp_path), embedder=FakeEmbedder())
     assert index.sync(store) > 0
     hits = index.search("介面", k=5)
     assert all("None" not in h["text"] for h in hits)
@@ -221,7 +227,7 @@ def test_summary_card_handles_missing_summary(tmp_path):
 
 def test_ask_agent_answers_with_retrieved_context_and_sources(tmp_path):
     store = make_store_with_meeting(tmp_path)
-    index = RagIndex(tmp_path / "rag.json", embedder=FakeEmbedder())
+    index = RagIndex(rag_store(tmp_path), embedder=FakeEmbedder())
     captured = {}
 
     def fake_generate(prompt):
@@ -239,7 +245,7 @@ def test_ask_agent_answers_with_retrieved_context_and_sources(tmp_path):
 
 def test_ask_agent_empty_store_answers_without_llm(tmp_path):
     store = LocalJsonStore(tmp_path / "db.json")
-    index = RagIndex(tmp_path / "rag.json", embedder=FakeEmbedder())
+    index = RagIndex(rag_store(tmp_path), embedder=FakeEmbedder())
 
     def boom(prompt):
         raise AssertionError("沒有資料不該呼叫 LLM")
@@ -268,7 +274,7 @@ def make_two_user_store(tmp_path):
 
 def test_sync_indexes_only_the_requesting_user(tmp_path):
     store, mine, theirs = make_two_user_store(tmp_path)
-    index = RagIndex(tmp_path / "rag.json", embedder=FakeEmbedder())
+    index = RagIndex(rag_store(tmp_path), embedder=FakeEmbedder())
 
     index.sync(store, user="me")
 
@@ -279,7 +285,7 @@ def test_sync_indexes_only_the_requesting_user(tmp_path):
 
 def test_search_never_returns_another_users_records(tmp_path):
     store, mine, theirs = make_two_user_store(tmp_path)
-    index = RagIndex(tmp_path / "rag.json", embedder=FakeEmbedder())
+    index = RagIndex(rag_store(tmp_path), embedder=FakeEmbedder())
     index.sync(store, user="me")
     index.sync(store, user="other")
 
@@ -294,7 +300,7 @@ def test_search_never_returns_another_users_records(tmp_path):
 
 def test_ask_agent_scopes_retrieval_to_the_user(tmp_path):
     store, mine, theirs = make_two_user_store(tmp_path)
-    index = RagIndex(tmp_path / "rag.json", embedder=FakeEmbedder())
+    index = RagIndex(rag_store(tmp_path), embedder=FakeEmbedder())
     captured = {}
 
     def fake_generate(prompt):
@@ -311,25 +317,18 @@ def test_ask_agent_scopes_retrieval_to_the_user(tmp_path):
 def test_legacy_index_records_belong_to_default_user(tmp_path):
     """改版前存下來的索引記錄沒有 user 欄位，要視為 DEFAULT_USER 的，
     不能因為欄位不存在就整份查不到（等同無聲失效）。"""
-    import json
-
     from app.stores.base import DEFAULT_USER
 
     emb = FakeEmbedder()
-    (tmp_path / "rag.json").write_text(
-        json.dumps({
-            "dim": None,
-            "records": [{
-                "meeting_id": "old1",
-                "title": "舊會議",
-                "date": "2026-01-01",
-                "text": "API 由小明負責",
-                "vector": emb.embed(["API 由小明負責"])[0],
-            }],
-        }),
-        encoding="utf-8",
-    )
-    index = RagIndex(tmp_path / "rag.json", embedder=emb)
+    store = rag_store(tmp_path)
+    store.save_rag_records(None, [{
+        "meeting_id": "old1",
+        "title": "舊會議",
+        "date": "2026-01-01",
+        "text": "API 由小明負責",
+        "vector": emb.embed(["API 由小明負責"])[0],
+    }])
+    index = RagIndex(store, embedder=emb)
 
     assert index.search("API", k=5, user=DEFAULT_USER)
     assert index.search("API", k=5, user="someone-else") == []
@@ -337,7 +336,7 @@ def test_legacy_index_records_belong_to_default_user(tmp_path):
 
 def test_reset_can_clear_only_one_user(tmp_path):
     store, mine, theirs = make_two_user_store(tmp_path)
-    index = RagIndex(tmp_path / "rag.json", embedder=FakeEmbedder())
+    index = RagIndex(rag_store(tmp_path), embedder=FakeEmbedder())
     index.sync(store, user="me")
     index.sync(store, user="other")
 

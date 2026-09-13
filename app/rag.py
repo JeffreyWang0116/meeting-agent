@@ -4,8 +4,9 @@
 1. 摘要卡 — 標題/摘要/決議/代辦/未決事項串成一段（舊會議沒逐字稿也可檢索）
 2. 逐字稿切塊 — 固定長度、相鄰重疊，避免答案剛好被切斷
 
-向量索引存本地 JSON（會議量是數十場等級，暴力餘弦相似即可，
-不需要向量資料庫；8 月換 Firestore 時同介面替換）。
+向量索引交給 TaskStore（會議量是數十場等級，暴力餘弦相似即可，不需要
+向量資料庫）：本地走 JSON 檔、雲端走 Firestore，與會議／任務同一後端，
+所以雲端重新部署之後索引還在，不必整份重新向量化。
 
 多租戶：索引檔是全站共用的一份，所以每筆記錄都要蓋上 user，sync 讀 store
 時也要帶 user。少了這一層，接上登入之後 A 的問題會檢索到 B 的會議內容——
@@ -13,12 +14,9 @@ store 那一層已經隔離了，這裡是整條資料流唯一會漏的地方�
 """
 from __future__ import annotations
 
-import json
 import math
 import threading
-from pathlib import Path
 
-from app.atomicio import atomic_write_text
 from app.gemini_keys import KeyPool, call_with_rotation
 from app.stores.base import DEFAULT_USER
 
@@ -106,16 +104,23 @@ class GeminiEmbedder:
 
 
 class RagIndex:
-    def __init__(self, path: Path | str, embedder):
-        self._path = Path(path)
+    """索引存哪裡交給 store：本地是 JSON 檔，雲端是 Firestore。
+
+    原本固定寫本地檔案，而雲端免費方案沒有持久磁碟——每次部署索引就整份
+    消失，下一個提問要把所有會議重新向量化，既慢又吃 embedding 額度。
+
+    記錄仍整份載進記憶體、檢索也在記憶體做：載入只發生在建構當下（一個
+    process 一次），提問時不會再打資料庫。
+    """
+
+    def __init__(self, store, embedder):
+        self._store = store
         self._embedder = embedder
         self._lock = threading.Lock()
         self._records = self._load()
 
     def _load(self) -> list[dict]:
-        if not self._path.exists():
-            return []
-        data = json.loads(self._path.read_text(encoding="utf-8"))
+        data = self._store.get_rag_records()
         expected = getattr(self._embedder, "dim", None)
         # 向量維度改過（例如從 3072 降到 768）→ 舊向量與新問題向量不同長，
         # 直接作廢整份索引，下次 sync 用新維度重建。
@@ -124,12 +129,8 @@ class RagIndex:
         return data.get("records", [])
 
     def _flush(self) -> None:
-        atomic_write_text(
-            self._path,
-            json.dumps(
-                {"dim": getattr(self._embedder, "dim", None), "records": self._records},
-                ensure_ascii=False,
-            ),
+        self._store.save_rag_records(
+            getattr(self._embedder, "dim", None), self._records
         )
 
     def sync(self, store, user: str = DEFAULT_USER) -> int:

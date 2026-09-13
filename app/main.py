@@ -462,7 +462,7 @@ def create_app(
     rag_index = None
     if ask_agent is None:
         rag_index = RagIndex(
-            settings.data_dir / "output" / "rag_index.json",
+            store,
             GeminiEmbedder(
                 api_key=settings.gemini_api_key,
                 api_keys=settings.gemini_api_keys,

@@ -197,6 +197,21 @@ class LocalJsonStore(TaskStore):
 
     # ---- 備份 / 還原 ----
 
+    # ---- 跨會議問答的向量索引（同目錄的 rag_index.json） ----
+
+    def _rag_path(self):
+        return self._path.with_name("rag_index.json")
+
+    def get_rag_records(self) -> dict:
+        doc = self._read_doc(self._rag_path())
+        return {"dim": doc.get("dim"), "records": doc.get("records", [])}
+
+    def save_rag_records(self, dim: int | None, records: list[dict]) -> None:
+        atomic_write_text(
+            self._rag_path(),
+            json.dumps({"dim": dim, "records": records}, ensure_ascii=False),
+        )
+
     def export_all(self, *, user: str = DEFAULT_USER) -> dict:
         with self._lock:
             return {
