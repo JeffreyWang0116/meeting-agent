@@ -281,3 +281,96 @@ def test_no_terms_means_no_hint_at_all(tmp_path, audio_file):
     mgr = MediaJobManager(tr, FakeOrchestrator(), tmp_path)
     mgr.wait(mgr.submit(audio_file), timeout=5)
     assert tr.hints == [None]
+
+
+# ---- pyannote 講者分離（混合式講者辨識）----
+
+class PendingFuture:
+    """還沒完成的分群工作：用來確認轉錄完後會切到「辨識講者中」。"""
+
+    def done(self):
+        return False
+
+
+class FakeDiarizer:
+    def __init__(self, relabelled="[0:00] 講者B：重標後的逐字稿", error=None):
+        self.started = []
+        self.applied = []
+        self.relabelled = relabelled
+        self.error = error
+        self.status_seen = None
+        self.mgr = None
+        self.job_id = None
+
+    def start(self, path):
+        self.started.append(path)
+        return PendingFuture()
+
+    def apply(self, future, transcript):
+        if self.mgr and self.job_id:
+            self.status_seen = self.mgr.get(self.job_id)["status"]
+        self.applied.append(transcript)
+        if self.error:
+            raise self.error
+        return self.relabelled
+
+
+def test_diarizer_relabels_transcript_before_analysis(tmp_path):
+    audio = tmp_path / "meeting.wav"
+    audio.write_bytes(b"x")
+    orch = FakeOrchestrator()
+    diarizer = FakeDiarizer()
+    mgr = MediaJobManager(FakeTranscriber("[0:00] 講者A：原本"), orch, tmp_path, diarizer=diarizer)
+    job_id = mgr.submit(audio)
+    mgr.wait(job_id, timeout=5)
+
+    assert diarizer.started == [audio]
+    assert diarizer.applied == ["[0:00] 講者A：原本"]
+    assert orch.received[0][0] == "[0:00] 講者B：重標後的逐字稿"
+    job = mgr.get(job_id)
+    assert job["status"] == "done"
+    assert job["transcript"] == "[0:00] 講者B：重標後的逐字稿"
+
+
+def test_job_shows_diarizing_status_while_waiting_for_speakers(tmp_path):
+    audio = tmp_path / "meeting.wav"
+    audio.write_bytes(b"x")
+    diarizer = FakeDiarizer()
+    mgr = MediaJobManager(FakeTranscriber("[0:00] 講者A：原本"), FakeOrchestrator(), tmp_path, diarizer=diarizer)
+    diarizer.mgr = mgr
+    # submit 之後才知道 job_id；apply 在背景執行緒裡才讀，來得及塞進去
+    original_start = diarizer.start
+
+    def start(path):
+        diarizer.job_id = next(iter(mgr._jobs))
+        return original_start(path)
+
+    diarizer.start = start
+    job_id = mgr.submit(audio)
+    mgr.wait(job_id, timeout=5)
+    assert diarizer.status_seen == "diarizing"
+
+
+def test_unexpected_diarizer_crash_keeps_gemini_transcript(tmp_path):
+    audio = tmp_path / "meeting.wav"
+    audio.write_bytes(b"x")
+    orch = FakeOrchestrator()
+    mgr = MediaJobManager(
+        FakeTranscriber("[0:00] 講者A：原本"), orch, tmp_path,
+        diarizer=FakeDiarizer(error=RuntimeError("bug")),
+    )
+    job_id = mgr.submit(audio)
+    mgr.wait(job_id, timeout=5)
+    assert mgr.get(job_id)["status"] == "done"
+    assert orch.received[0][0] == "[0:00] 講者A：原本"
+
+
+def test_diarizer_does_not_relabel_when_transcription_is_empty(tmp_path):
+    audio = tmp_path / "meeting.wav"
+    audio.write_bytes(b"x")
+    diarizer = FakeDiarizer()
+    mgr = MediaJobManager(FakeTranscriber(""), FakeOrchestrator(), tmp_path, diarizer=diarizer)
+    job_id = mgr.submit(audio)
+    mgr.wait(job_id, timeout=5)
+    assert mgr.get(job_id)["status"] == "error"
+    assert diarizer.applied == []  # 沒有逐字稿可重標

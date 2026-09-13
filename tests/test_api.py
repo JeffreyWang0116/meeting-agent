@@ -1143,3 +1143,38 @@ def test_enrolled_people_are_given_to_the_analysis_as_attendees(tmp_path):
     c.post(f"/api/live/{sid}/finish")
 
     assert prompts and "李美華" in prompts[0]
+
+
+# ---- pyannote 講者分離接線 ----
+
+def test_media_upload_uses_injected_diarizer(tmp_path):
+    """釘住接線本身：Diarizer 的機制測得再完整，create_app 沒把它交給
+    MediaJobManager 的話，功能照樣是關的。"""
+
+    class RelabelDiarizer:
+        def start(self, path):
+            return None
+
+        def apply(self, future, transcript):
+            return "[0:00] 講者B：pyannote 重標過"
+
+    settings = Settings(gemini_api_key=None, data_dir=tmp_path)
+    store = LocalJsonStore(tmp_path / "db.json")
+    orchestrator = Orchestrator(
+        parser=ParserAgent(),
+        decision=DecisionAgent(generate=lambda prompt: valid_json()),
+        executor=ExecutorAgent(store),
+        notifier=NotifierAgent(tmp_path / "notifications"),
+    )
+    app = create_app(
+        settings, store=store, orchestrator=orchestrator,
+        transcriber=FakeTranscriber(), diarizer=RelabelDiarizer(),
+    )
+    client = TestClient(app)
+    resp = client.post(
+        "/api/media",
+        files={"file": ("meeting.wav", io.BytesIO(b"RIFF-fake-wav"), "audio/wav")},
+    )
+    job = wait_for_job(client, resp.json()["job_id"])
+    assert job["status"] == "done"
+    assert "pyannote 重標過" in job["transcript"]

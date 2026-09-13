@@ -93,6 +93,15 @@ class Settings:
     # 幾個檔案），所以預設開；封頂 20 位是為了不讓每次呼叫的參考音訊無限
     # 膨脹（立院質詢動輒十幾位委員＋列席官員）。設 0 停用整個功能
     voice_relay_max_speakers: int = 20
+    # pyannoteAI 講者分離（混合式講者辨識）：有金鑰就用專門的聲學模型對整份音檔
+    # 分群、依時間戳重標 Gemini 逐字稿的講者；沒金鑰＝完全沿用 Gemini 自己標的代號。
+    # PoC（77 分鐘協商）：lite 只分出 3 位、pyannote 分出 19 位，逐行命中 96%
+    pyannote_api_key: str | None = None
+    # precision-2 才支援 voiceprint／identify；community-1 較便宜但只能分群
+    pyannote_model: str = "precision-2"
+    # 單一分群工作最多等幾秒。PoC 77 分鐘檔處理 44 秒，900 秒是很寬的上限——
+    # 等不到就退回 Gemini 代號，不讓使用者的轉錄卡在第三方服務上
+    diarize_timeout_seconds: int = 900
     data_dir: Path = field(default_factory=lambda: BASE_DIR / "data")
     # Firebase 金鑰：任一有值就用 Firestore 雲端儲存，否則用本地 JSON
     firebase_credentials_json: str | None = None  # service account JSON 字串（Render 用）
@@ -174,6 +183,9 @@ def get_settings() -> Settings:
         voice_relay_max_speakers=int(
             os.environ.get("VOICE_RELAY_MAX_SPEAKERS", "20")
         ),
+        pyannote_api_key=os.environ.get("PYANNOTE_API_KEY", "").strip() or None,
+        pyannote_model=os.environ.get("PYANNOTE_MODEL", "precision-2"),
+        diarize_timeout_seconds=int(os.environ.get("DIARIZE_TIMEOUT_SECONDS", "900")),
         data_dir=_under_base(os.environ.get("DATA_DIR")) or BASE_DIR / "data",
         firebase_credentials_json=os.environ.get("FIREBASE_CREDENTIALS_JSON") or None,
         firebase_credentials_file=(

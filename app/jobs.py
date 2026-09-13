@@ -19,9 +19,11 @@ logger = logging.getLogger(__name__)
 
 
 class MediaJobManager:
-    def __init__(self, transcriber, orchestrator, work_dir: Path | str):
+    def __init__(self, transcriber, orchestrator, work_dir: Path | str, diarizer=None):
         self._transcriber = transcriber
         self._orchestrator = orchestrator
+        # pyannote 講者分離（選用，見 app/transcription/diarizer.py）。None＝講者照舊由轉錄模型標
+        self._diarizer = diarizer
         self._work_dir = Path(work_dir)
         self._jobs: dict[str, dict] = {}
         self._threads: dict[str, threading.Thread] = {}
@@ -98,6 +100,17 @@ class MediaJobManager:
             self._jobs.pop(jid, None)
             self._threads.pop(jid, None)
 
+    def _relabel(self, job_id: str, diarization, transcript: str) -> str:
+        """用 pyannote 的分群結果重標講者。Diarizer 自己會吞掉 API 失敗；這裡再
+        包一層，是防它本身的 bug——講者辨識出錯不能賠上整份已經轉好的逐字稿。"""
+        if diarization is not None and not diarization.done():
+            self._update(job_id, status="diarizing", progress=1.0, transcript=transcript)
+        try:
+            return self._diarizer.apply(diarization, transcript)
+        except Exception:
+            logger.exception("講者重標失敗，沿用轉錄模型的代號：%s", job_id)
+            return transcript
+
     def _run(
         self,
         job_id: str,
@@ -116,6 +129,10 @@ class MediaJobManager:
                 self._update(job_id, status="extracting")
                 path = media.extract_audio(path)
             # 沒有 ffmpeg 時直接交給 faster-whisper（PyAV 可解常見影片容器的音訊）
+
+            # 分群在轉錄開始前就送出、背景並行：上傳＋分群只要一分鐘左右，
+            # 轉錄卻要好幾分鐘，排在後面等於讓使用者多等
+            diarization = self._diarizer.start(path) if self._diarizer else None
 
             self._update(job_id, status="transcribing")
             parts: list[str] = []
@@ -144,6 +161,8 @@ class MediaJobManager:
                     error="轉錄不到任何語音：請確認檔案的聲音軌有實際的說話內容（此檔可能是靜音或純音樂）",
                 )
                 return
+            if self._diarizer:
+                transcript = self._relabel(job_id, diarization, transcript)
             self._update(job_id, transcript=transcript, progress=1.0, status="analyzing")
 
             result = self._orchestrator.process_transcript(

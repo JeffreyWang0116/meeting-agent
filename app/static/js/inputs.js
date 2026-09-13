@@ -33,7 +33,7 @@ $("btnAnalyzeText").addEventListener("click", async () => {
 // ---- 路徑 2：檔案上傳 ----
 const JOB_STATUS_ZH = {
   queued: "排隊中…", extracting: "從影片抽取聲音軌…", transcribing: "轉錄中",
-  analyzing: "AI 分析中…", done: "完成", error: "失敗",
+  diarizing: "辨識講者中…", analyzing: "AI 分析中…", done: "完成", error: "失敗",
 };
 
 $("btnUpload").addEventListener("click", async () => {

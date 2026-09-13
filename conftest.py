@@ -20,5 +20,8 @@ for _var in (
     "FIREBASE_CREDENTIALS_FILE",
     "GOOGLE_APPLICATION_CREDENTIALS",
     "API_TOKEN",
+    # 本機 .env 有 pyannote 金鑰時，create_app 會建真的客戶端——測試上傳假音檔
+    # 就會打到真 API、燒掉試用額度
+    "PYANNOTE_API_KEY",
 ):
     os.environ[_var] = ""

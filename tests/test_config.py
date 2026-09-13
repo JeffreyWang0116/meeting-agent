@@ -152,3 +152,30 @@ def test_voice_relay_can_be_disabled(monkeypatch):
 def test_voice_relay_env_var_wins(monkeypatch):
     monkeypatch.setenv("VOICE_RELAY_MAX_SPEAKERS", "5")
     assert get_settings().voice_relay_max_speakers == 5
+
+
+# ---- pyannote 講者分離 ----
+
+def test_pyannote_is_off_without_a_key(monkeypatch):
+    """沒金鑰＝完全沿用 Gemini 標講者，不打任何第三方 API。"""
+    monkeypatch.setattr("app.config.load_dotenv", lambda *a, **k: None)
+    monkeypatch.delenv("PYANNOTE_API_KEY", raising=False)
+    settings = get_settings()
+    assert settings.pyannote_api_key is None
+    assert settings.pyannote_model == "precision-2"
+    assert settings.diarize_timeout_seconds == 900
+
+
+def test_pyannote_env_vars(monkeypatch):
+    monkeypatch.setenv("PYANNOTE_API_KEY", "sk-test")
+    monkeypatch.setenv("PYANNOTE_MODEL", "community-1")
+    monkeypatch.setenv("DIARIZE_TIMEOUT_SECONDS", "300")
+    settings = get_settings()
+    assert settings.pyannote_api_key == "sk-test"
+    assert settings.pyannote_model == "community-1"
+    assert settings.diarize_timeout_seconds == 300
+
+
+def test_blank_pyannote_key_counts_as_unset(monkeypatch):
+    monkeypatch.setenv("PYANNOTE_API_KEY", "  ")
+    assert get_settings().pyannote_api_key is None

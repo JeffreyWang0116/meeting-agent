@@ -47,6 +47,7 @@ from app.transcription import media
 from app.transcription.segments import parse_time_label, replace_term_in_range
 from app.translate import TARGETS as TRANSLATE_TARGETS
 from app.translate import Translator
+from app.transcription.diarizer import build_diarizer
 from app.transcription.gemini_transcriber import GeminiTranscriber
 from app.transcription.live_session import LiveSessionManager, SessionNotFound
 from app.transcription.voice_match import VoiceMatcher
@@ -349,6 +350,7 @@ def create_app(
     ask_agent=None,
     translator=None,
     verify_token=None,
+    diarizer=None,
 ) -> FastAPI:
     settings = settings or get_settings()
     store = store or make_store(settings)
@@ -456,8 +458,12 @@ def create_app(
             voice_matcher=voice_matcher,
         )
         live_manager.MAX_ENROLLMENTS = settings.live_enroll_max_speakers
+    # pyannote 講者分離（選用）：沒設 PYANNOTE_API_KEY 就是 None，講者照舊由轉錄模型標
+    diarizer = diarizer or build_diarizer(
+        settings, on_call=lambda: usage.record("diarize")
+    )
     job_manager = job_manager or MediaJobManager(
-        transcriber, orchestrator, settings.data_dir / "tmp"
+        transcriber, orchestrator, settings.data_dir / "tmp", diarizer=diarizer
     )
     rag_index = None
     if ask_agent is None:
