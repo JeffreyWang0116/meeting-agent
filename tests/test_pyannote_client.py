@@ -236,3 +236,13 @@ def test_voiceprint_without_output_raises(api, tmp_path):
 def test_missing_api_key_is_rejected_up_front():
     with pytest.raises(PyannoteError, match="PYANNOTE_API_KEY"):
         PyannoteClient(api_key="")
+
+
+def test_identify_uploads_submits_and_waits(api, tmp_path):
+    audio = tmp_path / "session.ogg"
+    audio.write_bytes(b"x")
+    output = {"exclusiveDiarization": [], "voiceprints": []}
+    api.on("POST", "/v1/identify", job("created"))
+    api.on("GET", "/v1/jobs/job-1", job("succeeded", output))
+    assert make_client(api).identify(audio, {"王小明": "vp"}, threshold=50) == output
+    assert api.json_of("POST", "/v1/identify")["matching"] == {"threshold": 50, "exclusive": True}

@@ -169,3 +169,78 @@ def test_encode_for_diarization_failure_raises_media_error(monkeypatch, tmp_path
     )
     with pytest.raises(media.MediaError, match="libopus"):
         media.encode_for_diarization(tmp_path / "a.wav")
+
+
+def test_encode_for_diarization_can_cap_length(monkeypatch, tmp_path):
+    # voiceprint 樣本上限 30 秒；「用音檔」上傳的樣本可能是一整段錄音
+    captured = {}
+
+    def fake_run(cmd, **kwargs):
+        captured["cmd"] = cmd
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(media.subprocess, "run", fake_run)
+    media.encode_for_diarization(tmp_path / "enroll.webm", max_seconds=30)
+    cmd = captured["cmd"]
+    assert cmd[cmd.index("-t") + 1] == "30"
+    assert cmd.index("-t") < cmd.index("-i")  # 輸入端截斷：不必解碼整份檔案
+
+
+def test_encode_for_diarization_does_not_cap_by_default(monkeypatch, tmp_path):
+    captured = {}
+    monkeypatch.setattr(
+        media.subprocess, "run",
+        lambda cmd, **kw: captured.setdefault("cmd", cmd) and subprocess.CompletedProcess(cmd, 0, "", ""),
+    )
+    media.encode_for_diarization(tmp_path / "meeting.wav")
+    assert "-t" not in captured["cmd"]
+
+
+# ---- 即時聆聽：各段錄音串成一份給講者分離 ----
+
+def test_concat_for_diarization_skips_overlap_and_reports_piece_durations(monkeypatch, tmp_path):
+    commands = []
+
+    def fake_run(cmd, **kwargs):
+        commands.append(cmd)
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(media.subprocess, "run", fake_run)
+    # MediaRecorder 的 webm 常沒有長度資訊，所以量的是轉出來的 wav
+    lengths = {"piece_000.wav": 45.0, "piece_001.wav": 42.0}
+    monkeypatch.setattr(media, "audio_duration", lambda p: lengths.get(Path(p).name))
+
+    a, b = tmp_path / "chunk_000.webm", tmp_path / "chunk_001.webm"
+    dest = tmp_path / "session.ogg"
+    durations = media.concat_for_diarization([(a, 0.0), (b, 3.0)], dest)
+
+    assert durations == [45.0, 42.0]
+    first, second, final = commands
+    assert first[first.index("-i") + 1] == str(a)
+    assert "-ss" not in first  # 第一段沒有重疊
+    assert second[second.index("-ss") + 1] == "3.000"  # 重疊的 3 秒前一段已經有了
+    assert final[final.index("-f") + 1] == "concat"
+    assert final[final.index("-c:a") + 1] == "libopus"
+    assert final[-1] == str(dest)
+
+
+def test_concat_for_diarization_cleans_up_intermediate_wavs(monkeypatch, tmp_path):
+    def fake_run(cmd, **kwargs):
+        Path(cmd[-1]).write_bytes(b"x")
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(media.subprocess, "run", fake_run)
+    monkeypatch.setattr(media, "audio_duration", lambda p: 10.0)
+    dest = tmp_path / "out" / "session.ogg"
+    media.concat_for_diarization([(tmp_path / "c0.webm", 0.0), (tmp_path / "c1.webm", 3.0)], dest)
+    assert sorted(p.name for p in dest.parent.iterdir()) == ["session.ogg"]
+
+
+def test_concat_for_diarization_needs_every_piece_duration(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        media.subprocess, "run",
+        lambda cmd, **kw: subprocess.CompletedProcess(cmd, 0, stdout="", stderr=""),
+    )
+    monkeypatch.setattr(media, "audio_duration", lambda p: None)
+    with pytest.raises(media.MediaError):
+        media.concat_for_diarization([(tmp_path / "c0.webm", 0.0)], tmp_path / "s.ogg")

@@ -69,6 +69,12 @@ class PyannoteClient:
             raise PyannoteError(f"voiceprint 工作沒有產出：{output.get('error') or output}")
         return voiceprint
 
+    def identify(
+        self, path: Path | str, voiceprints: dict[str, str], threshold: float | None = None
+    ) -> dict:
+        """上傳→分講者並比對聲紋→等結果。output 另含 voiceprints：[{speaker, match, confidence}]。"""
+        return self.wait(self.submit_identify(self.upload(path), voiceprints, threshold))
+
     # ---- 上傳 ----
 
     def upload(self, path: Path | str) -> str:
