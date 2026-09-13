@@ -209,3 +209,24 @@ def test_uploaded_voice_refs_are_deleted_when_a_later_upload_fails(tmp_path):
     )
     # good.wav 上傳成功過，就必須被刪掉，不能因為後面炸了而漏掉
     assert len(files.deleted) == len(files.uploaded)
+
+
+def test_voice_relay_is_actually_wired_into_create_app():
+    """接線要真的接上，不能只是設定檔有值。
+
+    這個功能曾經「實作完成但先不啟用」：23 支測試全綠、設定也讀得到值，
+    但 create_app 建構 GeminiTranscriber 那行是註解掉的，所以實際上完全沒有
+    作用。設定有值 ≠ 功能有開，靜態檢查釘住這件事。
+
+    接線在 create_app 內部、從 app 物件取不到，所以比照 test_frontend_modules.py
+    的做法。
+    """
+    import pathlib
+    import re
+
+    src = (pathlib.Path(__file__).resolve().parent.parent / "app" / "main.py").read_text(
+        encoding="utf-8"
+    )
+    wiring = re.search(r"^\s*(#\s*)?voice_relay_max_speakers=", src, re.M)
+    assert wiring, "main.py 沒有把 voice_relay_max_speakers 傳給 GeminiTranscriber"
+    assert not wiring.group(1), "voice_relay_max_speakers 那行還是註解掉的，功能沒有生效"
