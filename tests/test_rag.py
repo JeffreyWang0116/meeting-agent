@@ -344,3 +344,12 @@ def test_reset_can_clear_only_one_user(tmp_path):
 
     assert index.search("API", k=50, user="me") == []
     assert index.search("資料庫", k=50, user="other")
+
+
+def test_ask_agent_default_model_is_not_a_drifting_alias(tmp_path):
+    """gemini-flash-latest 會飄到「當下最新版」，實測常飄到過載版本回 503（README 明講別用）。
+    main.py 會用設定值覆蓋，但直接建 AskAgent 的人不該一不小心就踩到。"""
+    store = LocalJsonStore(tmp_path / "db.json")
+    agent = AskAgent(index=RagIndex(store, embedder=None), store=store)
+    assert not agent.model.endswith("-flash-latest")
+    assert agent.model == "gemini-flash-lite-latest"

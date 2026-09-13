@@ -374,3 +374,9 @@ def test_backfill_not_repeated_by_a_new_store_instance():
     make_store(db).list_meetings()
 
     assert db.collection("meetings").scans == scans_after_first
+
+
+def test_list_meetings_can_include_transcript():
+    store = make_store()
+    store.save_meeting(make_analysis(), transcript="Kevin：API 小明負責。")
+    assert store.list_meetings(include_transcript=True)[0]["transcript"] == "Kevin：API 小明負責。"

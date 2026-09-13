@@ -318,34 +318,41 @@ app/
 ├── atomicio.py           # 原子寫檔（斷電不壞資料）
 └── evaluation.py         # 任務抽取 precision/recall（供 eval/run.py）
 eval/                     # 量化評估：標注資料集 + 評估腳本；diarize_poc.py 講者分離實測
-tests/                    # pytest 測試（796，全部離線、不需金鑰）
+tests/                    # pytest 測試（802，全部離線、不需金鑰）
 Dockerfile                # 雲端部署映像（Python + ffmpeg，轉錄用 Gemini）
 render.yaml               # Render 一鍵部署藍圖
 data/samples/             # 模擬會議紀錄（中英夾雜、含邊界案例）
 data/output/              # 任務庫與通知產出
 ```
 
-### 前端（app/static/，三個檔案功能分區順序一致）
+### 前端（app/static/，ES modules、無建置步驟）
 
 ```
 app/static/
-├── index.html            # 畫面結構（每個 panel 有註解標示）
+├── index.html            # 畫面結構（每個 view 有註解標示）
 ├── style.css             # 樣式（檔頭有分區目錄）
-├── app.js                # 行為（檔頭有編號目錄，1~10 大區）
+├── js/                   # 行為，進入點 js/main.js（檔頭列出各模組職責）
+├── orb.js                # 即時聆聽的音量球（獨立載入，不碰麥克風）
+├── icons.svg             # Lucide 圖示雪碧圖（<use> 引用）
 ├── icon.svg / manifest.webmanifest / sw.js   # PWA
 ```
 
-app.js 的十大分區（style.css 依畫面順序對應）：
+`js/` 各模組（原本單一 `app.js` 拆出來的，載入順序見 `main.js`）：
 
-| # | 分區 | 內容 |
-| --- | --- | --- |
-| 1 | 共用基礎 | API 認證 fetch、SVG 圖示、esc/錯誤橫幅 |
-| 2 | 全域初始化 | 會議日期、錄音種類、功能勾選、分頁切換 |
-| 3 | 逐字稿 | 連續文件式渲染（時間欄＋講者＋內文）、時間/引用句跳轉 |
-| 4 | 分析結果 | 摘要、會議重點（點擊跳轉）、決議、代辦、行事曆、確認信 |
-| 5 | 任務庫 | 清單、搜尋篩選、列內編輯、手動新增 |
-| 6 | 歷史會議 | 查閱、編輯、重新分析、分享、講者改名、刪除 |
-| 7 | 主動提醒 | 到期掃描與每日通知 |
-| 8 | 跨會議問答 | RAG 問答＋關鍵字即時搜尋 |
-| 9 | 輸入路徑 | 純文字貼上、檔案上傳（含拖曳）、即時聆聽 |
-| 10 | 介面與資料工具 | 面板收縮、主題、設定選單、自訂詞彙、備份還原、PWA |
+| 模組 | 內容 |
+| --- | --- |
+| `api.js` | 全站唯一知道端點網址與請求形狀的地方 |
+| `core.js` | 共用基礎：`$`、esc、SVG 圖示、錯誤橫幅、骨架、分頁、API 認證 |
+| `auth.js` | Google 登入（伺服器有設 Firebase 才作用） |
+| `router.js` | 版面路由：側欄一次只顯示一個 view（`showView`） |
+| `setup.js` | 全域初始化：會議日期、會議種類、功能勾選、本次專用詞彙、麥克風選擇 |
+| `transcript.js` | 逐字稿渲染（時間欄＋講者＋內文）、時間/引用句跳轉 |
+| `result.js` | 分析結果：摘要、會議重點、決議、代辦、確認信、種類專屬區塊 |
+| `calendar.js` | 代辦寫進 Google 行事曆 |
+| `tasks.js` | 任務庫：清單、搜尋篩選、列內編輯、手動新增 |
+| `meetings.js` | 歷史會議：查閱、編輯、重新分析、分享、講者改名、刪除 |
+| `reminders.js` | 主動提醒：到期掃描與每日通知 |
+| `home.js` | 首頁儀表板、今日用量 |
+| `ask.js` | 跨會議問答（RAG）＋關鍵字即時搜尋 |
+| `inputs.js` | 三條輸入路徑：文字貼上、檔案上傳（含拖曳）、即時聆聽、預錄聲音辨識人 |
+| `settings.js` | 主題、設定選單、自訂詞彙、講者名冊、備份還原、PWA |

@@ -76,6 +76,9 @@ class LiveSession:
     # pyannote 重標後的逐字稿。有值就代表代號已換成 pyannote 那套：finish() 回傳它、
     # 「重試分析」沿用它，不再重打 API（音檔在 finish 後就刪了）
     diarized_transcript: str | None = None
+    # 整場重標進行中時設下的旗標，做完（成功或失敗）才 set。長會議要跑好幾分鐘，
+    # 期間斷線重按「重試分析」的請求等它，而不是再建一次 voiceprint（按個計費）
+    diarize_done: threading.Event | None = None
 
 
 class LiveSessionManager:
@@ -397,6 +400,22 @@ class LiveSessionManager:
         with self._lock:
             if session.diarized_transcript is not None:  # 重試分析：沿用上次結果
                 return dict(session.voice_result)
+            in_progress = session.diarize_done
+            if in_progress is None:
+                session.diarize_done = threading.Event()
+        if in_progress is not None:
+            in_progress.wait()
+            with self._lock:
+                if session.diarized_transcript is not None:
+                    return dict(session.voice_result)
+            return None  # 第一個請求失敗了：照舊走 Gemini，不再重試一次
+        try:
+            return self._diarize_once(session)
+        finally:
+            session.diarize_done.set()
+
+    def _diarize_once(self, session: LiveSession) -> dict[str, str] | None:
+        with self._lock:
             transcript = _join(session.parts)
             timing = dict(session.timing)
             paths = dict(session.chunk_paths)

@@ -716,19 +716,27 @@ def test_index_stamps_css_and_js_with_a_version(client):
 
 
 def test_asset_version_changes_when_a_file_changes(tmp_path):
-    """版本取兩個檔案裡較新的 mtime。部署／編輯都只會讓檔案變新，
-    所以只要有任何一個被動過，版本就會跟著換。"""
+    """版本取 style.css 與 js/ 底下每支模組裡最新的 mtime。部署／編輯都只會讓
+    檔案變新，所以只要有任何一個被動過，版本就會跟著換。
+
+    前端早就從單一 app.js 拆成 js/*.js；這支測試原本還在根目錄建 app.js，
+    第二段又拿改 CSS 之前的版本比，JS 模組改了版本換不換根本沒被驗到。"""
     (tmp_path / "style.css").write_text("a", encoding="utf-8")
-    (tmp_path / "app.js").write_text("b", encoding="utf-8")
+    (tmp_path / "js").mkdir()
+    (tmp_path / "js" / "main.js").write_text("b", encoding="utf-8")
+    (tmp_path / "js" / "transcript.js").write_text("c", encoding="utf-8")
+    base = time.time()
+    for path in (tmp_path / "style.css", *(tmp_path / "js").iterdir()):
+        os.utime(path, (base, base))
     before = asset_version(tmp_path)
 
-    newer = time.time() + 60
-    os.utime(tmp_path / "style.css", (newer, newer))
-    assert asset_version(tmp_path) != before
+    os.utime(tmp_path / "style.css", (base + 60, base + 60))
+    after_css = asset_version(tmp_path)
+    assert after_css != before
 
-    newer2 = newer + 60
-    os.utime(tmp_path / "app.js", (newer2, newer2))
-    assert asset_version(tmp_path) not in (before, "")
+    # 只動其中一支 JS 模組，版本也要跟著換（比的是改 CSS 之後的版本）
+    os.utime(tmp_path / "js" / "transcript.js", (base + 120, base + 120))
+    assert asset_version(tmp_path) not in (before, after_css, "")
 
 
 def test_asset_version_survives_missing_files(tmp_path):
@@ -1278,3 +1286,34 @@ def test_health_reports_whether_pyannote_is_active(tmp_path, monkeypatch):
     assert on.get("/api/health").json()["speaker_diarization"] == "pyannote"
     off = TestClient(create_app(_gemini_settings(tmp_path / "off", pyannote_api_key=None)))
     assert off.get("/api/health").json()["speaker_diarization"] is None
+
+
+def test_keyword_search_reads_meetings_in_one_pass(tmp_path):
+    """50 場會議原本是 51 次讀取（Firestore 按次計費）：先列表、再逐場 get_meeting。"""
+
+    class CountingStore(LocalJsonStore):
+        get_calls = 0
+
+        def get_meeting(self, meeting_id, *, user=DEFAULT_USER):
+            CountingStore.get_calls += 1
+            return super().get_meeting(meeting_id, user=user)
+
+    settings = Settings(gemini_api_key=None, data_dir=tmp_path)
+    store = CountingStore(tmp_path / "db.json")
+    orchestrator = Orchestrator(
+        parser=ParserAgent(),
+        decision=DecisionAgent(generate=lambda prompt: valid_json()),
+        executor=ExecutorAgent(store),
+        notifier=NotifierAgent(tmp_path / "notifications"),
+    )
+    client = TestClient(create_app(
+        settings, store=store, orchestrator=orchestrator, transcriber=FakeTranscriber()
+    ))
+    for _ in range(3):
+        make_meeting(client)
+    CountingStore.get_calls = 0
+
+    hits = client.get("/api/search", params={"q": "prompt"}).json()["hits"]
+    assert len({h["meeting_id"] for h in hits}) == 3  # 逐字稿裡的字照樣搜得到
+    assert CountingStore.get_calls == 0
+

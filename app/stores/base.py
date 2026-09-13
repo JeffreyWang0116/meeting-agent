@@ -54,8 +54,13 @@ class TaskStore(ABC):
     def get_meeting(self, meeting_id: str, *, user: str = DEFAULT_USER) -> dict | None: ...
 
     @abstractmethod
-    def list_meetings(self, *, user: str = DEFAULT_USER) -> list[dict]:
-        """所有會議（新到舊），不含任務明細。"""
+    def list_meetings(
+        self, *, user: str = DEFAULT_USER, include_transcript: bool = False
+    ) -> list[dict]:
+        """所有會議（新到舊），不含任務明細。
+
+        預設剔除逐字稿（可能數十 KB，列表不需要）；要掃全文的呼叫端（關鍵字搜尋）
+        設 include_transcript=True 一次拿齊，不要再逐場 get_meeting。"""
 
     @abstractmethod
     def update_meeting(self, meeting_id: str, fields: dict, *, user: str = DEFAULT_USER) -> dict | None:

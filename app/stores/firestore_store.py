@@ -160,9 +160,13 @@ class FirestoreStore(TaskStore):
         record = snap.to_dict()
         return record if owns(record, user) else None
 
-    def list_meetings(self, *, user: str = DEFAULT_USER) -> list[dict]:
+    def list_meetings(
+        self, *, user: str = DEFAULT_USER, include_transcript: bool = False
+    ) -> list[dict]:
         docs = self._user_docs(self._meetings, user)
         docs.sort(key=lambda m: m.get("created_at", ""), reverse=True)  # 新到舊
+        if include_transcript:
+            return docs  # 這一次查詢本來就讀回完整文件，不必再逐場讀
         # 逐字稿可能數十 KB，列表回應剔除全文保持輕量（get_meeting 才回傳）
         return [{k: v for k, v in m.items() if k != "transcript"} for m in docs]
 

@@ -258,3 +258,11 @@ def test_export_import_roundtrip_and_overwrite(tmp_path):
     fresh.import_all({"meetings": [], "tasks": []})
     assert fresh.list_meetings() == []
     assert fresh.list_tasks() == []
+
+
+def test_list_meetings_can_include_transcript(tmp_path):
+    """關鍵字搜尋要掃逐字稿：列表時一併拿，不必再逐場 get_meeting（N+1）。"""
+    store = LocalJsonStore(tmp_path / "db.json")
+    store.save_meeting(make_analysis(), transcript="志明下週一交 prompt")
+    assert "transcript" not in store.list_meetings()[0]
+    assert store.list_meetings(include_transcript=True)[0]["transcript"] == "志明下週一交 prompt"

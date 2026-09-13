@@ -103,11 +103,13 @@ class LocalJsonStore(TaskStore):
                 None,
             )
 
-    def list_meetings(self, *, user: str = DEFAULT_USER) -> list[dict]:
+    def list_meetings(
+        self, *, user: str = DEFAULT_USER, include_transcript: bool = False
+    ) -> list[dict]:
         with self._lock:
             # 逐字稿可能數十 KB，列表回應剔除全文保持輕量（get_meeting 才回傳）
             return [
-                {k: v for k, v in m.items() if k != "transcript"}
+                {k: v for k, v in m.items() if include_transcript or k != "transcript"}
                 for m in reversed(self._data["meetings"])
                 if owns(m, user)
             ]

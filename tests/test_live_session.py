@@ -771,3 +771,60 @@ def test_voice_mapping_after_diarization_does_not_mix_in_gemini_labels(tmp_path)
     mgr.diarize_session(sid)
     assert mgr.voice_mapping(sid) == {"講者B": "王小明"}  # 音檔還在，也不再用 Gemini 比
     assert matcher.calls == []
+
+
+class GatedLiveDiarizer(FakeLiveDiarizer):
+    """relabel_session 卡在閘門上，模擬長會議串接＋上傳＋比對要跑好幾分鐘。"""
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.entered = threading.Event()
+        self.gate = threading.Event()
+
+    def relabel_session(self, transcript, pieces, enrollments):
+        self.entered.set()
+        assert self.gate.wait(5), "測試閘門逾時"
+        return super().relabel_session(transcript, pieces, enrollments)
+
+
+def test_concurrent_finish_retry_does_not_diarize_twice(tmp_path):
+    """長會議結束要跑好幾分鐘；網路斷線後按「重試分析」，第二個請求不能再建一次
+    voiceprint（按個計費），也不能跟第一個搶寫同一份暫存音檔。"""
+    diarizer = GatedLiveDiarizer(prior={"講者B": "王小明"})
+    mgr = _diarized_mgr(tmp_path, ["[0:01] 講者A：一"], diarizer)
+    sid = mgr.start()
+    mgr.add_chunk(sid, b"a", offset_seconds=0)
+
+    results = {}
+    first = threading.Thread(target=lambda: results.setdefault("first", mgr.diarize_session(sid)))
+    first.start()
+    assert diarizer.entered.wait(5)
+    second = threading.Thread(target=lambda: results.setdefault("second", mgr.diarize_session(sid)))
+    second.start()
+    second.join(0.2)
+    assert second.is_alive()  # 第二個請求在等第一個，而不是自己再跑一次
+
+    diarizer.gate.set()
+    first.join(5)
+    second.join(5)
+    assert len(diarizer.calls) == 1
+    assert results == {"first": {"講者B": "王小明"}, "second": {"講者B": "王小明"}}
+
+
+def test_waiting_retry_falls_back_when_the_first_attempt_fails(tmp_path):
+    diarizer = GatedLiveDiarizer(error=RuntimeError("pyannote down"))
+    mgr = _diarized_mgr(tmp_path, ["[0:01] 講者A：一"], diarizer)
+    sid = mgr.start()
+    mgr.add_chunk(sid, b"a", offset_seconds=0)
+
+    results = {}
+    first = threading.Thread(target=lambda: results.setdefault("first", mgr.diarize_session(sid)))
+    first.start()
+    assert diarizer.entered.wait(5)
+    second = threading.Thread(target=lambda: results.setdefault("second", mgr.diarize_session(sid)))
+    second.start()
+    diarizer.gate.set()
+    first.join(5)
+    second.join(5)
+    assert len(diarizer.calls) == 1
+    assert results == {"first": None, "second": None}

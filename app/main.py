@@ -60,7 +60,7 @@ STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 
 def asset_version(static_dir: Path) -> str:
-    """前端資產的版本字串，取 style.css / app.js 之中較新的 mtime。
+    """前端資產的版本字串，取 style.css 與 js/*.js 之中最新的 mtime。
 
     Cache-Control 只管得到「之後才存進去」的快取。在加上這個標頭之前就被瀏覽器
     存下來的舊 CSS/JS，會依啟發式規則自認新鮮、完全不回來問伺服器——改版後畫面
@@ -633,7 +633,7 @@ def create_app(
             html = html.replace(f'"/static/{name}"', f'"/static/{name}?v={version}"')
         return HTMLResponse(html, headers={"Cache-Control": "no-cache"})
 
-    # 前端靜態檔（style.css / app.js / icon.svg）統一由 /static 供應
+    # 前端靜態檔（style.css / js/*.js / orb.js / icons.svg）統一由 /static 供應
     app.mount("/static", NoCacheStatic(directory=STATIC_DIR), name="static")
 
     # ---- PWA：manifest / service worker ----
@@ -887,8 +887,8 @@ def create_app(
             raise HTTPException(status_code=400, detail="請輸入要搜尋的關鍵字")
         kw = keyword.lower()
         hits = []
-        for meta in store.list_meetings(user=current_user()):
-            record = store.get_meeting(meta["id"], user=current_user()) or meta
+        # 一次列出含逐字稿的完整紀錄：逐場 get_meeting 在 Firestore 上是 N+1 次讀取
+        for record in store.list_meetings(user=current_user(), include_transcript=True):
             info = record.get("meeting", {})
             fields = [
                 ("標題", info.get("title") or ""),

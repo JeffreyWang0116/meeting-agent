@@ -5,7 +5,7 @@
   每個像素依 simplex 雜訊場算出顏色，所以「球」其實沒有幾何模型。
 
   此檔不碰麥克風。音量由外部用 setLevel(0~1) 餵進來——即時聆聽已經開了
-  一份麥克風串流給 MediaRecorder，共用那份即可（見 app.js 的 AnalyserNode），
+  一份麥克風串流給 MediaRecorder，共用那份即可（見 js/inputs.js 的 AnalyserNode），
   不需要也不應該再開第二份。
 */
 (function () {

@@ -17,7 +17,7 @@
 </head>
 <body>
 <!-- 版面：左側固定導覽（app shell）＋右側單一工作區。
-     每個 .view 是一個獨立畫面，同時只顯示一個，由 app.js 的 showView() 切換。
+     每個 .view 是一個獨立畫面，同時只顯示一個，由 js/router.js 的 showView() 切換。
      圖示一律用 <use> 引 /static/icons.svg 的 Lucide symbol，不再內嵌 path。 -->
 <!-- 登入閘門：伺服器啟用 Firebase Auth 時才會由 js/auth.js 打開。
      沒接登入的部署（本機開發、共用 API Token）永遠看不到它。 -->
@@ -437,7 +437,7 @@
               <div class="summary-trans" id="rSummaryTrans" style="display:none"></div>
 
               <!-- 種類專屬區塊（目前是銷售拜訪的 BANT）。
-                   標題文字由 app.js 依種類填，沒有專屬區塊的種類整節隱藏 -->
+                   標題文字由 js/result.js 依種類填，沒有專屬區塊的種類整節隱藏 -->
               <h3 class="sub" id="hSections" style="display:none">
                 <svg class="i-sm" aria-hidden="true"><use href="/static/icons.svg#clipboard-list"/></svg>
                 <span id="sectionsTitle">重點欄位</span>
