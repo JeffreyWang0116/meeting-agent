@@ -35,7 +35,7 @@ from app.transcription.voice_match import wait_until_active
 logger = logging.getLogger(__name__)
 
 # Gemini 原生支援的音訊副檔名，這些不需要再轉檔
-_SAFE_AUDIO_EXTS = {".wav", ".mp3", ".flac", ".ogg", ".aiff"}
+_SAFE_AUDIO_EXTS = media.GEMINI_AUDIO_EXTS
 
 # 超過這個長度就分段轉錄。實測 gemini-flash-lite 餵整份 17 分鐘的質詢錄音時，
 # 講者標註會整份消失、時間戳也會漂到比實際長度多 3 分鐘；同一支影片只取前 3

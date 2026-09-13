@@ -20,6 +20,10 @@ _WINGET_FFMPEG = (
 )
 
 
+# Gemini 原生支援的音訊副檔名。其餘（webm、m4a、影片…）要先轉 wav 才能上傳：
+# 實測瀏覽器錄的 webm 會被當成 video/webm、處理結果 FAILED。轉錄與聲紋比對共用這份
+GEMINI_AUDIO_EXTS = frozenset({".wav", ".mp3", ".flac", ".ogg", ".aiff"})
+
 # 講者分離上傳用的編碼：PoC 實測 Opus 32kbps 與 16k FLAC 分群結果 99.6% 一致、大小 1/6
 _OPUS_ARGS = ("-c:a", "libopus", "-b:a", "32k", "-application", "voip")
 

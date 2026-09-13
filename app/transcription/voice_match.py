@@ -22,10 +22,12 @@ from __future__ import annotations
 import json
 import re
 import time
+import uuid
 from pathlib import Path
 
 from app.agents.speaker_namer_agent import is_safe_name
 from app.gemini_keys import KeyPool, call_with_rotation
+from app.transcription import media
 from app.transcription.segments import collect_speakers, speaker_of
 
 _CODE_FENCE = re.compile(r"^\s*```(?:json)?\s*|\s*```\s*$")
@@ -153,11 +155,14 @@ class VoiceMatcher:
 
         client = genai.Client(api_key=key)
         # 上傳的檔案綁在該把 key 的專案底下，所以整組必須用同一把 key
-        uploaded, contents = [], []
+        uploaded, contents, converted = [], [], []
         try:
             for part in parts:
                 if isinstance(part, Path):
-                    handle = client.files.upload(file=str(part))
+                    audio = _gemini_audio(part)
+                    if audio != part:
+                        converted.append(audio)
+                    handle = client.files.upload(file=str(audio))
                     uploaded.append(handle)
                     # 一次要送 3~8 個檔，其中任何一個還沒就緒都會讓整次呼叫失敗
                     contents.append(wait_until_active(client, handle))
@@ -177,6 +182,21 @@ class VoiceMatcher:
                     client.files.delete(name=handle.name)
                 except Exception:
                     pass
+            for path in converted:
+                path.unlink(missing_ok=True)
+
+
+def _gemini_audio(path: Path) -> Path:
+    """Gemini 不支援的格式先轉成 wav，回傳實際要上傳的檔。
+
+    瀏覽器（Chrome／Edge）錄的樣本與錄音段是 webm：直接上傳會被當成 video/webm、
+    處理結果 FAILED（實測），整次比對出錯後被 match() 吞掉——使用者只看到「沒認出
+    任何人」，完全不知道是格式問題。轉錄那邊（GeminiTranscriber._ensure_audio）早就
+    會先轉 wav，這裡原本漏了。轉檔失敗直接丟出：原檔送上去一樣是 FAILED，不如別傳。
+    """
+    if path.suffix.lower() in media.GEMINI_AUDIO_EXTS or not media.ffmpeg_available():
+        return path
+    return media.extract_audio(path, path.with_name(f"{path.stem}_{uuid.uuid4().hex[:8]}.wav"))
 
 
 def _parse_mapping(raw: str) -> dict[str, str]:

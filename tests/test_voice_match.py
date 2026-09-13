@@ -189,3 +189,90 @@ def test_wait_until_active_raises_on_failed():
     handle = SimpleNamespace(name="files/a", state="FAILED")
     with pytest.raises(VoiceMatchError):
         wait_until_active(client, handle, sleep=lambda s: None)
+
+
+
+# ---- 上傳前的格式轉換 ----
+
+class _RecordingGenai:
+    """取代 google.genai.Client：記下實際上傳了哪些檔、檔案當下是否存在。"""
+
+    def __init__(self):
+        self.uploaded = []
+        self.deleted = []
+        outer = self
+
+        class Files:
+            def upload(self, file):
+                outer.uploaded.append((Path(file).name, Path(file).exists()))
+                return SimpleNamespace(name=f"files/{len(outer.uploaded)}", state="ACTIVE")
+
+            def delete(self, name):
+                outer.deleted.append(name)
+
+        class Models:
+            def generate_content(self, **kwargs):
+                return SimpleNamespace(text='{"speakers": []}')
+
+        self.files = Files()
+        self.models = Models()
+
+
+def _patch_genai(monkeypatch):
+    fake = _RecordingGenai()
+    import google.genai
+
+    monkeypatch.setattr(google.genai, "Client", lambda api_key=None: fake)
+    return fake
+
+
+def test_webm_samples_are_converted_to_wav_before_upload(monkeypatch, tmp_path):
+    """瀏覽器錄的樣本與錄音段是 webm。Gemini 把它當 video/webm、處理結果 FAILED
+    （實測），比對整個出錯又被吞掉——預錄聲音辨識人在 Chrome 上從來沒認出過人。"""
+    from app.transcription import media
+
+    fake = _patch_genai(monkeypatch)
+    converted = []
+
+    def fake_extract(src, dest=None):
+        Path(dest).write_bytes(b"RIFF")
+        converted.append((Path(src).name, Path(dest).suffix))
+        return Path(dest)
+
+    monkeypatch.setattr(media, "ffmpeg_available", lambda: True)
+    monkeypatch.setattr(media, "extract_audio", fake_extract)
+    webm = tmp_path / "enroll_00.webm"
+    webm.write_bytes(b"webm")
+    wav = tmp_path / "chunk_000.wav"
+    wav.write_bytes(b"RIFF")
+
+    VoiceMatcher(api_key="k")._call_gemini("k", ["說明", webm, "片段", wav])
+
+    assert converted == [("enroll_00.webm", ".wav")]
+    names = [name for name, _ in fake.uploaded]
+    assert names[0].endswith(".wav") and names[0] != "enroll_00.webm"
+    assert names[1] == "chunk_000.wav"  # 原生支援的格式不轉
+    assert all(existed for _, existed in fake.uploaded)
+    # 轉出來的暫存 wav 用完就刪，原檔留著（finish 才會連同 session 目錄一起刪）
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["chunk_000.wav", "enroll_00.webm"]
+    assert len(fake.deleted) == 2  # Gemini 端的上傳也照舊清掉
+
+
+def test_conversion_failure_makes_the_match_return_empty(monkeypatch, tmp_path):
+    from app.transcription import media
+
+    fake = _patch_genai(monkeypatch)
+    monkeypatch.setattr(media, "ffmpeg_available", lambda: True)
+
+    def broken(src, dest=None):
+        raise media.MediaError("ffmpeg 抽取音軌失敗")
+
+    monkeypatch.setattr(media, "extract_audio", broken)
+    webm = tmp_path / "enroll_00.webm"
+    webm.write_bytes(b"webm")
+    matcher = VoiceMatcher(api_key="k")
+    assert matcher.match(
+        [{"name": "王小明", "path": webm}],
+        [{"path": webm, "transcript": "[0:01] 講者A：嗨"}],
+    ) == {}
+    assert fake.uploaded == []  # 轉不動就不上傳：原檔送上去只會被 Gemini 判定 FAILED
