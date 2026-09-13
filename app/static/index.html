@@ -454,7 +454,10 @@
               <h3 class="sub">
                 <svg class="i-sm" aria-hidden="true"><use href="/static/icons.svg#calendar"/></svg>
                 行事曆事件
-                <a class="ghost btn-link" id="icsLink" href="#" download style="margin-left:auto">下載 .ics</a>
+                <span class="aux" id="gcalStatus"></span>
+                <button class="ghost btn-link" id="btnGCal" hidden style="margin-left:auto"
+                        title="把有期限的代辦寫進你的 Google 行事曆，之後由 Google 負責提醒你"></button>
+                <a class="ghost btn-link" id="icsLink" href="#" download>下載 .ics</a>
               </h3>
               <div class="event-list" id="rEvents"></div>
 

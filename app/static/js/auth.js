@@ -25,6 +25,7 @@ import { $, API_TOKEN_KEY, nativeFetch, setCredentialSource } from "./core.js";
 const SDK = "https://www.gstatic.com/firebasejs/10.14.1";
 
 let auth = null;
+let sdk = null;                     // Firebase SDK 模組，登入啟用後才載入
 let signedIn;                       // 登入完成才 resolve
 const ready = new Promise(resolve => { signedIn = resolve; });
 
@@ -66,7 +67,6 @@ async function start() {
   const gate = $("loginGate");
   gate.hidden = false;
 
-  let sdk;
   try {
     const [app, authMod] = await Promise.all([
       import(`${SDK}/firebase-app.js`),
@@ -103,4 +103,31 @@ async function start() {
   };
 }
 
+// ---- Google 行事曆授權 ----
+// 刻意不把 calendar scope 併進登入：登入畫面多一句「存取你的 Google 日曆」會
+// 嚇退根本用不到這功能的人，而登入是每個人的必經之路。改成使用者真的按下
+// 「加入行事曆」時才要權限。
+//
+// 另一個非要延後不可的理由：這把 OAuth access token 只在 popup 回傳的當下拿
+// 得到，Firebase 不會保存它。重新整理後 onAuthStateChanged 只還你 ID token，
+// 行事曆權杖是拿不回來的——所以本來就只能在使用者操作的當下現拿。
+const CALENDAR_SCOPE = "https://www.googleapis.com/auth/calendar.events";
+
+function googleSignedIn() {
+  return !!auth?.currentUser;
+}
+
+async function requestCalendarToken() {
+  if (!sdk || !auth?.currentUser) return null;
+  const provider = new sdk.GoogleAuthProvider();
+  provider.addScope(CALENDAR_SCOPE);
+  // 用 reauthenticate 而不是 signInWithPopup：使用者在 popup 裡選到另一個
+  // Google 帳號時，前者丟 auth/user-mismatch，後者會默默把整個 app 切換成
+  // 另一個帳號的資料——畫面上毫無提示，只會發現東西全不見了。
+  const result = await sdk.reauthenticateWithPopup(auth.currentUser, provider);
+  return sdk.GoogleAuthProvider.credentialFromResult(result)?.accessToken || null;
+}
+
 start();
+
+export { googleSignedIn, requestCalendarToken };

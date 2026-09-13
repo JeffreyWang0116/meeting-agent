@@ -26,6 +26,7 @@ import "./api.js";
 import "./router.js";
 import "./setup.js";
 import "./transcript.js";
+import "./calendar.js";
 import "./result.js";
 import "./tasks.js";
 import "./meetings.js";

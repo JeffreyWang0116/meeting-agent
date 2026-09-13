@@ -1,4 +1,5 @@
 import { api } from "./api.js";
+import { setCalendarEvents } from "./calendar.js";
 import { $, PRIORITY_ZH, esc, icon, showError, showNotice, skelBlocks, skelLine } from "./core.js";
 import { refreshMeetings } from "./meetings.js";
 import { refreshReminders } from "./reminders.js";
@@ -172,6 +173,7 @@ function renderResult(result, transcript) {
   $("rEvents").innerHTML = events.length
     ? events.map(e => `<div class="event-item">${icon("calendar")}<span><span class="when">${esc(e.start.date)}</span><b>${esc(e.summary)}</b><span class="desc">${esc(e.description).replace(/\n/g, " · ")}</span></span></div>`).join("")
     : `<p class="empty-note">沒有含期限的代辦，未產生行事曆事件</p>`;
+  setCalendarEvents(events);
 
   $("rDraft").textContent = result.notifications.email_draft || "";
   draftSubject = result.notifications.email_subject || "";

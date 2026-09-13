@@ -1,9 +1,10 @@
 """Notifier Agent：確認信草稿與行事曆事件產生測試。"""
 import json
+import re
 
 import pytest
 
-from app.agents.notifier_agent import NotifierAgent
+from app.agents.notifier_agent import NotifierAgent, build_calendar_events
 from app.models import MeetingAnalysis
 from tests.test_models import make_valid_payload
 
@@ -88,3 +89,41 @@ def test_events_file_is_valid_json(tmp_path, analysis):
     NotifierAgent(tmp_path).notify("m001", analysis)
     data = json.loads((tmp_path / "m001" / "calendar_events.json").read_text(encoding="utf-8"))
     assert isinstance(data, list)
+
+
+# ---- 事件 id：讓「加入 Google 行事曆」按兩次不會變成兩份 ----
+# Google 的 events.insert 允許自帶 id，重複 insert 同一個 id 會回 409，
+# 前端就靠這個分辨「已經加過」而不是再塞一筆。
+
+# Google 規定 event id 只能用 base32hex 的字元（a-v、0-9），長度 5~1024
+GOOGLE_EVENT_ID_RE = re.compile(r"^[a-v0-9]{5,1024}$")
+
+
+def test_calendar_events_carry_google_compatible_ids(analysis):
+    events = build_calendar_events(analysis, meeting_id="m001")
+    assert events
+    for event in events:
+        assert GOOGLE_EVENT_ID_RE.match(event["id"]), event["id"]
+
+
+def test_event_id_is_stable_across_calls(analysis):
+    """同一筆代辦每次都要算出同一個 id，否則按第二次又會插入一份新的。"""
+    first = build_calendar_events(analysis, meeting_id="m001")
+    second = build_calendar_events(analysis, meeting_id="m001")
+    assert [e["id"] for e in first] == [e["id"] for e in second]
+
+
+def test_event_id_differs_by_task_and_meeting(analysis):
+    base = build_calendar_events(analysis, meeting_id="m001")[0]["id"]
+
+    other_meeting = build_calendar_events(analysis, meeting_id="m002")[0]["id"]
+    assert other_meeting != base, "不同會議的同名代辦是兩件事，不該互相蓋掉"
+
+    analysis.todos[0].task = "完成 Prompt 第二版"
+    other_task = build_calendar_events(analysis, meeting_id="m001")[0]["id"]
+    assert other_task != base
+
+
+def test_events_written_by_notify_also_carry_ids(tmp_path, analysis):
+    result = NotifierAgent(tmp_path).notify("m001", analysis)
+    assert all(e.get("id") for e in result["calendar_events"])
