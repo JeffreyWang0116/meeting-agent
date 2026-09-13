@@ -192,3 +192,36 @@ def test_voiceprint_threshold_defaults_to_fifty(monkeypatch):
 def test_voiceprint_threshold_env_var(monkeypatch):
     monkeypatch.setenv("VOICEPRINT_MATCH_THRESHOLD", "70")
     assert get_settings().voiceprint_match_threshold == 70
+
+
+# ---- 速率限制 ----
+
+def test_rate_limit_follows_public_deploy_by_default(monkeypatch):
+    """比照認證的慣例：公開網址預設開，本機開發預設關（不會開發到一半被自己擋）。"""
+    monkeypatch.setattr("app.config.load_dotenv", lambda *a, **k: None)
+    monkeypatch.delenv("RATE_LIMIT_ENABLED", raising=False)
+    monkeypatch.delenv("RENDER", raising=False)
+    assert get_settings().rate_limit_enabled is False
+    monkeypatch.setenv("RENDER", "true")
+    assert get_settings().rate_limit_enabled is True
+
+
+def test_rate_limit_env_var_wins(monkeypatch):
+    monkeypatch.setattr("app.config.load_dotenv", lambda *a, **k: None)
+    monkeypatch.setenv("RENDER", "true")
+    monkeypatch.setenv("RATE_LIMIT_ENABLED", "0")
+    assert get_settings().rate_limit_enabled is False
+    monkeypatch.delenv("RENDER")
+    monkeypatch.setenv("RATE_LIMIT_ENABLED", "1")
+    monkeypatch.setenv("RATE_LIMITS", "media=1/5")
+    settings = get_settings()
+    assert settings.rate_limit_enabled is True
+    assert settings.rate_limits == "media=1/5"
+
+
+def test_invalid_rate_limits_fail_fast_at_startup(tmp_path):
+    """寫錯的上限設定若悄悄被忽略，公開網址就等於沒有節流。"""
+    from app.main import create_app
+
+    with pytest.raises(ValueError, match="RATE_LIMITS"):
+        create_app(Settings(data_dir=tmp_path, rate_limit_enabled=True, rate_limits="media=abc"))

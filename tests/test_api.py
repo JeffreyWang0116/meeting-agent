@@ -1317,3 +1317,83 @@ def test_keyword_search_reads_meetings_in_one_pass(tmp_path):
     assert len({h["meeting_id"] for h in hits}) == 3  # 逐字稿裡的字照樣搜得到
     assert CountingStore.get_calls == 0
 
+
+# ---- 速率限制 ----
+
+def _limited_client(tmp_path, limits):
+    settings = Settings(
+        gemini_api_key=None, data_dir=tmp_path, rate_limit_enabled=True, rate_limits=limits
+    )
+    store = LocalJsonStore(tmp_path / "db.json")
+    orchestrator = Orchestrator(
+        parser=ParserAgent(),
+        decision=DecisionAgent(generate=lambda prompt: valid_json()),
+        executor=ExecutorAgent(store),
+        notifier=NotifierAgent(tmp_path / "notifications"),
+    )
+    return TestClient(create_app(
+        settings, store=store, orchestrator=orchestrator, transcriber=FakeTranscriber()
+    ))
+
+
+def test_analyze_is_rate_limited_with_retry_after(tmp_path):
+    client = _limited_client(tmp_path, "analyze=2/0")
+    for _ in range(2):
+        assert client.post("/api/meetings", json={"text": "志明下週一交 prompt"}).status_code == 200
+    resp = client.post("/api/meetings", json={"text": "志明下週一交 prompt"})
+    assert resp.status_code == 429
+    assert "每分鐘最多 2 次" in resp.json()["detail"]
+    assert int(resp.headers["Retry-After"]) > 0
+
+
+def test_media_upload_is_rejected_before_the_file_is_saved(tmp_path):
+    client = _limited_client(tmp_path, "media=0/1")
+
+    def upload(meeting_date=None):
+        return client.post(
+            "/api/media",
+            files={"file": ("meeting.wav", io.BytesIO(b"RIFF-fake-wav"), "audio/wav")},
+            data={"meeting_date": meeting_date} if meeting_date else None,
+        )
+
+    assert upload().status_code == 200
+    resp = upload()
+    assert resp.status_code == 429
+    assert "今天的檔案上傳已達上限 1 次" in resp.json()["detail"]
+    # 額度用完時連格式錯誤的請求都回 429 而非 400：限制在任何解析與存檔之前就擋下，
+    # 被擋的上傳不會寫進暫存磁碟
+    assert upload(meeting_date="下週五").status_code == 429
+
+
+def test_live_start_and_chunk_are_rate_limited(tmp_path):
+    client = _limited_client(tmp_path, "live_start=1/0,live_chunk=1/0")
+    sid = client.post("/api/live/start").json()["session_id"]
+    assert client.post("/api/live/start").status_code == 429
+    def chunk():
+        return client.post(
+            f"/api/live/{sid}/chunk",
+            files={"file": ("c.webm", io.BytesIO(b"audio"), "audio/webm")},
+            data={"offset": "0"},
+        )
+
+    assert chunk().status_code == 200
+    assert chunk().status_code == 429
+
+
+def test_ask_and_translate_are_rate_limited(tmp_path):
+    client = _limited_client(tmp_path, "ask=1/0,translate=1/0")
+    first_ask = client.post("/api/ask", json={"question": "誰負責 prompt？"})
+    assert first_ask.status_code != 429
+    assert client.post("/api/ask", json={"question": "誰負責 prompt？"}).status_code == 429
+    first_tr = client.post("/api/translate", json={"text": "hi", "target": "zh"})
+    assert first_tr.status_code != 429
+    assert client.post("/api/translate", json={"text": "hi", "target": "zh"}).status_code == 429
+
+
+def test_rate_limit_is_off_by_default_for_local_settings(client):
+    for _ in range(15):
+        assert client.post("/api/meetings", json={"text": "志明下週一交 prompt"}).status_code == 200
+
+
+def test_health_reports_rate_limit_state(tmp_path):
+    assert _limited_client(tmp_path, "").get("/api/health").json()["rate_limit"] is True

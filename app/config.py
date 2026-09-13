@@ -105,6 +105,11 @@ class Settings:
     # 預錄聲音辨識人的聲紋比對門檻（0~100）。實測（77 分鐘協商）：本人 89 分、
     # 不是本人 16~28 分；API 預設 0 會把缺席者硬配給某位只講 4 秒的人
     voiceprint_match_threshold: float = 50
+    # 速率限制（app/ratelimit.py）：每位使用者、每種耗額度的操作有每分鐘／每天上限。
+    # 預設跟著 is_public_deploy 走（比照認證）：公開網址開、本機開發關
+    rate_limit_enabled: bool = False
+    # 覆寫個別上限，如 "media=3/20,ask=10/100"（每分鐘/每天，0＝不限）；空＝全用預設
+    rate_limits: str | None = None
     data_dir: Path = field(default_factory=lambda: BASE_DIR / "data")
     # Firebase 金鑰：任一有值就用 Firestore 雲端儲存，否則用本地 JSON
     firebase_credentials_json: str | None = None  # service account JSON 字串（Render 用）
@@ -210,4 +215,10 @@ def get_settings() -> Settings:
         is_public_deploy=bool(os.environ.get("RENDER")),
         allow_no_auth=os.environ.get("ALLOW_NO_AUTH", "").strip().lower()
         in {"1", "true", "yes"},
+        rate_limit_enabled=(
+            os.environ["RATE_LIMIT_ENABLED"].strip().lower() in {"1", "true", "yes"}
+            if os.environ.get("RATE_LIMIT_ENABLED", "").strip()
+            else bool(os.environ.get("RENDER"))
+        ),
+        rate_limits=os.environ.get("RATE_LIMITS") or None,
     )

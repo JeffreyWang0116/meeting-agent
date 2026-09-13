@@ -196,6 +196,25 @@ repo 已附 `Dockerfile`（含 ffmpeg）、`requirements-cloud.txt`（精簡依�
 
 `/api/media` 的單檔上限預設 500MB，`/api/live/*/chunk` 的每段音訊也套同一個上限；超過回 `413` 並且不留下半截檔案。免費方案的暫時性磁碟只有幾百 MB，寫爆之後連 `db.json` 都存不進去、整個服務跟著停擺，所以這是硬性的門檻而非建議值。磁碟更小的方案設 `MAX_UPLOAD_MB` 往下調即可（2 小時的單聲道會議錄音約 60~120MB）。
 
+#### 速率限制（公開部署預設開啟）
+
+公開網址上任何能登入的人都能連打上傳、問答，把整個服務共用的 Gemini 每日額度燒光（啟用 pyannote 後更是按時數計費）。所以耗額度的端點**每位使用者**各有每分鐘／每天上限，超過回 `429` 並附 `Retry-After`，前端會顯示「操作太頻繁，請 N 秒後再試」或「今天的檔案上傳已達上限」。
+
+| 操作 | 名稱 | 預設（每分鐘 / 每天） |
+|---|---|---|
+| 貼上文字分析、重新分析 | `analyze` | 10 / 60 |
+| 檔案上傳轉錄 | `media` | 3 / 20 |
+| 開始即時聆聽 | `live_start` | 3 / 20 |
+| 即時聆聽每段錄音 | `live_chunk` | 20 / 600（每分鐘放寬：結束時要補送失敗的段） |
+| 詢問會議 | `ask` | 10 / 100 |
+| 摘要翻譯 | `translate` | 20 / 300 |
+
+- 偵測到 Render（`RENDER=true`）自動開啟；本機開發預設關閉。`RATE_LIMIT_ENABLED=1/0` 可強制開關
+- 覆寫個別上限：`RATE_LIMITS=media=5/30,ask=20/200`（0＝不限）。寫錯格式會直接啟動失敗，不會悄悄變成沒有節流
+- 計數存在記憶體，重新部署會歸零——要擋的是連打與濫用，精確用量看儀表板
+- 只用共用 `API_TOKEN`（沒開 Google 登入）時，所有人算同一個使用者，等於整個服務共用一份上限
+- 目前狀態看 `/api/health` 的 `rate_limit`
+
 #### （選填）Google 登入：每個人一份自己的資料
 
 不開登入的話，這個網址是**單人模式**——所有人上傳的錄音、產生的任務、加的自訂詞彙都寫進同一份資料，彼此看得到。`API_TOKEN` 擋得住陌生人，但擋不住「拿到 token 的人互相看到對方的會議」，因為它是一把共用鑰匙，只分「進不進得來」，不分「你是誰」。
@@ -313,12 +332,13 @@ app/
 ├── glossary.py           # 自訂詞彙表（轉錄與分析 prompt 共用；含標成人名的講者名冊）
 ├── export.py             # 匯出：任務 CSV、行事曆 .ics、Markdown 會議報告
 ├── usage.py              # 今日 API 用量統計
+├── ratelimit.py          # 速率限制：每位使用者每種操作的每分鐘／每天上限（429）
 ├── gemini_keys.py        # 多金鑰輪替 + 429/503 重試
 ├── timeutil.py           # 本地時區（UTC+8）工具
 ├── atomicio.py           # 原子寫檔（斷電不壞資料）
 └── evaluation.py         # 任務抽取 precision/recall（供 eval/run.py）
 eval/                     # 量化評估：標注資料集 + 評估腳本；diarize_poc.py 講者分離實測
-tests/                    # pytest 測試（802，全部離線、不需金鑰）
+tests/                    # pytest 測試（830，全部離線、不需金鑰；前端講者判斷另需 node）
 Dockerfile                # 雲端部署映像（Python + ffmpeg，轉錄用 Gemini）
 render.yaml               # Render 一鍵部署藍圖
 data/samples/             # 模擬會議紀錄（中英夾雜、含邊界案例）

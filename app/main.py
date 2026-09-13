@@ -52,6 +52,7 @@ from app.transcription.gemini_transcriber import GeminiTranscriber
 from app.transcription.live_session import LiveSessionManager, SessionNotFound
 from app.transcription.voice_match import VoiceMatcher
 from app.transcription.transcriber import Transcriber
+from app.ratelimit import RateLimited, RateLimiter, parse_limits
 from app.usage import UsageTracker
 
 logger = logging.getLogger(__name__)
@@ -357,6 +358,21 @@ def create_app(
     # 用量統計要在 agent 之前建好：每個會打 Gemini 的元件都得拿到 record_call，
     # 統計才算得到重試與換金鑰（端點層只知道「使用者按了幾次」，差一個數量級）
     usage = UsageTracker(settings.data_dir / "output" / "usage.json")
+    # 速率限制：設定寫錯（parse_limits 丟 ValueError）就讓啟動失敗——悄悄忽略的話，
+    # 公開網址等於沒有節流
+    rate_limiter = RateLimiter(
+        parse_limits(settings.rate_limits), enabled=settings.rate_limit_enabled
+    )
+
+    def limit(bucket: str) -> None:
+        """耗額度的端點一進來先檢查；超過上限回 429 並附 Retry-After。"""
+        try:
+            rate_limiter.check(bucket, current_user())
+        except RateLimited as exc:
+            raise HTTPException(
+                status_code=429, detail=str(exc),
+                headers={"Retry-After": str(exc.retry_after)},
+            )
 
     def record_call() -> None:
         usage.record("gemini_call")
@@ -671,6 +687,8 @@ def create_app(
             # 講者分離後端："pyannote"＝已啟用；None＝講者由轉錄模型標。部署後
             # 從這裡確認金鑰有沒有生效（填了但引擎不是 gemini 也會是 None）
             "speaker_diarization": "pyannote" if diarizer else None,
+            # 速率限制有沒有開（公開部署預設開）
+            "rate_limit": rate_limiter.enabled,
         }
 
     # ---- 輸入路徑 1：純文字 ----
@@ -678,6 +696,7 @@ def create_app(
     @app.post("/api/meetings")
     def analyze_meeting(req: MeetingRequest):
         kind = validate_kind(req.kind)
+        limit("analyze")
         return run_analysis(
             req.text,
             req.meeting_date,
@@ -808,6 +827,7 @@ def create_app(
         transcript = (record.get("transcript") or "").strip()
         if not transcript:
             raise HTTPException(status_code=400, detail="此會議沒有逐字稿全文，無法重新分析")
+        limit("analyze")
 
         kind = record.get("kind")
         # 會前打的專用詞彙跟著會議存起來，重新分析時要沿用，不能弄丟
@@ -922,6 +942,7 @@ def create_app(
     @app.post("/api/ask")
     def ask_meetings(req: AskRequest):
         """RAG 跨會議問答：檢索歷史會議片段，交給 Gemini 依據回答。"""
+        limit("ask")
         usage.record("ask")
         try:
             return ask_agent.ask(
@@ -939,6 +960,7 @@ def create_app(
         """通用翻譯：翻譯摘要、歷史會議內容等。"""
         if not req.text.strip():
             raise HTTPException(status_code=400, detail="翻譯內容不可為空")
+        limit("translate")
         if req.target not in TRANSLATE_TARGETS:
             raise HTTPException(
                 status_code=400,
@@ -1084,6 +1106,7 @@ def create_app(
         name_speakers: Optional[str] = Form(None),
         terms: Optional[str] = Form(None),
     ):
+        limit("media")  # 在存檔之前擋：被擋下的上傳不佔暫存磁碟
         try:
             parsed_date = date.fromisoformat(meeting_date) if meeting_date else None
         except ValueError:
@@ -1131,6 +1154,7 @@ def create_app(
 
     @app.post("/api/live/start")
     def live_start(req: Optional[LiveStartRequest] = None):
+        limit("live_start")
         translate_to = req.translate_to if req else None
         if translate_to and translate_to not in TRANSLATE_TARGETS:
             raise HTTPException(
@@ -1155,6 +1179,7 @@ def create_app(
         # 才不會被硬切點剁成兩半；重疊處會被轉錄兩次，後端依絕對時間濾掉
         overlap: Optional[float] = Form(None),
     ):
+        limit("live_chunk")
         suffix = Path(file.filename or "chunk.webm").suffix or ".webm"
         data = read_capped(file.file, max_upload_bytes)
         usage.record("live_chunk")
