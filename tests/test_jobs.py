@@ -9,7 +9,7 @@ class FakeTranscriber:
         self.text = text
         self.error = error
 
-    def transcribe(self, path, on_progress=None):
+    def transcribe(self, path, on_progress=None, user=None):
         if self.error:
             raise self.error
         if on_progress:
@@ -46,7 +46,7 @@ class HintRecordingTranscriber(FakeTranscriber):
         super().__init__(text)
         self.hints = []
 
-    def transcribe(self, path, on_progress=None, hint=None):
+    def transcribe(self, path, on_progress=None, hint=None, user=None):
         self.hints.append(hint)
         return super().transcribe(path, on_progress)
 
@@ -120,7 +120,7 @@ def test_video_with_ffmpeg_extracts_audio_first(tmp_path, monkeypatch):
     received_paths = []
 
     class PathRecordingTranscriber(FakeTranscriber):
-        def transcribe(self, path, on_progress=None):
+        def transcribe(self, path, on_progress=None, user=None):
             received_paths.append(path)
             return super().transcribe(path, on_progress)
 
@@ -134,7 +134,7 @@ def test_video_with_ffmpeg_extracts_audio_first(tmp_path, monkeypatch):
 def test_empty_transcript_gives_clear_error(tmp_path, audio_file):
     # 靜音檔／無語音內容：要給人看得懂的錯誤，且不該把空文字送去 LLM 分析
     class SilentTranscriber(FakeTranscriber):
-        def transcribe(self, path, on_progress=None):
+        def transcribe(self, path, on_progress=None, user=None):
             return ""
 
     orch = FakeOrchestrator()

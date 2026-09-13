@@ -26,10 +26,10 @@ class FakeTranscriber:
     device = "cpu"
     model_size = "fake"
 
-    def transcribe(self, path, on_progress=None):
+    def transcribe(self, path, on_progress=None, user=None):
         if on_progress:
             on_progress(1.0, "假逐字稿")
-        return "Kevin 說週五要 demo，鈺翔負責 prompt。"
+        return "Kevin 說週五要 demo，志明負責 prompt。"
 
 
 @pytest.fixture
@@ -63,7 +63,7 @@ def wait_for_job(client, job_id, timeout=5.0):
 def test_post_meeting_returns_analysis(client):
     resp = client.post(
         "/api/meetings",
-        json={"text": "鈺翔下週一交 prompt", "meeting_date": "2026-07-12"},
+        json={"text": "志明下週一交 prompt", "meeting_date": "2026-07-12"},
     )
     assert resp.status_code == 200
     body = resp.json()
@@ -167,7 +167,7 @@ def test_live_session_lost_can_fall_back_to_text_analysis(client):
 
     resp = client.post(
         "/api/meetings",
-        json={"text": "[0:05] 講者A：鈺翔下週一交 prompt", "meeting_date": "2026-07-12"},
+        json={"text": "[0:05] 講者A：志明下週一交 prompt", "meeting_date": "2026-07-12"},
     )
     assert resp.status_code == 200
     assert resp.json()["transcript"]
@@ -185,7 +185,7 @@ def test_live_chunk_transcribe_error_returns_502_with_reason(tmp_path):
         device = "gemini"
         model_size = "fake"
 
-        def transcribe(self, path, on_progress=None):
+        def transcribe(self, path, on_progress=None, user=None):
             raise RuntimeError("429 quota exceeded")
 
     settings = Settings(gemini_api_key=None, data_dir=tmp_path)
@@ -221,7 +221,7 @@ def test_live_chunk_after_finish_400(client):
 # ---- 任務管理 ----
 
 def make_meeting(client) -> str:
-    resp = client.post("/api/meetings", json={"text": "鈺翔下週一交 prompt"})
+    resp = client.post("/api/meetings", json={"text": "志明下週一交 prompt"})
     return resp.json()["meeting_id"]
 
 
@@ -318,7 +318,7 @@ def test_export_tasks_csv(client):
     assert "text/csv" in resp.headers["content-type"]
     body = resp.content.decode("utf-8-sig")
     assert "完成 Prompt 初版" in body
-    assert "王鈺翔" in body
+    assert "陳志明" in body
 
 
 def test_get_meeting_detail_includes_transcript(client):
@@ -392,10 +392,10 @@ def test_reanalyze_without_transcript_400(client):
 
 
 def test_replace_term_uniformly_and_adds_glossary(client):
-    meeting_id = make_meeting(client)  # 逐字稿："鈺翔下週一交 prompt"
+    meeting_id = make_meeting(client)  # 逐字稿："志明下週一交 prompt"
     resp = client.post(
         f"/api/meetings/{meeting_id}/replace-term",
-        json={"old": "鈺翔", "new": "玉翔", "add_to_glossary": True},
+        json={"old": "志明", "new": "玉翔", "add_to_glossary": True},
     )
     assert resp.status_code == 200
     body = resp.json()
@@ -427,7 +427,7 @@ def test_replace_term_not_found_is_noop(client):
     assert resp.status_code == 200
     assert resp.json()["replaced"] == 0
     assert resp.json()["glossary_added"] is False  # 沒替換到就不動詞彙表
-    assert client.get(f"/api/meetings/{meeting_id}").json()["transcript"] == "鈺翔下週一交 prompt"
+    assert client.get(f"/api/meetings/{meeting_id}").json()["transcript"] == "志明下週一交 prompt"
     assert client.get("/api/glossary").json()["terms"] == []
 
 
@@ -580,7 +580,7 @@ def test_meeting_events_ics_download(client):
 # ---- 關鍵字搜尋 ----
 
 def test_keyword_search_finds_meetings_with_snippet(client):
-    make_meeting(client)  # 逐字稿 = 「鈺翔下週一交 prompt」
+    make_meeting(client)  # 逐字稿 = 「志明下週一交 prompt」
     body = client.get("/api/search", params={"q": "prompt"}).json()
     assert body["hits"]
     hit = body["hits"][0]
@@ -648,14 +648,14 @@ def test_glossary_roundtrip_and_validation(client):
 
     resp = client.put(
         "/api/glossary",
-        json={"terms": [{"term": "王霖翔", "note": "人名", "person": False}, {"term": "TaskHub"}]},
+        json={"terms": [{"term": "林佳蓉", "note": "人名", "person": False}, {"term": "TaskHub"}]},
     )
     assert resp.status_code == 200
     assert resp.json()["terms"] == [
-        {"term": "王霖翔", "note": "人名", "person": False},
+        {"term": "林佳蓉", "note": "人名", "person": False},
         {"term": "TaskHub", "note": "", "person": False},
     ]
-    assert client.get("/api/glossary").json()["terms"][0]["term"] == "王霖翔"
+    assert client.get("/api/glossary").json()["terms"][0]["term"] == "林佳蓉"
     # 空詞彙要擋
     assert client.put("/api/glossary", json={"terms": [{"term": "  "}]}).status_code == 400
 
@@ -666,10 +666,10 @@ def test_person_terms_survive_backup(client):
     """講者名冊已併入詞彙表：標成人名的項目要跟著備份走。"""
     client.put(
         "/api/glossary",
-        json={"terms": [{"term": "王霖翔", "person": True}, {"term": "TaskHub"}]},
+        json={"terms": [{"term": "林佳蓉", "person": True}, {"term": "TaskHub"}]},
     )
     terms = client.get("/api/backup").json()["glossary"]
-    assert [t["term"] for t in terms] == ["王霖翔", "TaskHub"]
+    assert [t["term"] for t in terms] == ["林佳蓉", "TaskHub"]
     assert [t["person"] for t in terms] == [True, False]
 
 
@@ -854,12 +854,12 @@ def test_live_chunk_rejects_oversized_chunk(tiny_limit_client):
 def test_remember_persons_endpoint_marks_names_without_wiping_terms(client):
     """手動改講者名時前端只送那一個名字，不能把既有詞彙洗掉。"""
     client.put("/api/glossary", json={"terms": [{"term": "TaskHub", "note": "產品"}]})
-    resp = client.post("/api/glossary/persons", json={"names": ["王霖翔", "講者A"]})
+    resp = client.post("/api/glossary/persons", json={"names": ["林佳蓉", "講者A"]})
 
     assert resp.status_code == 200
-    assert resp.json()["names"] == ["王霖翔"]  # 代號被擋掉
+    assert resp.json()["names"] == ["林佳蓉"]  # 代號被擋掉
     terms = client.get("/api/glossary").json()["terms"]
-    assert [t["term"] for t in terms] == ["TaskHub", "王霖翔"]
+    assert [t["term"] for t in terms] == ["TaskHub", "林佳蓉"]
 
 
 # ---- 預錄聲音辨識人（選用功能）----
@@ -949,7 +949,7 @@ def test_enrolled_voices_rename_the_speaker_labels(tmp_path):
         device = "cpu"
         model_size = "fake"
 
-        def transcribe(self, path, on_progress=None, hint=None):
+        def transcribe(self, path, on_progress=None, hint=None, user=None):
             return "[0:01] 講者A：週五要 demo"
 
     class FixedMatcher:

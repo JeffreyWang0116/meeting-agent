@@ -55,10 +55,10 @@ def test_prompt_includes_glossary_terms():
     """自訂詞彙要進轉錄 prompt，人名/專有名詞才不會被聽錯。"""
     t = GeminiTranscriber(
         api_key="k",
-        glossary=lambda: [{"term": "王霖翔", "note": "人名"}],
+        glossary=lambda user=None: [{"term": "林佳蓉", "note": "人名"}],
     )
     prompt = t.build_prompt()
-    assert "王霖翔（人名）" in prompt
+    assert "林佳蓉（人名）" in prompt
     # 沒有詞彙時維持原本 prompt
     assert "詞彙" not in GeminiTranscriber(api_key="k").build_prompt()
 
@@ -160,7 +160,8 @@ def test_long_file_uses_strong_model_whole_pass(monkeypatch, tmp_path):
     used = []
 
     class Tracking(GeminiTranscriber):
-        def _transcribe_one(self, audio_path, hint, model=None, on_partial=None, voice_refs=None):
+        def _transcribe_one(self, audio_path, hint, model=None, on_partial=None,
+                            voice_refs=None, user=None):
             used.append(model or self.model)
             return "[0:00] 講者A：整場一次轉完\n[5:00] 講者B：分得很清楚"
 
@@ -181,7 +182,8 @@ def test_medium_file_still_uses_lite_chunking(monkeypatch, tmp_path):
     used = []
 
     class Tracking(GeminiTranscriber):
-        def _transcribe_one(self, audio_path, hint, model=None, on_partial=None, voice_refs=None):
+        def _transcribe_one(self, audio_path, hint, model=None, on_partial=None,
+                            voice_refs=None, user=None):
             used.append(model or self.model)
             return "[0:00] 講者A：內容"
 
@@ -202,7 +204,8 @@ def test_long_file_without_strong_model_falls_back_to_chunking(monkeypatch, tmp_
     used = []
 
     class Tracking(GeminiTranscriber):
-        def _transcribe_one(self, audio_path, hint, model=None, on_partial=None, voice_refs=None):
+        def _transcribe_one(self, audio_path, hint, model=None, on_partial=None,
+                            voice_refs=None, user=None):
             used.append(model or self.model)
             return "[0:00] 講者A：內容"
 
@@ -223,7 +226,8 @@ def test_strong_whole_disabled_when_threshold_zero(monkeypatch, tmp_path):
     used = []
 
     class Tracking(GeminiTranscriber):
-        def _transcribe_one(self, audio_path, hint, model=None, on_partial=None, voice_refs=None):
+        def _transcribe_one(self, audio_path, hint, model=None, on_partial=None,
+                            voice_refs=None, user=None):
             used.append(model or self.model)
             return "[0:00] 講者A：內容"
 
@@ -269,7 +273,8 @@ class FakeChunkedSetup:
         setup = self
 
         class Recording(GeminiTranscriber):
-            def _transcribe_one(self, audio_path, hint, model=None, on_partial=None, voice_refs=None):
+            def _transcribe_one(self, audio_path, hint, model=None, on_partial=None,
+                            voice_refs=None, user=None):
                 setup.hints.append(hint)
                 return setup.texts[str(audio_path)]
 
@@ -425,7 +430,8 @@ class RetryingSetup(FakeChunkedSetup):
         calls = {"n": 0}
 
         class Sequenced(GeminiTranscriber):
-            def _transcribe_one(self, audio_path, hint, model=None, on_partial=None, voice_refs=None):
+            def _transcribe_one(self, audio_path, hint, model=None, on_partial=None,
+                            voice_refs=None, user=None):
                 text = sequence[min(calls["n"], len(sequence) - 1)]
                 calls["n"] += 1
                 return text
@@ -570,7 +576,8 @@ def test_falls_back_to_stronger_model_when_retries_all_fail(monkeypatch, tmp_pat
     used_models = []
 
     class Tracking(GeminiTranscriber):
-        def _transcribe_one(self, audio_path, hint, model=None, on_partial=None, voice_refs=None):
+        def _transcribe_one(self, audio_path, hint, model=None, on_partial=None,
+                            voice_refs=None, user=None):
             used_models.append(model or self.model)
             if model == "gemini-flash-latest":
                 return "[0:00] 講者A：強模型標得好\n[0:05] 講者B：也標了"
@@ -595,7 +602,8 @@ def test_stronger_model_not_used_when_labels_are_fine(monkeypatch, tmp_path):
     used_models = []
 
     class Tracking(GeminiTranscriber):
-        def _transcribe_one(self, audio_path, hint, model=None, on_partial=None, voice_refs=None):
+        def _transcribe_one(self, audio_path, hint, model=None, on_partial=None,
+                            voice_refs=None, user=None):
             used_models.append(model or self.model)
             return "[0:00] 講者A：標得很好\n[0:05] 講者B：也是"
 
@@ -611,7 +619,8 @@ def test_fallback_result_discarded_if_worse(monkeypatch, tmp_path):
     FakeChunkedSetup(monkeypatch, tmp_path, duration=600, chunk_texts=["", ""])
 
     class Tracking(GeminiTranscriber):
-        def _transcribe_one(self, audio_path, hint, model=None, on_partial=None, voice_refs=None):
+        def _transcribe_one(self, audio_path, hint, model=None, on_partial=None,
+                            voice_refs=None, user=None):
             if model:
                 return "[0:00] 完全沒標\n[0:05] 也沒標"
             return "[0:00] 講者A：至少有一行\n[0:05] 沒標"
@@ -636,7 +645,8 @@ def test_no_fallback_when_not_configured(monkeypatch, tmp_path):
     calls = []
 
     class Tracking(GeminiTranscriber):
-        def _transcribe_one(self, audio_path, hint, model=None, on_partial=None, voice_refs=None):
+        def _transcribe_one(self, audio_path, hint, model=None, on_partial=None,
+                            voice_refs=None, user=None):
             calls.append(model)
             return "[0:00] 沒標\n[0:05] 也沒標"
 
@@ -658,7 +668,8 @@ def _all_failing(monkeypatch, tmp_path, chunks, **kw):
     used = []
 
     class Tracking(GeminiTranscriber):
-        def _transcribe_one(self, audio_path, hint, model=None, on_partial=None, voice_refs=None):
+        def _transcribe_one(self, audio_path, hint, model=None, on_partial=None,
+                            voice_refs=None, user=None):
             used.append(model or self.model)
             return "[0:00] 沒標\n[0:05] 也沒標"
 
@@ -696,7 +707,8 @@ def test_successful_chunks_do_not_consume_fallback_budget(monkeypatch, tmp_path)
     seen = {"n": 0}
 
     class Tracking(GeminiTranscriber):
-        def _transcribe_one(self, audio_path, hint, model=None, on_partial=None, voice_refs=None):
+        def _transcribe_one(self, audio_path, hint, model=None, on_partial=None,
+                            voice_refs=None, user=None):
             used.append(model or self.model)
             seen["n"] += 1
             # 第一段標得好，之後兩段都失敗
@@ -845,7 +857,8 @@ def test_chunked_progress_moves_within_a_chunk(monkeypatch, tmp_path):
     calls = []
 
     class Streaming(GeminiTranscriber):
-        def _transcribe_one(self, audio_path, hint, model=None, on_partial=None, voice_refs=None):
+        def _transcribe_one(self, audio_path, hint, model=None, on_partial=None,
+                            voice_refs=None, user=None):
             if on_partial:
                 on_partial("[1:00] 講者A：前半")
                 on_partial("[1:00] 講者A：前半\n[3:00] 講者A：後半")
@@ -877,7 +890,8 @@ def test_transcriber_reports_every_api_call(monkeypatch, tmp_path):
     t = GeminiTranscriber(api_key="k", chunk_seconds=240, on_call=lambda: calls.append(1))
     monkeypatch.setattr(
         t, "_transcribe_with_key",
-        lambda key, path, hint=None, model=None, on_partial=None, voice_refs=None: "[0:10] 講者A：內容",
+        lambda key, path, hint=None, model=None, on_partial=None, voice_refs=None,
+            user=None: "[0:10] 講者A：內容",
     )
     t.transcribe(src)
 
@@ -908,7 +922,8 @@ def test_voice_relay_grows_book_and_passes_refs_to_next_chunk(monkeypatch, tmp_p
     captured_refs = []
 
     class Recording(GeminiTranscriber):
-        def _transcribe_one(self, audio_path, hint, model=None, on_partial=None, voice_refs=None):
+        def _transcribe_one(self, audio_path, hint, model=None, on_partial=None,
+                            voice_refs=None, user=None):
             captured_refs.append(voice_refs)
             return setup.texts[str(audio_path)]
 
@@ -937,7 +952,8 @@ def test_voice_relay_disabled_by_default_never_cuts_clips(monkeypatch, tmp_path)
     captured_refs = []
 
     class Recording(GeminiTranscriber):
-        def _transcribe_one(self, audio_path, hint, model=None, on_partial=None, voice_refs=None):
+        def _transcribe_one(self, audio_path, hint, model=None, on_partial=None,
+                            voice_refs=None, user=None):
             captured_refs.append(voice_refs)
             return setup.texts[str(audio_path)]
 
@@ -968,7 +984,8 @@ def test_voice_relay_caps_at_max_speakers(monkeypatch, tmp_path):
     captured_refs = []
 
     class Recording(GeminiTranscriber):
-        def _transcribe_one(self, audio_path, hint, model=None, on_partial=None, voice_refs=None):
+        def _transcribe_one(self, audio_path, hint, model=None, on_partial=None,
+                            voice_refs=None, user=None):
             captured_refs.append(voice_refs)
             return setup.texts[str(audio_path)]
 
@@ -999,7 +1016,8 @@ def test_voice_relay_skips_speaker_when_clip_cut_fails(monkeypatch, tmp_path):
     captured_refs = []
 
     class Recording(GeminiTranscriber):
-        def _transcribe_one(self, audio_path, hint, model=None, on_partial=None, voice_refs=None):
+        def _transcribe_one(self, audio_path, hint, model=None, on_partial=None,
+                            voice_refs=None, user=None):
             captured_refs.append(voice_refs)
             return setup.texts[str(audio_path)]
 
@@ -1029,7 +1047,8 @@ def test_voice_relay_skips_speaker_without_valid_sample_span(monkeypatch, tmp_pa
     captured_refs = []
 
     class Recording(GeminiTranscriber):
-        def _transcribe_one(self, audio_path, hint, model=None, on_partial=None, voice_refs=None):
+        def _transcribe_one(self, audio_path, hint, model=None, on_partial=None,
+                            voice_refs=None, user=None):
             captured_refs.append(voice_refs)
             return setup.texts[str(audio_path)]
 
@@ -1067,7 +1086,8 @@ def test_voice_samples_do_not_overwrite_each_other(monkeypatch, tmp_path):
     captured_refs = []
 
     class Recording(GeminiTranscriber):
-        def _transcribe_one(self, audio_path, hint, model=None, on_partial=None, voice_refs=None):
+        def _transcribe_one(self, audio_path, hint, model=None, on_partial=None,
+                            voice_refs=None, user=None):
             captured_refs.append(voice_refs)
             return setup.texts[str(audio_path)]
 
@@ -1106,7 +1126,8 @@ def test_voice_sample_skipped_when_timestamp_drifts_past_the_chunk(monkeypatch, 
     monkeypatch.setattr(media, "cut_clip", fake_cut_clip)
 
     class Recording(GeminiTranscriber):
-        def _transcribe_one(self, audio_path, hint, model=None, on_partial=None, voice_refs=None):
+        def _transcribe_one(self, audio_path, hint, model=None, on_partial=None,
+                            voice_refs=None, user=None):
             return setup.texts[str(audio_path)]
 
     Recording(

@@ -393,7 +393,12 @@ def create_app(
             # 人名就是詞彙表裡標成人名的項目：使用者只維護一份清單，
             # 而且那些名字同時餵進轉錄，不會再被聽成別的字
             known_names=glossary.person_names,
-            remember_names=glossary.remember_persons,
+            # 刻意不接 remember_names：AI 認出的姓名自動寫回詞彙表會形成迴圈
+            # ——認出一次就寫進去，之後每一場的轉錄與分析 prompt 都帶著它，
+            # 模型於是把它套到不相干的講者身上，然後又被記住一次。使用者從沒
+            # 在詞彙表輸入過那個名字，卻場場都看到，而且完全查不出是哪來的。
+            # 姓名要進詞彙表只有一條路：使用者自己去設定，或手動改講者名
+            # （/api/glossary/persons）。
         ),
     )
     if transcriber is None:

@@ -16,9 +16,9 @@ def valid_json() -> str:
 
 def test_valid_response_parses_to_analysis():
     agent = DecisionAgent(generate=lambda prompt: valid_json())
-    analysis = agent.analyze("鈺翔下週一前把 prompt 寫好", meeting_date=MEETING_DATE)
+    analysis = agent.analyze("志明下週一前把 prompt 寫好", meeting_date=MEETING_DATE)
     assert analysis.meeting.title == "專題進度會議"
-    assert analysis.todos[0].owner == "王鈺翔"
+    assert analysis.todos[0].owner == "陳志明"
 
 
 def test_markdown_code_fence_stripped():
@@ -116,9 +116,9 @@ def test_prompt_includes_glossary_terms():
 
     prompt = build_prompt(
         "測試", MEETING_DATE,
-        glossary=[{"term": "王霖翔", "note": "人名"}],
+        glossary=[{"term": "林佳蓉", "note": "人名"}],
     )
-    assert "王霖翔（人名）" in prompt
+    assert "林佳蓉（人名）" in prompt
     assert "詞彙" in prompt
     # 空詞彙表不出現詞彙段落
     assert "詞彙表" not in build_prompt("測試", MEETING_DATE)
@@ -131,7 +131,7 @@ def test_glossary_line_forbids_guessing_owner_from_vocab():
 
     prompt = build_prompt(
         "測試", MEETING_DATE,
-        glossary=[{"term": "王霖翔", "note": "人名"}],
+        glossary=[{"term": "林佳蓉", "note": "人名"}],
     )
     assert "不代表" in prompt or "不能" in prompt or "禁止" in prompt
     assert "owner" in prompt.split("已知詞彙表")[1].split("。")[0]
@@ -146,7 +146,7 @@ def test_analyze_uses_injected_glossary_provider():
 
     agent = DecisionAgent(
         generate=fake_generate,
-        glossary=lambda: [{"term": "TaskHub", "note": "產品名"}],
+        glossary=lambda user=None: [{"term": "TaskHub", "note": "產品名"}],
     )
     agent.analyze("測試", meeting_date=MEETING_DATE)
     assert "TaskHub（產品名）" in captured["prompt"]
@@ -271,10 +271,10 @@ def test_per_meeting_terms_join_the_global_glossary_in_the_prompt():
     prompt = build_prompt(
         "逐字稿",
         date(2026, 8, 10),
-        glossary=[{"term": "王霖翔", "note": "人名"}],
+        glossary=[{"term": "林佳蓉", "note": "人名"}],
         extra_terms=[{"term": "TaskHub", "note": "本次專案代號"}],
     )
-    assert "王霖翔（人名）" in prompt
+    assert "林佳蓉（人名）" in prompt
     assert "TaskHub（本次專案代號）" in prompt
 
 

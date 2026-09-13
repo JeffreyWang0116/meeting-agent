@@ -6,6 +6,7 @@ import os
 import sys
 import threading
 from pathlib import Path
+from app.stores.base import DEFAULT_USER
 
 logger = logging.getLogger(__name__)
 
@@ -105,7 +106,8 @@ class Transcriber:
             logger.info("Whisper 模型已載入：%s（cpu）", model_size)
             return self._model
 
-    def transcribe(self, path, on_progress=None, hint: str | None = None) -> str:
+    def transcribe(self, path, on_progress=None, hint: str | None = None,
+                   user: str = DEFAULT_USER) -> str:
         """轉錄音檔/影片檔，回傳全文。
 
         on_progress(fraction, segment_text)：每完成一個段落呼叫一次，
@@ -116,20 +118,20 @@ class Transcriber:
         """
         model = self._ensure_model()
         try:
-            return self._run(model, path, on_progress)
+            return self._run(model, path, on_progress, user)
         except (RuntimeError, OSError) as exc:
             # CUDA 函式庫要到實際運算才載入，缺 cublas/cudnn 時
             # 建模不會失敗、轉錄才爆，所以退回 CPU 要放在這裡
             if self.device != "cuda" or not _is_cuda_error(exc):
                 raise
             logger.warning("CUDA 執行階段失敗（%s），退回 CPU 重新轉錄", exc)
-            return self._run(self._rebuild_on_cpu(), path, on_progress)
+            return self._run(self._rebuild_on_cpu(), path, on_progress, user)
 
-    def _run(self, model, path, on_progress) -> str:
+    def _run(self, model, path, on_progress, user: str = DEFAULT_USER) -> str:
         from app.glossary import glossary_prompt_line
 
         initial_prompt = _INITIAL_PROMPT
-        terms = glossary_prompt_line(self._glossary() if self._glossary else [])
+        terms = glossary_prompt_line(self._glossary(user) if self._glossary else [])
         if terms:
             initial_prompt += f"對話中出現的詞彙：{terms}。"
         segments, info = model.transcribe(

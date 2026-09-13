@@ -28,8 +28,8 @@ def gold(task, owner=None, due=None):
 
 
 def test_exact_match_counts_tp_and_fields():
-    pred = [gold("完成 Prompt 初版", "王鈺翔", "2026-07-20")]
-    g = [gold("完成 Prompt 初版", "王鈺翔", "2026-07-20")]
+    pred = [gold("完成 Prompt 初版", "陳志明", "2026-07-20")]
+    g = [gold("完成 Prompt 初版", "陳志明", "2026-07-20")]
     r = match_todos(pred, g)
     assert (r["tp"], r["fp"], r["fn"]) == (1, 0, 0)
     assert r["owner_correct"] == 1
@@ -48,7 +48,7 @@ def test_no_match_below_threshold():
 
 
 def test_wrong_owner_still_matches_task_but_not_field():
-    r = match_todos([gold("完成 Prompt 初版", "Kevin")], [gold("完成 Prompt 初版", "王鈺翔")])
+    r = match_todos([gold("完成 Prompt 初版", "Kevin")], [gold("完成 Prompt 初版", "陳志明")])
     assert r["tp"] == 1
     assert r["owner_correct"] == 0
 

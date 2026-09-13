@@ -16,6 +16,7 @@ from pathlib import Path
 
 from app.gemini_keys import KeyPool, call_with_rotation
 from app.glossary import terms_hint_line
+from app.stores.base import DEFAULT_USER
 from app.transcription import media
 from app.transcription.segments import (
     chunk_hint,
@@ -176,11 +177,11 @@ class GeminiTranscriber:
         # 「預設開」由 Settings 層的預設值負責（與 max_fallback_chunks 同一慣例）
         self.voice_relay_max_speakers = voice_relay_max_speakers
 
-    def build_prompt(self, hint: str | None = None) -> str:
+    def build_prompt(self, hint: str | None = None, user: str = DEFAULT_USER) -> str:
         # 詞彙表含人名，措辭要明講它只管內文用字，否則模型會拿它當講者標籤用；
         # 那句話與「本次專用詞彙」共用，集中在 terms_hint_line
         prompt = _TRANSCRIBE_PROMPT + terms_hint_line(
-            self._glossary() if self._glossary else []
+            self._glossary(user) if self._glossary else []
         )
         if hint:  # 跨段講者一致性提示＋本次專用詞彙（即時聆聽逐段轉錄時帶入）
             prompt += hint
@@ -188,20 +189,21 @@ class GeminiTranscriber:
 
     # ---- 對外介面（與 Whisper Transcriber 相同簽名）----
 
-    def transcribe(self, path, on_progress=None, hint: str | None = None) -> str:
+    def transcribe(self, path, on_progress=None, hint: str | None = None,
+                   user: str = DEFAULT_USER) -> str:
         audio_path = self._ensure_audio(Path(path))
         duration = media.audio_duration(audio_path) if media.ffmpeg_available() else None
 
         # 長檔：強模型整份單次轉錄（見 strong_model 的說明）
         if self._use_strong_whole(duration):
             return self._transcribe_whole(
-                audio_path, on_progress, hint, self.strong_model, duration
+                audio_path, on_progress, hint, self.strong_model, duration, user
             )
 
         chunks = self._plan_chunks(audio_path, duration)
         if chunks:
-            return self._transcribe_chunked(chunks, on_progress, hint)
-        return self._transcribe_whole(audio_path, on_progress, hint, None, duration)
+            return self._transcribe_chunked(chunks, on_progress, hint, user)
+        return self._transcribe_whole(audio_path, on_progress, hint, None, duration, user)
 
     # ---- 內部 ----
 
@@ -220,6 +222,7 @@ class GeminiTranscriber:
         hint: str | None,
         model: str | None,
         duration: float | None = None,
+        user: str = DEFAULT_USER,
     ) -> str:
         """整份單次轉錄（不分段）。model=None 用預設模型（短檔走 lite），
         指定 model 則用該模型（長檔走強模型）。
@@ -247,7 +250,9 @@ class GeminiTranscriber:
 
         text = drop_empty_lines(
             normalize_timestamps(
-                self._transcribe_one(audio_path, hint, model=model, on_partial=report)
+                self._transcribe_one(
+                    audio_path, hint, model=model, on_partial=report, user=user
+                )
             )
         )
         if on_progress:
@@ -273,7 +278,9 @@ class GeminiTranscriber:
             return []
         return chunks if len(chunks) > 1 else []
 
-    def _transcribe_chunked(self, chunks, on_progress, hint: str | None) -> str:
+    def _transcribe_chunked(
+        self, chunks, on_progress, hint: str | None, user: str = DEFAULT_USER
+    ) -> str:
         """逐段轉錄再縫合：時間戳平移回整場時間，講者標籤跨段沿用同一組。"""
         parts: list[str] = []
         speakers: list[str] = []
@@ -334,6 +341,7 @@ class GeminiTranscriber:
                     retry_budget=retries_left,
                     on_partial=inner_reporter(index),
                     voice_refs=voice_refs,
+                    user=user,
                 )
                 if used_fallback:
                     fallback_used += 1
@@ -420,6 +428,7 @@ class GeminiTranscriber:
         retry_budget: int | None = None,
         on_partial=None,
         voice_refs: list[dict] | None = None,
+        user: str = DEFAULT_USER,
     ) -> tuple[str, bool, int]:
         """轉錄一段，講者標註率太低就重跑，取標得最好的那次。
 
@@ -442,7 +451,7 @@ class GeminiTranscriber:
         retries_used = 0
         for attempt in range(allowed_retries + 1):
             text = self._transcribe_one(
-                chunk, hint, on_partial=on_partial, voice_refs=voice_refs
+                chunk, hint, on_partial=on_partial, voice_refs=voice_refs, user=user
             )
             if attempt:
                 retries_used += 1
@@ -462,7 +471,7 @@ class GeminiTranscriber:
             logger.info("%s 改用 %s 重跑", chunk.name, self.fallback_model)
             text = self._transcribe_one(
                 chunk, hint, model=self.fallback_model, on_partial=on_partial,
-                voice_refs=voice_refs,
+                voice_refs=voice_refs, user=user,
             )
             if speaker_label_ratio(text) > best_ratio:
                 best = text
@@ -476,6 +485,7 @@ class GeminiTranscriber:
         model: str | None = None,
         on_partial=None,
         voice_refs: list[dict] | None = None,
+        user: str = DEFAULT_USER,
     ) -> str:
         """on_partial(累積至今的文字)：有給就走串流，模型每吐一段就呼叫一次。
 
@@ -500,7 +510,7 @@ class GeminiTranscriber:
             call_with_rotation(
                 self._pool,
                 lambda key: self._transcribe_with_key(
-                    key, audio_path, hint, model, on_partial, voice_refs
+                    key, audio_path, hint, model, on_partial, voice_refs, user
                 ),
                 on_call=self._on_call,
             )
@@ -533,6 +543,7 @@ class GeminiTranscriber:
         model: str | None = None,
         on_partial=None,
         voice_refs: list[dict] | None = None,
+        user: str = DEFAULT_USER,
     ) -> str:
         client = self._client(key)
         # 聲音簿的樣本檔要先於主音訊上傳，contents 裡才排得在「請沿用代號」
@@ -583,7 +594,7 @@ class GeminiTranscriber:
                 uploaded = client.files.get(name=uploaded.name)
             args = {
                 "model": model or self.model,
-                "contents": [*resolved_refs, self.build_prompt(hint), uploaded],
+                "contents": [*resolved_refs, self.build_prompt(hint, user), uploaded],
                 "config": {"temperature": 0.0},
             }
             if on_partial is None:

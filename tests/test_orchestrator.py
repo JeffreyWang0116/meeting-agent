@@ -26,7 +26,7 @@ def orchestrator(tmp_path):
 
 def test_full_pipeline_produces_complete_result(orchestrator):
     pipeline, store = orchestrator
-    result = pipeline.process_transcript("鈺翔：我下週一前把 prompt 寫好\r\n\r\n\r\nKevin: ok")
+    result = pipeline.process_transcript("志明：我下週一前把 prompt 寫好\r\n\r\n\r\nKevin: ok")
 
     assert result["meeting_id"]
     assert result["analysis"]["meeting"]["title"] == "專題進度會議"
@@ -45,7 +45,7 @@ def test_disabled_todos_feature_creates_no_tasks(orchestrator):
     """代辦事項功能沒開時，不只畫面不顯示，任務庫也不該真的多出任務。"""
     pipeline, store = orchestrator
     result = pipeline.process_transcript(
-        "鈺翔：我下週一前把 prompt 寫好", features=set()
+        "志明：我下週一前把 prompt 寫好", features=set()
     )
     assert result["analysis"]["todos"] == []
     assert result["analysis"]["meeting"]["summary"] is None

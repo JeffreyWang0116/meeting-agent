@@ -13,7 +13,7 @@ class FakeTranscriber:
         self.texts = list(texts)
         self.received = []
 
-    def transcribe(self, path, on_progress=None):
+    def transcribe(self, path, on_progress=None, user=None):
         self.received.append(path)
         return self.texts.pop(0)
 
@@ -128,7 +128,7 @@ class HintRecordingTranscriber:
         self.texts = list(texts)
         self.hints = []
 
-    def transcribe(self, path, on_progress=None, hint=None):
+    def transcribe(self, path, on_progress=None, hint=None, user=None):
         self.hints.append(hint)
         return self.texts.pop(0)
 
@@ -187,7 +187,7 @@ class GatedTranscriber:
     def __init__(self):
         self.gates = {}
 
-    def transcribe(self, path, on_progress=None, hint=None):
+    def transcribe(self, path, on_progress=None, hint=None, user=None):
         from pathlib import Path
 
         text = Path(path).read_bytes().decode()

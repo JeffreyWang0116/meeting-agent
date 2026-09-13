@@ -135,7 +135,7 @@ def test_glossary_is_per_account(tmp_path):
     client, _ = make_app(tmp_path)
     client.put(
         "/api/glossary",
-        json={"terms": [{"term": "王霖翔", "note": "人名"}]},
+        json={"terms": [{"term": "林佳蓉", "note": "人名"}]},
         headers=as_user(None, "alice"),
     )
     assert client.get("/api/glossary", headers=as_user(None, "bob")).json()["terms"] == []

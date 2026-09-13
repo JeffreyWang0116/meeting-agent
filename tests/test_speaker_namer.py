@@ -219,7 +219,7 @@ def test_roster_reads_and_writes_are_scoped_to_the_user():
     asked, remembered = [], []
 
     agent = SpeakerNamerAgent(
-        generate=lambda prompt: _reply({"講者A": "王霖翔"}),
+        generate=lambda prompt: _reply({"講者A": "林佳蓉"}),
         known_names=lambda user=None: (asked.append(user), [])[1],
         remember_names=lambda names, user=None: remembered.append((user, names)),
     )

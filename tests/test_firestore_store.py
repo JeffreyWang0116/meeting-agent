@@ -112,7 +112,7 @@ def test_tasks_flattened_with_meeting_reference_and_default_status():
     assert len(tasks) == 1
     assert tasks[0]["meeting_id"] == meeting_id
     assert tasks[0]["task"] == "完成 Prompt 初版"
-    assert tasks[0]["owner"] == "王鈺翔"
+    assert tasks[0]["owner"] == "陳志明"
     assert tasks[0]["id"]
     assert tasks[0]["status"] == "todo"
 
@@ -236,18 +236,18 @@ def test_glossary_get_and_save_persists():
     db = FakeFirestore()
     store = make_store(db)
     assert store.get_glossary() == []
-    store.save_glossary([{"term": "王霖翔", "note": "人名"}])
-    assert store.get_glossary() == [{"term": "王霖翔", "note": "人名"}]
+    store.save_glossary([{"term": "林佳蓉", "note": "人名"}])
+    assert store.get_glossary() == [{"term": "林佳蓉", "note": "人名"}]
     # 換一個 store 連同一個後端（等同重啟）仍在
-    assert make_store(db).get_glossary() == [{"term": "王霖翔", "note": "人名"}]
+    assert make_store(db).get_glossary() == [{"term": "林佳蓉", "note": "人名"}]
 
 
 def test_speaker_roster_get_and_save_persists():
     db = FakeFirestore()
     store = make_store(db)
     assert store.get_speaker_roster() == []
-    store.save_speaker_roster(["王霖翔", "李經理"])
-    assert make_store(db).get_speaker_roster() == ["王霖翔", "李經理"]
+    store.save_speaker_roster(["林佳蓉", "李經理"])
+    assert make_store(db).get_speaker_roster() == ["林佳蓉", "李經理"]
 
 
 def test_add_manual_task():
@@ -264,7 +264,7 @@ def test_export_import_roundtrip():
     store = make_store(db)
     store.save_meeting(make_analysis(), transcript="逐字稿原文")
     store.save_glossary([{"term": "TaskHub", "note": ""}])
-    store.save_speaker_roster(["王霖翔"])
+    store.save_speaker_roster(["林佳蓉"])
 
     dump = store.export_all()
     assert dump["meetings"][0]["transcript"] == "逐字稿原文"
@@ -276,7 +276,7 @@ def test_export_import_roundtrip():
     assert other.list_meetings()[0]["meeting"]["title"] == "專題進度會議"
     assert other.list_tasks()[0]["task"] == "完成 Prompt 初版"
     assert other.get_glossary() == [{"term": "TaskHub", "note": ""}]
-    assert other.get_speaker_roster() == ["王霖翔"]
+    assert other.get_speaker_roster() == ["林佳蓉"]
 
     # 整份覆蓋：同一後端匯入空資料會清掉
     store.import_all({"meetings": [], "tasks": []})

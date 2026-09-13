@@ -153,7 +153,7 @@ class LiveSessionManager:
             # 聲紋比對要回頭取這段音檔，副檔名依上傳而異，記下來才找得到
             session.chunk_paths[index] = chunk_path
 
-        text = self._transcribe(chunk_path, hint).strip()
+        text = self._transcribe(chunk_path, hint, session.user).strip()
         if text:
             text = shift_timestamps(text, offset_seconds)
 
@@ -174,20 +174,27 @@ class LiveSessionManager:
 
         return {"text": text, "translation": translation, "transcript": transcript}
 
-    def _transcribe(self, path: Path, hint: str | None) -> str:
-        """轉錄一段。transcriber 是注入的鴨子型別，簽名不一定收 hint，
-        支援才傳（跨段講者提示只對會標講者的後端有意義）。"""
+    def _transcribe(self, path: Path, hint: str | None, user: str = DEFAULT_USER) -> str:
+        """轉錄一段。transcriber 是注入的鴨子型別，簽名不一定收 hint/user，
+        支援才傳（跨段講者提示只對會標講者的後端有意義）。
+
+        user 一定要帶到：詞彙表依帳號分開，少了它會讀到 DEFAULT_USER 那桶
+        舊資料，把別人的詞彙灌進這場聆聽的轉錄提示裡。
+        """
         fn = self._transcriber.transcribe
-        if hint:
-            try:
-                params = inspect.signature(fn).parameters
-                if "hint" in params or any(
-                    p.kind == p.VAR_KEYWORD for p in params.values()
-                ):
-                    return fn(path, hint=hint)
-            except (TypeError, ValueError):
-                pass
-        return fn(path)
+        try:
+            params = inspect.signature(fn).parameters
+            takes = lambda name: name in params or any(
+                p.kind == p.VAR_KEYWORD for p in params.values()
+            )
+        except (TypeError, ValueError):
+            takes = lambda name: False
+        kwargs = {}
+        if hint and takes("hint"):
+            kwargs["hint"] = hint
+        if takes("user"):
+            kwargs["user"] = user
+        return fn(path, **kwargs)
 
     def transcript(self, session_id: str, user: str = DEFAULT_USER) -> str:
         with self._lock:

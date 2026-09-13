@@ -55,7 +55,7 @@ class Orchestrator:
         text = self.parser.parse(raw_text)
         corrections: list[dict] = []
         if correct_typos and self.corrector:
-            text, corrections = self.corrector.correct(text)
+            text, corrections = self.corrector.correct(text, user)
         speaker_names: list[dict] = []
         # 預設不對應姓名：轉錄輸出的講者A/B/C 已可用，補真名是選用的加分項。
         # 台語等語者辨識不穩的錄音，猜錯的名字比代號更糟，所以由呼叫端明確開啟
@@ -68,7 +68,8 @@ class Orchestrator:
                 else self.namer.name_speakers(text, user=user)
             )
         analysis = self.decision.analyze(
-            text, meeting_date=meeting_date, kind=kind, features=features, extra_terms=terms
+            text, meeting_date=meeting_date, kind=kind, features=features,
+            extra_terms=terms, user=user,
         )
         meeting_id = self.executor.execute(
             analysis, transcript=text, kind=kind, terms=terms, user=user

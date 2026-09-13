@@ -35,5 +35,5 @@ def test_trailing_spaces_stripped_per_line(parser):
 
 
 def test_mixed_language_content_preserved(parser):
-    text = "Kevin: 我們用 FastAPI 好了\n鈺翔: ok 那 deadline 訂下週五"
+    text = "Kevin: 我們用 FastAPI 好了\n志明: ok 那 deadline 訂下週五"
     assert parser.parse(text) == text

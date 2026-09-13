@@ -128,9 +128,13 @@ class MediaJobManager:
             # 沒有詞彙時不帶這個參數，呼叫形狀與加這個功能之前一模一樣
             hint = terms_hint_line(terms, "本次會議專用詞彙")
             transcript = (
-                self._transcriber.transcribe(path, on_progress=on_progress, hint=hint)
+                self._transcriber.transcribe(
+                    path, on_progress=on_progress, hint=hint, user=user
+                )
                 if hint
-                else self._transcriber.transcribe(path, on_progress=on_progress)
+                else self._transcriber.transcribe(
+                    path, on_progress=on_progress, user=user
+                )
             )
             if not transcript.strip():
                 self._update(

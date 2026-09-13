@@ -73,11 +73,11 @@ def test_cannot_update_or_delete_another_users_data(store):
 
 def test_glossary_and_roster_are_per_user(store):
     store.save_glossary([{"term": "TaskHub", "note": ""}], user="userA")
-    store.save_speaker_roster(["王霖翔"], user="userA")
+    store.save_speaker_roster(["林佳蓉"], user="userA")
 
     assert store.get_glossary(user="userA") == [{"term": "TaskHub", "note": ""}]
     assert store.get_glossary(user="userB") == []
-    assert store.get_speaker_roster(user="userA") == ["王霖翔"]
+    assert store.get_speaker_roster(user="userA") == ["林佳蓉"]
     assert store.get_speaker_roster(user="userB") == []
 
 
@@ -169,14 +169,14 @@ def test_legacy_glossary_and_roster_files_are_still_readable(tmp_path):
     import json
 
     (tmp_path / "glossary.json").write_text(
-        json.dumps({"terms": [{"term": "王霖翔", "note": "人名"}]}, ensure_ascii=False),
+        json.dumps({"terms": [{"term": "林佳蓉", "note": "人名"}]}, ensure_ascii=False),
         encoding="utf-8")
     (tmp_path / "speakers.json").write_text(
-        json.dumps({"names": ["王霖翔", "Kevin"]}, ensure_ascii=False), encoding="utf-8")
+        json.dumps({"names": ["林佳蓉", "Kevin"]}, ensure_ascii=False), encoding="utf-8")
 
     store = LocalJsonStore(tmp_path / "db.json")
-    assert store.get_glossary() == [{"term": "王霖翔", "note": "人名"}]
-    assert store.get_speaker_roster() == ["王霖翔", "Kevin"]
+    assert store.get_glossary() == [{"term": "林佳蓉", "note": "人名"}]
+    assert store.get_speaker_roster() == ["林佳蓉", "Kevin"]
 
     # 第一次寫入就把舊格式搬進 by_user，不留兩種格式並存
     store.save_glossary([{"term": "TaskHub", "note": ""}])

@@ -1,7 +1,7 @@
 """自訂詞彙表：人名、產品名等專有名詞。
 
 轉錄（Gemini / Whisper）與分析（Decision Agent）的 prompt 都會帶上這份
-詞彙表，「王霖翔」才不會被聽成「王林祥」，省去事後人工校正。
+詞彙表，「林佳蓉」才不會被聽成「林家容」，省去事後人工校正。
 
 持久化交給 TaskStore（get_glossary / save_glossary）——本地走 JSON 檔、
 雲端走 Firestore，與任務/會議同一後端，部署重啟也不會遺失。
@@ -17,7 +17,7 @@ MAX_TERMS = 200
 
 
 def glossary_prompt_line(terms: list[dict]) -> str:
-    """把詞彙表串成 prompt 片段：「王霖翔（人名）、TaskHub」；空表回傳空字串。"""
+    """把詞彙表串成 prompt 片段：「林佳蓉（人名）、TaskHub」；空表回傳空字串。"""
     if not terms:
         return ""
     return "、".join(
@@ -113,7 +113,13 @@ class Glossary:
         return [t["term"] for t in self.terms(user) if t.get("person")]
 
     def remember_persons(self, names, user: str = DEFAULT_USER) -> None:
-        """AI 命名成功時把姓名記進詞彙表並標為人名。
+        """把姓名記進詞彙表並標為人名。
+
+        只給「使用者手動改講者名」那條路徑（/api/glossary/persons）用。
+        **刻意不接到 AI 命名上**：自動記憶會形成迴圈——認出一次就寫進詞彙表，
+        之後每一場的轉錄與分析 prompt 都帶著它，模型於是把它套到不相干的講者
+        身上，然後又被記住一次。使用者從沒輸入過那個名字，卻場場都看到。
+
 
         這是分析流程的副作用，**絕不拋例外**：記不記得起來，都不該讓一場
         已經分析完的會議失敗。代號、含冒號、過長的姓名一律略過。

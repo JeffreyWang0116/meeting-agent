@@ -1,6 +1,6 @@
 """Corrector Agent：轉錄後的錯字校正模組。
 
-語音辨識常把同音字聽錯（「函式」→「涵式」、人名「王霖翔」→「王林祥」）。
+語音辨識常把同音字聽錯（「函式」→「涵式」、人名「林佳蓉」→「林家容」）。
 自訂詞彙表（glossary）只能逐詞比對發音，無法靠上下文判斷；這個 Agent 補上
 那一段：把整份逐字稿交給 LLM，用上下文找出聽錯的字詞。
 
@@ -20,6 +20,7 @@ import re
 
 from app.gemini_keys import KeyPool, call_with_rotation
 from app.glossary import glossary_prompt_line
+from app.stores.base import DEFAULT_USER
 
 _CODE_FENCE = re.compile(r"^\s*```(?:json)?\s*|\s*```\s*$")
 
@@ -77,7 +78,7 @@ class CorrectorAgent:
 
     # ---- 對外介面 ----
 
-    def correct(self, transcript: str) -> tuple[str, list[dict]]:
+    def correct(self, transcript: str, user: str = DEFAULT_USER) -> tuple[str, list[dict]]:
         """回傳 (校正後的逐字稿, 實際套用的修正清單)。
 
         任何一步出錯都回傳原文＋空清單：校正是加分項，不該擋住整個分析流程。
@@ -85,15 +86,15 @@ class CorrectorAgent:
         if not transcript or not transcript.strip():
             return transcript, []
         try:
-            raw = self._generate(self.build_prompt(transcript))
+            raw = self._generate(self.build_prompt(transcript, user))
             corrections = _parse_corrections(raw)
         except Exception:
             return transcript, []
         return apply_corrections(transcript, corrections)
 
-    def build_prompt(self, transcript: str) -> str:
+    def build_prompt(self, transcript: str, user: str = DEFAULT_USER) -> str:
         glossary_line = ""
-        terms = glossary_prompt_line(self._glossary() if self._glossary else [])
+        terms = glossary_prompt_line(self._glossary(user) if self._glossary else [])
         if terms:
             glossary_line = (
                 f"7. 已知詞彙表（人名與專有名詞一律以此寫法為準，"

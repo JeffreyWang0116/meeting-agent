@@ -30,7 +30,7 @@ def test_tasks_are_flattened_with_meeting_reference(tmp_path):
     task = tasks[0]
     assert task["meeting_id"] == meeting_id
     assert task["task"] == "完成 Prompt 初版"
-    assert task["owner"] == "王鈺翔"
+    assert task["owner"] == "陳志明"
     assert task["id"]
 
 
@@ -198,19 +198,19 @@ def test_glossary_get_and_save_persists(tmp_path):
     path = tmp_path / "db.json"
     store = LocalJsonStore(path)
     assert store.get_glossary() == []
-    store.save_glossary([{"term": "王霖翔", "note": "人名"}])
-    assert store.get_glossary() == [{"term": "王霖翔", "note": "人名"}]
+    store.save_glossary([{"term": "林佳蓉", "note": "人名"}])
+    assert store.get_glossary() == [{"term": "林佳蓉", "note": "人名"}]
     # 重載後仍在（落地）
-    assert LocalJsonStore(path).get_glossary() == [{"term": "王霖翔", "note": "人名"}]
+    assert LocalJsonStore(path).get_glossary() == [{"term": "林佳蓉", "note": "人名"}]
 
 
 def test_speaker_roster_get_and_save_persists(tmp_path):
     path = tmp_path / "db.json"
     store = LocalJsonStore(path)
     assert store.get_speaker_roster() == []
-    store.save_speaker_roster(["王霖翔", "李經理"])
-    assert store.get_speaker_roster() == ["王霖翔", "李經理"]
-    assert LocalJsonStore(path).get_speaker_roster() == ["王霖翔", "李經理"]
+    store.save_speaker_roster(["林佳蓉", "李經理"])
+    assert store.get_speaker_roster() == ["林佳蓉", "李經理"]
+    assert LocalJsonStore(path).get_speaker_roster() == ["林佳蓉", "李經理"]
 
 
 def test_list_meetings_newest_first(tmp_path):
@@ -240,7 +240,7 @@ def test_export_import_roundtrip_and_overwrite(tmp_path):
     store = LocalJsonStore(tmp_path / "db.json")
     store.save_meeting(make_analysis(), transcript="逐字稿原文")
     store.save_glossary([{"term": "TaskHub", "note": ""}])
-    store.save_speaker_roster(["王霖翔"])
+    store.save_speaker_roster(["林佳蓉"])
 
     dump = store.export_all()
     assert dump["meetings"][0]["transcript"] == "逐字稿原文"  # 備份含逐字稿全文
@@ -252,7 +252,7 @@ def test_export_import_roundtrip_and_overwrite(tmp_path):
     assert fresh.list_meetings()[0]["meeting"]["title"] == "專題進度會議"
     assert fresh.list_tasks()[0]["task"] == "完成 Prompt 初版"
     assert fresh.get_glossary() == [{"term": "TaskHub", "note": ""}]
-    assert fresh.get_speaker_roster() == ["王霖翔"]
+    assert fresh.get_speaker_roster() == ["林佳蓉"]
 
     # import 是「整份覆蓋」：匯入空資料會清掉現有內容
     fresh.import_all({"meetings": [], "tasks": []})

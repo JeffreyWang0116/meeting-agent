@@ -25,10 +25,10 @@ class FakeTranscriber:
     device = "cpu"
     model_size = "fake"
 
-    def transcribe(self, path, on_progress=None):
+    def transcribe(self, path, on_progress=None, user=None):
         if on_progress:
             on_progress(1.0, "假逐字稿")
-        return "Kevin 說週五要 demo，鈺翔負責 prompt。"
+        return "Kevin 說週五要 demo，志明負責 prompt。"
 
 
 @pytest.fixture

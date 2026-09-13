@@ -17,6 +17,7 @@ from pydantic import ValidationError
 from app.gemini_keys import KeyPool, call_with_rotation
 from app.glossary import glossary_prompt_line
 from app.models import MeetingAnalysis
+from app.stores.base import DEFAULT_USER
 
 
 class DecisionAgentError(Exception):
@@ -296,6 +297,7 @@ class DecisionAgent:
         kind: str | None = None,
         features: set[str] | None = None,
         extra_terms: list[dict] | None = None,
+        user: str = DEFAULT_USER,
     ) -> MeetingAnalysis:
         meeting_date = meeting_date or date.today()
         # features=None：向後相容，等同全部功能都開
@@ -304,7 +306,7 @@ class DecisionAgent:
             transcript,
             meeting_date,
             kind=kind,
-            glossary=self._glossary() if self._glossary else None,
+            glossary=self._glossary(user) if self._glossary else None,
             features=features,
             extra_terms=extra_terms,
         )

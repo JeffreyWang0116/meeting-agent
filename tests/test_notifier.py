@@ -35,7 +35,7 @@ def test_email_draft_contains_key_sections(tmp_path, analysis):
     assert "討論 7 月里程碑進度與分工。" in draft          # 摘要
     assert "採用 FastAPI 作為後端框架" in draft            # 決議
     assert "完成 Prompt 初版" in draft                     # 代辦
-    assert "王鈺翔" in draft                               # 負責人
+    assert "陳志明" in draft                               # 負責人
     assert "要不要支援英文介面" in draft                   # 待確認
     assert "高" in draft                                   # 優先級中文化
 
@@ -70,7 +70,7 @@ def test_calendar_event_shape_matches_google_api(tmp_path, analysis):
     assert event["summary"] == "【代辦】完成 Prompt 初版"
     assert event["start"] == {"date": "2026-07-20"}
     assert event["end"] == {"date": "2026-07-21"}  # Google 全天事件 end 為隔天（exclusive）
-    assert "王鈺翔" in event["description"]
+    assert "陳志明" in event["description"]
 
 
 def test_todos_without_due_date_get_no_calendar_event(tmp_path, analysis):

@@ -16,7 +16,7 @@ def make_valid_payload():
             "title": "專題進度會議",
             "date": "2026-07-12",
             "summary": "討論 7 月里程碑進度與分工。",
-            "attendees": ["王鈺翔", "Kevin"],
+            "attendees": ["陳志明", "Kevin"],
         },
         "decisions": [
             {"description": "採用 FastAPI 作為後端框架", "context": "行動端之後可共用 API"}
@@ -24,10 +24,10 @@ def make_valid_payload():
         "todos": [
             {
                 "task": "完成 Prompt 初版",
-                "owner": "王鈺翔",
+                "owner": "陳志明",
                 "due_date": "2026-07-20",
                 "priority": "high",
-                "source_quote": "鈺翔你下週一前把 prompt 寫好",
+                "source_quote": "志明你下週一前把 prompt 寫好",
             }
         ],
         "pending_items": [
@@ -54,7 +54,7 @@ def test_valid_payload_parses():
 def test_parses_from_json_string():
     raw = json.dumps(make_valid_payload(), ensure_ascii=False)
     analysis = MeetingAnalysis.model_validate_json(raw)
-    assert analysis.meeting.attendees == ["王鈺翔", "Kevin"]
+    assert analysis.meeting.attendees == ["陳志明", "Kevin"]
 
 
 def test_owner_and_due_date_may_be_null():

@@ -54,10 +54,10 @@ def test_glossary_terms_injected_into_initial_prompt():
 
     t = Transcriber(
         model=PromptCapturingModel([seg("x", 1.0)]),
-        glossary=lambda: [{"term": "王霖翔", "note": "人名"}],
+        glossary=lambda user=None: [{"term": "林佳蓉", "note": "人名"}],
     )
     t.transcribe("fake.wav")
-    assert "王霖翔" in captured["initial_prompt"]
+    assert "林佳蓉" in captured["initial_prompt"]
 
 
 def test_detect_device_returns_valid_value():

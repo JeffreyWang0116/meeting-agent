@@ -202,7 +202,7 @@ def test_decision_agent_rotates_key_on_quota_error(monkeypatch):
         return valid_json()
 
     monkeypatch.setattr(agent, "_call_gemini", fake_call)
-    analysis = agent.analyze("鈺翔下週一交 prompt")
+    analysis = agent.analyze("志明下週一交 prompt")
     assert analysis.meeting.title
     assert used == ["k1", "k2"]
 
@@ -217,7 +217,8 @@ def test_gemini_transcriber_rotates_key_on_quota_error(tmp_path, monkeypatch):
     t = GeminiTranscriber(api_keys=["k1", "k2"])
     used = []
 
-    def fake_run(key, path, hint=None, model=None, on_partial=None, voice_refs=None):
+    def fake_run(key, path, hint=None, model=None, on_partial=None, voice_refs=None,
+                 user=None):
         used.append(key)
         if key == "k1":
             raise _quota_exc()

@@ -98,7 +98,7 @@ class TaskStore(ABC):
 
     @abstractmethod
     def get_speaker_roster(self, *, user: str = DEFAULT_USER) -> list[str]:
-        """讀取講者名冊（["王霖翔", ...]，最近用到的在前），沒有回傳空清單。"""
+        """讀取講者名冊（["林佳蓉", ...]，最近用到的在前），沒有回傳空清單。"""
 
     @abstractmethod
     def save_speaker_roster(self, names: list[str], *, user: str = DEFAULT_USER) -> None:

@@ -33,7 +33,7 @@ class FakeTranscriber:
     device = "cpu"
     model_size = "fake"
 
-    def transcribe(self, path, on_progress=None):
+    def transcribe(self, path, on_progress=None, user=None):
         return "Kevin 說週五要 demo。"
 
 
@@ -63,7 +63,7 @@ class SeqTranscriber:
     def __init__(self, texts):
         self.texts = list(texts)
 
-    def transcribe(self, path, on_progress=None):
+    def transcribe(self, path, on_progress=None, user=None):
         return self.texts.pop(0)
 
 

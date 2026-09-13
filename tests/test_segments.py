@@ -349,7 +349,7 @@ def test_drop_empty_lines_removes_timestamp_only_and_blank_lines():
 
 def test_drop_empty_lines_keeps_plain_content_without_markers():
     """純貼上、沒有時間戳也沒有標籤但有文字的行要保留。"""
-    assert drop_empty_lines("鈺翔：我下週交\n\nKevin：好") == "鈺翔：我下週交\nKevin：好"
+    assert drop_empty_lines("志明：我下週交\n\nKevin：好") == "志明：我下週交\nKevin：好"
 
 
 def test_drop_empty_lines_keeps_unlabelled_content():

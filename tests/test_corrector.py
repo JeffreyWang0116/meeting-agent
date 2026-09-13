@@ -7,7 +7,7 @@ import json
 
 from app.agents.corrector_agent import CorrectorAgent, apply_corrections
 
-TRANSCRIPT = "[0:05] 講者A：這個涵式要重寫。\n[1:02] 王林祥：我下週處理。"
+TRANSCRIPT = "[0:05] 講者A：這個涵式要重寫。\n[1:02] 林家容：我下週處理。"
 
 
 def fake(corrections) -> str:
@@ -36,9 +36,9 @@ def test_replaces_every_occurrence_and_counts_them():
 
 
 def test_timestamps_and_line_structure_preserved():
-    text, _ = agent([{"wrong": "王林祥", "right": "王霖翔"}]).correct(TRANSCRIPT)
+    text, _ = agent([{"wrong": "林家容", "right": "林佳蓉"}]).correct(TRANSCRIPT)
     assert text.startswith("[0:05] ")
-    assert "[1:02] 王霖翔：" in text
+    assert "[1:02] 林佳蓉：" in text
     assert text.count("\n") == TRANSCRIPT.count("\n")
 
 
@@ -82,11 +82,11 @@ def test_code_fence_stripped():
 
 
 def test_glossary_terms_enter_prompt():
-    a = CorrectorAgent(generate=lambda p: fake([]), glossary=lambda: [
-        {"term": "王霖翔", "note": "人名"}
+    a = CorrectorAgent(generate=lambda p: fake([]), glossary=lambda user=None: [
+        {"term": "林佳蓉", "note": "人名"}
     ])
     prompt = a.build_prompt(TRANSCRIPT)
-    assert "王霖翔（人名）" in prompt
+    assert "林佳蓉（人名）" in prompt
     assert "詞彙表" not in CorrectorAgent(generate=lambda p: fake([])).build_prompt("x")
 
 
@@ -101,7 +101,7 @@ def test_correction_touching_timestamp_rejected():
 def test_multiline_correction_rejected():
     """跨行取代會把兩行併成一行，破壞一句一行的時間軸結構。"""
     text, applied = agent(
-        [{"wrong": "重寫。\n[1:02] 王林祥：", "right": "重寫。王霖翔："}]
+        [{"wrong": "重寫。\n[1:02] 林家容：", "right": "重寫。林佳蓉："}]
     ).correct(TRANSCRIPT)
     assert text == TRANSCRIPT and applied == []
 

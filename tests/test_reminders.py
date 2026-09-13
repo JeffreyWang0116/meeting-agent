@@ -15,7 +15,7 @@ def make_task(**over):
         "id": "t1",
         "meeting_id": "m1",
         "task": "完成 Prompt 初版",
-        "owner": "王鈺翔",
+        "owner": "陳志明",
         "due_date": "2026-07-20",
         "priority": "high",
         "status": "todo",
@@ -44,7 +44,7 @@ def test_overdue_task_generates_reminder_with_days():
     assert r["days"] == 3
     assert "完成 Prompt 初版" in r["message"]
     assert "逾期" in r["message"]
-    assert "王鈺翔" in r["message"]
+    assert "陳志明" in r["message"]
 
 
 def test_done_task_is_never_reminded():

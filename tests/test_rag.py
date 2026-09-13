@@ -80,8 +80,8 @@ def test_orchestrator_passes_transcript_to_store(tmp_path):
         executor=ExecutorAgent(store),
         notifier=NotifierAgent(tmp_path / "n"),
     )
-    result = pipeline.process_transcript("鈺翔下週一交 prompt")
-    assert "鈺翔下週一交 prompt" in store.get_meeting(result["meeting_id"])["transcript"]
+    result = pipeline.process_transcript("志明下週一交 prompt")
+    assert "志明下週一交 prompt" in store.get_meeting(result["meeting_id"])["transcript"]
 
 
 # ---- RagIndex ----
