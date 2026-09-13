@@ -173,60 +173,26 @@ def test_empty_roster_adds_nothing_to_prompt():
     assert with_roster == SpeakerNamerAgent(api_key="k").build_prompt(TRANSCRIPT)
 
 
-def test_applied_names_are_remembered():
-    """成功對應的姓名記進名冊，下次同一群人開會就有寫法可循。"""
-    remembered = []
-    agent = SpeakerNamerAgent(
-        api_key="k",
-        generate=lambda p: _reply({"講者A": "吳宗憲", "講者B": "石崇良"}),
-        remember_names=lambda names, user=None: remembered.extend(names),
-    )
-    agent.name_speakers(TRANSCRIPT)
-    assert remembered == ["吳宗憲", "石崇良"]
-
-
-def test_nothing_remembered_when_no_names_applied():
-    remembered = []
-    agent = SpeakerNamerAgent(
-        api_key="k", generate=lambda p: "這不是 JSON",
-        remember_names=lambda names, user=None: remembered.extend(names),
-    )
-    agent.name_speakers(TRANSCRIPT)
-    assert remembered == []
-
-
-def test_remember_failure_does_not_break_naming():
-    """名冊寫入失敗（例如雲端資料庫短暫掛掉）不該讓已經完成的對應付諸流水。"""
-    def boom(_names):
-        raise RuntimeError("store 掛了")
-
-    agent = SpeakerNamerAgent(
-        api_key="k", generate=lambda p: _reply({"講者A": "吳宗憲"}), remember_names=boom
-    )
-    text, applied = agent.name_speakers(TRANSCRIPT)
-    assert "吳宗憲：" in text and applied
-
-
 # ---- 名冊要綁使用者 ----
 
-def test_roster_reads_and_writes_are_scoped_to_the_user():
-    """name_speakers 沒帶 user 的話，名冊永遠讀寫 DEFAULT_USER 那一格。
+def test_roster_reads_are_scoped_to_the_user():
+    """name_speakers 沒帶 user 的話，名冊永遠讀 DEFAULT_USER 那一格。
 
-    在多帳號部署裡後果是：A 的與會者姓名被寫進共用格子，再餵進 B 的命名提示
-    ——姓名（個資）跨帳號外洩，而且完全沒有徵兆。executor 早就有帶 user，
-    只有這條路徑漏掉。
+    在多帳號部署裡後果是：A 的與會者姓名被餵進 B 的命名提示——姓名（個資）
+    跨帳號外洩，而且完全沒有徵兆。executor 早就有帶 user，只有這條路徑漏掉。
+
+    對應的「寫回名冊」整條已經移除（見 main.py 建構 SpeakerNamerAgent 處），
+    所以這裡只驗讀取。
     """
-    asked, remembered = [], []
+    asked = []
 
     agent = SpeakerNamerAgent(
         generate=lambda prompt: _reply({"講者A": "林佳蓉"}),
         known_names=lambda user=None: (asked.append(user), [])[1],
-        remember_names=lambda names, user=None: remembered.append((user, names)),
     )
     agent.name_speakers(TRANSCRIPT, user="uid-A")
 
     assert asked == ["uid-A"], f"讀名冊沒帶使用者：{asked}"
-    assert remembered and remembered[0][0] == "uid-A", f"寫名冊沒帶使用者：{remembered}"
 
 
 def test_orchestrator_passes_the_user_down_to_the_namer():

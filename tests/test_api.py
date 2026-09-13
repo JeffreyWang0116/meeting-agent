@@ -851,15 +851,21 @@ def test_live_chunk_rejects_oversized_chunk(tiny_limit_client):
     assert resp.status_code == 413
 
 
-def test_remember_persons_endpoint_marks_names_without_wiping_terms(client):
-    """手動改講者名時前端只送那一個名字，不能把既有詞彙洗掉。"""
-    client.put("/api/glossary", json={"terms": [{"term": "TaskHub", "note": "產品"}]})
-    resp = client.post("/api/glossary/persons", json={"names": ["林佳蓉", "講者A"]})
+def test_nothing_can_write_names_into_the_glossary_behind_the_users_back(client):
+    """詞彙表只收使用者在管理介面自己輸入的詞。
 
-    assert resp.status_code == 200
-    assert resp.json()["names"] == ["林佳蓉"]  # 代號被擋掉
+    原本在歷史會議手動改講者名會順手把姓名寫進詞彙表，讓之後每一場的轉錄與
+    分析 prompt 都帶著它。使用者以為自己只是修正那一場的顯示，不會想到這會
+    影響往後所有會議——而且那個名字是怎麼進到詞彙表的，事後完全查不出來。
+
+    姓名要進詞彙表只剩一條路：設定 → 自訂詞彙 → 手動新增。
+    """
+    client.put("/api/glossary", json={"terms": [{"term": "TaskHub", "note": "產品"}]})
+
+    assert client.post("/api/glossary/persons", json={"names": ["陳大文"]}).status_code == 404
+
     terms = client.get("/api/glossary").json()["terms"]
-    assert [t["term"] for t in terms] == ["TaskHub", "林佳蓉"]
+    assert [t["term"] for t in terms] == ["TaskHub"]
 
 
 # ---- 預錄聲音辨識人（選用功能）----

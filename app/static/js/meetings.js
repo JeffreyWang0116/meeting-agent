@@ -4,7 +4,6 @@ import { $, PAGE_SIZE, esc, icon, loadFail, pageNo, paginate, registerPager, reg
 import { renderHome } from "./home.js";
 import { refreshReminders, remindersLoaded, renderReminders } from "./reminders.js";
 import { copyWithFeedback } from "./result.js";
-import { rememberSpeaker } from "./settings.js";
 import { correctTypos, nameSpeakers } from "./setup.js";
 import { allTasks, refreshTasks, renderTasks, tasksLoaded } from "./tasks.js";
 import { SPEAKER_RE, TIME_RE, jumpToTranscript, renderChat } from "./transcript.js";
@@ -399,7 +398,6 @@ $("meetingRows").addEventListener("click", async e => {
       for (const t of owned) {
         await api.updateTask(t.id, { owner: newName });
       }
-      rememberSpeaker(newName);  // 記進名冊，下次辨識講者時姓名寫法就有依據
       renderMeetings();
       if (owned.length) { refreshTasks(); refreshReminders(); }
     } catch (err) { showError("講者改名失敗：" + err.message); }

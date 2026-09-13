@@ -88,31 +88,6 @@ def test_person_names_only_returns_people(tmp_path):
     assert g.person_names() == ["林佳蓉", "李四"]
 
 
-def test_remember_persons_adds_new_names_without_touching_curated_terms(tmp_path):
-    """AI 命名成功時自動記下姓名。這是分析流程的副作用，絕不能拋例外，
-    也不能擠掉使用者手動整理的詞彙。"""
-    from app.glossary import Glossary
-    from app.stores.local_store import LocalJsonStore
-
-    g = Glossary(LocalJsonStore(tmp_path / "db.json"))
-    g.replace([{"term": "TaskHub", "note": "產品名"}])
-    g.remember_persons(["林佳蓉", "林佳蓉", "講者A", ""])
-
-    terms = g.terms()
-    assert [t["term"] for t in terms] == ["TaskHub", "林佳蓉"]
-    assert g.person_names() == ["林佳蓉"]  # 代號與空字串被擋掉
-
-
-def test_remember_persons_never_raises(tmp_path):
-    from app.glossary import Glossary
-    from app.stores.local_store import LocalJsonStore
-
-    g = Glossary(LocalJsonStore(tmp_path / "db.json"))
-    g.remember_persons(None)          # 型別亂給也不能炸
-    g.remember_persons(["x" * 500])   # 過長的姓名略過即可
-    assert g.person_names() == []
-
-
 def test_legacy_roster_is_migrated_into_the_glossary(tmp_path):
     """舊版把講者名冊存在另一個地方。合併後要自動搬過來，
     否則使用者的名冊會像憑空消失。"""
@@ -130,25 +105,25 @@ def test_legacy_roster_is_migrated_into_the_glossary(tmp_path):
 
 # ---- 詞彙表只收使用者自己輸入的詞 ----
 
-def test_ai_naming_is_not_wired_to_write_the_glossary():
-    """AI 認出的姓名不得自動寫進詞彙表。
+def test_replace_is_the_only_way_into_the_glossary():
+    """詞彙表只有一個寫入口：使用者在管理介面按下的整份取代。
 
-    自動記憶會形成迴圈：某場會議認出一個姓名 → 寫進詞彙表 → 之後每一場的
-    轉錄與分析 prompt 都帶著它 → 模型把它套到不相干的講者身上 → 又被記住
-    一次。使用者從沒在詞彙表輸入過那個名字，卻場場都看到它出現，而且完全
-    查不出是哪來的。
+    曾經有兩條路徑會在使用者背後把姓名塞進來——AI 命名成功時自動記住，以及
+    在歷史會議手動改講者名時順手記一筆。兩者都會形成迴圈：寫進去之後每一場
+    的轉錄與分析 prompt 都帶著它，模型於是把它套到不相干的講者身上，然後又
+    被記住一次。使用者從沒在詞彙表輸入過那個名字，卻場場都看到，而且完全查
+    不出是哪來的。
 
-    SpeakerNamerAgent 的 remember_names 掛鉤本身保留（/api/glossary/persons
-    那條「使用者手動改講者名」的路徑要用），這裡釘的是 create_app 不再把它
-    接到 AI 命名上。接線在 create_app 內部、從 app 物件取不到，所以比照
-    test_frontend_modules.py 的做法做靜態檢查。
+    兩條都已整條移除。這裡釘的是「不要再長回來」：Glossary 對外只能有
+    replace 這一個寫入方法。
     """
-    import pathlib
+    from app.glossary import Glossary
 
-    src = (pathlib.Path(__file__).resolve().parent.parent / "app" / "main.py").read_text(
-        encoding="utf-8"
-    )
-    assert "remember_names=" not in src, "create_app 又把 AI 命名接回自動寫入詞彙表了"
+    writers = [
+        name for name in dir(Glossary)
+        if not name.startswith("_") and name not in {"terms", "person_names", "replace"}
+    ]
+    assert writers == [], f"Glossary 多了 replace 以外的寫入口：{writers}"
 
 
 def test_terms_are_isolated_per_account(tmp_path):

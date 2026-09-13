@@ -304,10 +304,6 @@ class AskRequest(BaseModel):
     meeting_ids: Optional[list[str]] = None  # 限定檢索範圍（複選會議）；None = 全部
 
 
-class PersonNamesRequest(BaseModel):
-    names: list[str]
-
-
 class GlossaryRequest(BaseModel):
     terms: list[dict]
 
@@ -393,12 +389,11 @@ def create_app(
             # 人名就是詞彙表裡標成人名的項目：使用者只維護一份清單，
             # 而且那些名字同時餵進轉錄，不會再被聽成別的字
             known_names=glossary.person_names,
-            # 刻意不接 remember_names：AI 認出的姓名自動寫回詞彙表會形成迴圈
-            # ——認出一次就寫進去，之後每一場的轉錄與分析 prompt 都帶著它，
-            # 模型於是把它套到不相干的講者身上，然後又被記住一次。使用者從沒
-            # 在詞彙表輸入過那個名字，卻場場都看到，而且完全查不出是哪來的。
-            # 姓名要進詞彙表只有一條路：使用者自己去設定，或手動改講者名
-            # （/api/glossary/persons）。
+            # 沒有任何「把姓名寫回詞彙表」的掛鉤：自動記憶會形成迴圈——認出
+            # 一次就寫進去，之後每一場的轉錄與分析 prompt 都帶著它，模型於是把
+            # 它套到不相干的講者身上，然後又被記住一次。使用者從沒輸入過那個
+            # 名字，卻場場都看到，而且完全查不出是哪來的。
+            # 姓名進詞彙表只剩一條路：設定 → 自訂詞彙 → 手動新增。
         ),
     )
     if transcriber is None:
@@ -954,18 +949,6 @@ def create_app(
             return {"terms": glossary.replace(req.terms, current_user())}
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc))
-
-    @app.post("/api/glossary/persons")
-    def remember_persons(req: PersonNamesRequest):
-        """記一筆剛用到的姓名並標成人名（前端手動改講者名時呼叫）。
-
-        整份取代（PUT）在這裡不適用：前端只知道剛改的那一個名字，送完整清單
-        會把同時開著別的分頁改的東西洗掉。不合格的姓名略過就好，不回報錯誤
-        ——這是順手記一筆，不是使用者主動送出的表單。
-        """
-        user = current_user()
-        glossary.remember_persons(req.names, user)
-        return {"names": glossary.person_names(user)}
 
     # ---- 任務管理 ----
 

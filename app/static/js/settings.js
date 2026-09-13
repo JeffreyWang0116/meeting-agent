@@ -123,15 +123,6 @@ $("glosList").addEventListener("click", e => {
   saveGlossary();
 });
 
-// ---- 手動改講者名時，把姓名記進詞彙表（標成人名）----
-// 名冊已併入詞彙表：使用者只維護一份清單，而那些名字同時也會餵進轉錄。
-// 記不記得起來都不影響改名本身，所以失敗只當沒發生，不打擾使用者。
-async function rememberSpeaker(name) {
-  try {
-    await api.rememberPersons({ names: [name] });
-  } catch (err) { /* 順手記一筆，靜靜略過 */ }
-}
-
 // ---- PWA：註冊 service worker（讓手機可「加入主畫面」以近原生方式使用） ----
 if ("serviceWorker" in navigator) {
   navigator.serviceWorker.register("/sw.js").catch(() => { /* 不支援就當一般網頁 */ });
@@ -145,4 +136,4 @@ if ("serviceWorker" in navigator) {
   }, { passive: true });
 })();
 
-export { glosTerms, rememberSpeaker, renderGlossary, saveGlossary };
+export { glosTerms, renderGlossary, saveGlossary };

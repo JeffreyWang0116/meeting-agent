@@ -79,7 +79,6 @@ class SpeakerNamerAgent:
         api_keys=None,
         on_call=None,
         known_names=None,
-        remember_names=None,
     ):
         self._pool = KeyPool(api_keys if api_keys else [api_key])
         # 每打一次 API 就回報一次，用量統計才會算到重試與換金鑰
@@ -88,10 +87,9 @@ class SpeakerNamerAgent:
         self.model = model
         # 可注入 callable(prompt) -> str，測試時不需要真的呼叫 Gemini
         self._generate = generate or self._generate_with_gemini
-        # 講者名冊：callable() -> list[str] 讀、callable(list[str]) 寫，
-        # 以 callable 注入才能每次讀到最新內容（與詞彙表同一個作法）
+        # 講者名冊：callable(user) -> list[str]，以 callable 注入才能每次讀到
+        # 最新內容（與詞彙表同一個作法）。刻意沒有對應的「寫回」掛鉤，見 main.py
         self._known_names = known_names
-        self._remember_names = remember_names
 
     # ---- 對外介面 ----
 
@@ -129,11 +127,6 @@ class SpeakerNamerAgent:
         if not mapping:
             return transcript, []
         text, applied = apply_speaker_names(transcript, mapping)
-        if applied and self._remember_names:
-            try:
-                self._remember_names([a["name"] for a in applied], user)
-            except Exception:
-                pass  # 名冊寫入失敗不該讓已經完成的對應付諸流水
         return text, applied
 
     def build_prompt(

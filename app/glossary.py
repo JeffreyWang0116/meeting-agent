@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import threading
 
-from app.agents.speaker_namer_agent import is_safe_name
 from app.stores.base import DEFAULT_USER
 
 MAX_TERMS = 200
@@ -111,46 +110,6 @@ class Glossary:
     def person_names(self, user: str = DEFAULT_USER) -> list[str]:
         """標成人名的詞彙——餵給 SpeakerNamerAgent，讓姓名寫法跨會議一致。"""
         return [t["term"] for t in self.terms(user) if t.get("person")]
-
-    def remember_persons(self, names, user: str = DEFAULT_USER) -> None:
-        """把姓名記進詞彙表並標為人名。
-
-        只給「使用者手動改講者名」那條路徑（/api/glossary/persons）用。
-        **刻意不接到 AI 命名上**：自動記憶會形成迴圈——認出一次就寫進詞彙表，
-        之後每一場的轉錄與分析 prompt 都帶著它，模型於是把它套到不相干的講者
-        身上，然後又被記住一次。使用者從沒輸入過那個名字，卻場場都看到。
-
-
-        這是分析流程的副作用，**絕不拋例外**：記不記得起來，都不該讓一場
-        已經分析完的會議失敗。代號、含冒號、過長的姓名一律略過。
-        自動加入永遠排在後面，也不會擠掉使用者手動整理的詞彙。
-        """
-        try:
-            if not isinstance(names, (list, tuple, set)):
-                return
-            fresh = list(dict.fromkeys(
-                n for n in (str(x or "").strip() for x in names)
-                if n and is_safe_name(n)
-            ))
-            if not fresh:
-                return
-            with self._lock:
-                if user not in self._cache:
-                    self._cache[user] = self._load(user)
-                current = self._cache[user]
-                known = {t["term"] for t in current}
-                for t in current:
-                    if t["term"] in set(fresh):
-                        t["person"] = True
-                room = max(0, MAX_TERMS - len(current))
-                current = current + [
-                    {"term": n, "note": "", "person": True}
-                    for n in fresh if n not in known
-                ][:room]
-                self._cache[user] = current
-                self._store.save_glossary(current, user=user)
-        except Exception:  # 名冊是加分項，靜靜略過
-            pass
 
     def replace(self, terms: list[dict], user: str = DEFAULT_USER) -> list[dict]:
         """整份取代（前端每次送完整清單，邏輯最單純）。回傳清理後的結果。"""
