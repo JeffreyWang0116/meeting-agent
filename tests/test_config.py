@@ -225,3 +225,12 @@ def test_invalid_rate_limits_fail_fast_at_startup(tmp_path):
 
     with pytest.raises(ValueError, match="RATE_LIMITS"):
         create_app(Settings(data_dir=tmp_path, rate_limit_enabled=True, rate_limits="media=abc"))
+
+
+def test_pyannote_voiceprint_is_off_by_default(monkeypatch):
+    """試用只有 10 個 voiceprint、按個計費：要明講才開。"""
+    monkeypatch.setattr("app.config.load_dotenv", lambda *a, **k: None)
+    monkeypatch.delenv("PYANNOTE_VOICEPRINT_ENABLED", raising=False)
+    assert get_settings().pyannote_voiceprint_enabled is False
+    monkeypatch.setenv("PYANNOTE_VOICEPRINT_ENABLED", "1")
+    assert get_settings().pyannote_voiceprint_enabled is True

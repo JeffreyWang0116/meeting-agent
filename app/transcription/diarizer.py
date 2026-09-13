@@ -40,6 +40,7 @@ class Diarizer:
         submit: Callable[[Callable[[], dict]], Future] | None = None,
         concat: Callable[..., list[float]] = media.concat_for_diarization,
         voiceprint_threshold: float | None = 50,
+        voiceprints_enabled: bool = False,
     ):
         self.client = client
         self._on_call = on_call
@@ -47,6 +48,8 @@ class Diarizer:
         self._duration = duration
         self._concat = concat
         self.voiceprint_threshold = voiceprint_threshold
+        # voiceprint 按建立次數計費（試用只有 10 個），預設不建。見 Settings.pyannote_voiceprint_enabled
+        self.voiceprints_enabled = voiceprints_enabled
         self._submit = submit or ThreadPoolExecutor(
             max_workers=_MAX_PARALLEL_JOBS, thread_name_prefix="diarize"
         ).submit
@@ -89,7 +92,7 @@ class Diarizer:
                 cursor += length
 
             voiceprints: dict[str, str] = {}
-            for person in enrollments:
+            for person in enrollments if self.voiceprints_enabled else []:
                 # 一個人建不起來（樣本太短、錄壞）只少那一個名字，其他人照做
                 try:
                     sample = self._encode(person["path"], max_seconds=VOICEPRINT_MAX_SECONDS)
@@ -154,5 +157,8 @@ def build_diarizer(settings, on_call: Callable[[], None] | None = None) -> Diari
         timeout_seconds=settings.diarize_timeout_seconds,
     )
     return Diarizer(
-        client, on_call=on_call, voiceprint_threshold=settings.voiceprint_match_threshold
+        client,
+        on_call=on_call,
+        voiceprint_threshold=settings.voiceprint_match_threshold,
+        voiceprints_enabled=settings.pyannote_voiceprint_enabled,
     )

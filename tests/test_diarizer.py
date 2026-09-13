@@ -71,6 +71,8 @@ def fake_encode(tmp_path, calls=None):
 def make(tmp_path, client=None, **kwargs):
     kwargs.setdefault("encode", fake_encode(tmp_path))
     kwargs.setdefault("duration", lambda path: 10.0)
+    # 既有的 identify 測試驗的是「開啟 voiceprint」那條路；預設關閉另有專門的測試
+    kwargs.setdefault("voiceprints_enabled", True)
     return Diarizer(client or FakeClient(), submit=run_now, **kwargs)
 
 
@@ -305,3 +307,29 @@ def test_build_diarizer_passes_voiceprint_threshold():
         pyannote_api_key="k", transcribe_engine="gemini", voiceprint_match_threshold=65,
     ))
     assert diarizer.voiceprint_threshold == 65
+
+
+def test_relabel_session_never_creates_voiceprints_when_disabled(tmp_path):
+    client = FakeClient(output=LIVE_OUTPUT)
+    diarizer = make(
+        tmp_path, client, concat=fake_concat([45.0, 42.0], []), voiceprints_enabled=False,
+    )
+    _, prior = diarizer.relabel_session(
+        LIVE_TRANSCRIPT, live_pieces(tmp_path),
+        [{"name": "王小明", "path": tmp_path / "enroll_00.webm"}],
+    )
+    assert client.voiceprinted == [] and client.identified == []
+    assert prior == {}
+
+
+def test_voiceprints_are_disabled_by_default():
+    assert Diarizer(FakeClient()).voiceprints_enabled is False
+
+
+def test_build_diarizer_passes_voiceprint_switch():
+    on = build_diarizer(Settings(
+        pyannote_api_key="k", transcribe_engine="gemini", pyannote_voiceprint_enabled=True,
+    ))
+    off = build_diarizer(Settings(pyannote_api_key="k", transcribe_engine="gemini"))
+    assert on.voiceprints_enabled is True
+    assert off.voiceprints_enabled is False

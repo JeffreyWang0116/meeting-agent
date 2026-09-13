@@ -427,6 +427,11 @@ class LiveSessionManager:
             enrollments = list(session.enrollments)
         if not transcript.strip():
             return None
+        # voiceprint 停用時，有預錄樣本的場次整場照舊走 Gemini：pyannote 純分群給不出
+        # 姓名，而 Gemini 認出的名字掛在它自己的代號上，重標後對不上——名字會整組消失。
+        # 使用者錄了樣本就是要看到名字，寧可講者分得差一點
+        if enrollments and not getattr(self._diarizer, "voiceprints_enabled", True):
+            return None
         pieces = []
         for index in sorted(paths):
             offset, overlap = timing.get(index, (None, 0.0))

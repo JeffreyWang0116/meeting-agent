@@ -105,6 +105,10 @@ class Settings:
     # 預錄聲音辨識人的聲紋比對門檻（0~100）。實測（77 分鐘協商）：本人 89 分、
     # 不是本人 16~28 分；API 預設 0 會把缺席者硬配給某位只講 4 秒的人
     voiceprint_match_threshold: float = 50
+    # 預錄聲音辨識人要不要改用 pyannote voiceprint 比對姓名。預設關：試用只有 10 個、
+    # 按建立次數計費（每預錄一人扣一個）。關閉時有預錄樣本的即時聆聽整場照舊走
+    # Gemini（標講者＋比對姓名）；沒預錄的場次與上傳檔案照常用 pyannote 分講者
+    pyannote_voiceprint_enabled: bool = False
     # 速率限制（app/ratelimit.py）：每位使用者、每種耗額度的操作有每分鐘／每天上限。
     # 預設跟著 is_public_deploy 走（比照認證）：公開網址開、本機開發關
     rate_limit_enabled: bool = False
@@ -197,6 +201,9 @@ def get_settings() -> Settings:
         voiceprint_match_threshold=float(
             os.environ.get("VOICEPRINT_MATCH_THRESHOLD", "50")
         ),
+        pyannote_voiceprint_enabled=os.environ.get(
+            "PYANNOTE_VOICEPRINT_ENABLED", ""
+        ).strip().lower() in {"1", "true", "yes"},
         data_dir=_under_base(os.environ.get("DATA_DIR")) or BASE_DIR / "data",
         firebase_credentials_json=os.environ.get("FIREBASE_CREDENTIALS_JSON") or None,
         firebase_credentials_file=(

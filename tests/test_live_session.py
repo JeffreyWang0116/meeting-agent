@@ -828,3 +828,32 @@ def test_waiting_retry_falls_back_when_the_first_attempt_fails(tmp_path):
     second.join(5)
     assert len(diarizer.calls) == 1
     assert results == {"first": None, "second": None}
+
+
+# ---- voiceprint 停用（PYANNOTE_VOICEPRINT_ENABLED 預設關）----
+
+def test_enrolled_session_skips_pyannote_when_voiceprints_are_disabled(tmp_path):
+    """voiceprint 試用只有 10 個、按個計費。停用時有預錄樣本的場次整場照舊走 Gemini：
+    pyannote 純分群給不出姓名，重標後 Gemini 認出的名字又對不上新代號，會整組消失。"""
+    diarizer = FakeLiveDiarizer(prior={"講者B": "王小明"})
+    diarizer.voiceprints_enabled = False
+    matcher = FakeMatcher({"講者A": "李大華"})
+    mgr = _diarized_mgr(tmp_path, ["[0:01] 講者A：一"], diarizer, matcher)
+    sid = mgr.start()
+    mgr.enroll(sid, "李大華", b"voice")
+    mgr.add_chunk(sid, b"a", offset_seconds=0)
+
+    assert mgr.diarize_session(sid) is None
+    assert diarizer.calls == []
+    assert mgr.voice_mapping(sid) == {"講者A": "李大華"}  # Gemini 比對照常
+    assert mgr.finish(sid) == "[0:01] 講者A：一"
+
+
+def test_session_without_enrollments_still_uses_pyannote_when_voiceprints_are_disabled(tmp_path):
+    diarizer = FakeLiveDiarizer()
+    diarizer.voiceprints_enabled = False
+    mgr = _diarized_mgr(tmp_path, ["[0:01] 講者A：一"], diarizer)
+    sid = mgr.start()
+    mgr.add_chunk(sid, b"a", offset_seconds=0)
+    assert mgr.diarize_session(sid) == {}
+    assert len(diarizer.calls) == 1
