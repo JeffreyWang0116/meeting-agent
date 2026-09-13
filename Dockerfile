@@ -8,9 +8,10 @@ RUN apt-get update \
 
 WORKDIR /app
 
-# 先裝依賴，讓 Docker 快取這一層（只用精簡的雲端依賴，不含 faster-whisper）
-COPY requirements-cloud.txt .
-RUN pip install --no-cache-dir -r requirements-cloud.txt
+# 先裝依賴，讓 Docker 快取這一層（只用精簡的雲端依賴，不含 faster-whisper）。
+# 裝的是完整鎖定版本：與 CI 測過的完全一致，重新建置不會突然換到新的大版本
+COPY requirements-cloud.lock .
+RUN pip install --no-cache-dir -r requirements-cloud.lock
 
 COPY app ./app
 

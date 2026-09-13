@@ -17,7 +17,11 @@ jobs:
           cache: pip
       - name: Install dependencies
         run: |
-          pip install -r requirements-cloud.txt
-          pip install pytest httpx
+          # 與 Dockerfile 裝同一份鎖定版本：CI 綠燈才代表 Render 部署的那組版本能跑
+          pip install -r requirements-cloud.lock
+          pip install pytest httpx ruff
+      # 規則見 ruff.toml：只挑會抓到真 bug 的，不管風格與行長
+      - name: Lint
+        run: ruff check .
       - name: Run tests
         run: pytest -q

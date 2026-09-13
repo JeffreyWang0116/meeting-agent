@@ -1,0 +1,68 @@
+# 雲端部署實際安裝的完整版本鎖定（Dockerfile 與 CI 都裝這份）。
+#
+# 為什麼要鎖：requirements-cloud.txt 全用 >=，每次 Render 重新建置都會裝到當下
+# 最新版——哪天 starlette／google-genai 出了不相容的大版本，部署會突然壞掉，
+# 本機卻一切正常。鎖住之後「CI 測過的版本＝Render 裝的版本」。
+#
+# 版本依 Render 的環境（Linux x86_64、CPython 3.12）解析，並對齊開發機實測通過的版本。
+# 升級方式：改 requirements-cloud.txt → 在開發機裝好新版跑過 pytest → 重新產生本檔：
+#   python -m pip install --dry-run --ignore-installed --report report.json #     --platform manylinux_2_28_x86_64 --platform manylinux2014_x86_64 #     --implementation cp --python-version 3.12 --only-binary=:all: --target _tmp #     -r requirements-cloud.txt -c <開發機 pip freeze 的版本>
+#   再把 report.json 的 install 清單寫成 名稱==版本
+#
+# uvloop 手動補上：它是 uvicorn[standard] 只在 Linux 才裝的依賴（平台條件在 Windows 上
+# 解析時會被略過），Render 原本就有裝，鎖定後不能少
+annotated-doc==0.0.4
+annotated-types==0.7.0
+anyio==4.14.2
+cachecontrol==0.14.4
+certifi==2026.6.17
+cffi==2.1.0
+charset-normalizer==3.4.9
+click==8.4.2
+colorama==0.4.6
+cryptography==49.0.0
+distro==1.9.0
+fastapi==0.139.2
+firebase-admin==7.5.0
+google-api-core==2.32.0
+google-auth==2.55.2
+google-cloud-core==2.6.0
+google-cloud-firestore==2.28.0
+google-cloud-storage==3.13.0
+google-crc32c==1.8.0
+google-genai==2.12.1
+google-resumable-media==2.10.0
+googleapis-common-protos==1.75.0
+grpcio-status==1.82.1
+grpcio==1.82.1
+h11==0.16.0
+h2==4.3.0
+hpack==4.2.0
+httpcore==1.0.9
+httptools==0.8.0
+httpx==0.28.1
+hyperframe==6.1.0
+idna==3.18
+msgpack==1.2.1
+proto-plus==1.28.1
+protobuf==7.35.1
+pyasn1-modules==0.4.2
+pyasn1==0.6.4
+pycparser==3.0
+pydantic-core==2.46.4
+pydantic==2.13.4
+pyjwt==2.13.0
+python-dotenv==1.2.2
+python-multipart==0.0.32
+pyyaml==6.0.3
+requests==2.34.2
+sniffio==1.3.1
+starlette==1.3.1
+tenacity==9.1.4
+typing-extensions==4.16.0
+typing-inspection==0.4.2
+urllib3==2.7.0
+uvicorn==0.51.0
+uvloop==0.22.1
+watchfiles==1.2.0
+websockets==16.1.1

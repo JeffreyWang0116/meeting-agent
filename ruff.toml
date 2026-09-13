@@ -1,0 +1,18 @@
+# ruff lint 設定（CI 會跑 `ruff check .`）。
+#
+# 規則刻意挑「會抓到真 bug」的，不挑風格：
+# - E4/E7/E9、F：ruff 預設（語法錯誤、未定義名稱、沒用到的 import…）
+# - W605：無效跳脫字元。evaluation.py 曾因此把 raw 字串斷成兩段，彎引號整組沒被濾掉
+# - B（flake8-bugbear）：可變預設值、迴圈變數被閉包捕捉這類邏輯陷阱
+#
+# 不開 E501（行長）與自動格式化：現有程式碼會整份改寫，兩人同時開發時衝突成本太高。
+target-version = "py312"
+extend-exclude = ["data", ".venv"]
+
+[lint]
+select = ["E4", "E7", "E9", "F", "W605", "B"]
+ignore = [
+    "B008",  # FastAPI 慣用 File(...)／Form(...) 當預設值
+    "B904",  # except 裡 raise HTTPException 不帶 from：回給前端的錯誤不需要串例外鏈
+    "B905",  # zip() 不加 strict：現有呼叫都是刻意截短或已保證等長
+]

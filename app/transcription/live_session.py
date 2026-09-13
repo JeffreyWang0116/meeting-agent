@@ -249,11 +249,16 @@ class LiveSessionManager:
         fn = self._transcriber.transcribe
         try:
             params = inspect.signature(fn).parameters
-            takes = lambda name: name in params or any(
+        except (TypeError, ValueError):
+            params = None
+
+        def takes(name: str) -> bool:
+            if params is None:
+                return False
+            return name in params or any(
                 p.kind == p.VAR_KEYWORD for p in params.values()
             )
-        except (TypeError, ValueError):
-            takes = lambda name: False
+
         kwargs = {}
         if hint and takes("hint"):
             kwargs["hint"] = hint

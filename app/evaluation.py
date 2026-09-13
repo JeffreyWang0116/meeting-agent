@@ -10,7 +10,12 @@ from __future__ import annotations
 import re
 from difflib import SequenceMatcher
 
-_NOISE = re.compile(r"[\s,，。、；;：:！!？?〜~「」『』""''\"'()（）\[\]【】]+")
+# 標點與空白一律忽略。彎引號 “ ” ‘ ’ 另起一段、不放進 raw 字串：原本它們被寫成
+# ASCII 引號，把 raw 字串斷成兩段拼接，彎引號整組漏掉（test_evaluation 有釘住）
+_NOISE = re.compile(
+    r"[\s,，。、；;：:！!？?〜~「」『』()（）\[\]【】\"'"
+    "“”‘’]+"
+)
 
 
 def _normalize(text) -> str:

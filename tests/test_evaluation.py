@@ -90,3 +90,12 @@ def test_aggregate_micro_averages_across_items():
     assert (agg["tp"], agg["fp"], agg["fn"]) == (1, 1, 1)
     assert agg["precision"] == pytest.approx(0.5)
     assert agg["recall"] == pytest.approx(0.5)
+
+
+def test_curly_quotes_are_treated_as_punctuation():
+    """模型輸出常用中文彎引號；原本字元集合裡的 “” ‘’ 被寫成 ASCII 引號，
+    raw 字串還因此斷成兩段拼接，彎引號完全沒被濾掉，同一件事被當成不同任務。"""
+    from app.evaluation import _field_equal
+
+    assert _field_equal("“完成”報告", "完成報告")
+    assert _field_equal("‘志明’", "志明")

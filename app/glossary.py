@@ -10,8 +10,6 @@ from __future__ import annotations
 
 import threading
 
-from app.stores.base import DEFAULT_USER
-
 MAX_TERMS = 200
 
 

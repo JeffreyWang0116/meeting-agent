@@ -164,7 +164,7 @@
 
 雲端主機沒有 GPU，所以部署版把轉錄從本地 Whisper 換成 Gemini（設定 `TRANSCRIBE_ENGINE=gemini`，`Dockerfile` 已預設）。文字貼上、檔案上傳、即時聆聽三種輸入都可用。
 
-repo 已附 `Dockerfile`（含 ffmpeg）、`requirements-cloud.txt`（精簡依賴，不含 faster-whisper）與 `render.yaml` 藍圖。以 [Render](https://render.com) 免費方案為例：
+repo 已附 `Dockerfile`（含 ffmpeg）、`requirements-cloud.txt`（精簡依賴，不含 faster-whisper；實際安裝的是完整鎖定版本 `requirements-cloud.lock`）與 `render.yaml` 藍圖。以 [Render](https://render.com) 免費方案為例：
 
 1. 到 Render → **New → Blueprint**，連上這個 GitHub repo，它會自動讀 `render.yaml`
 2. 部署過程會要你填 `GEMINI_API_KEY`（金鑰只存在 Render 後台，不進 repo）；多把 key 就改設 `GEMINI_API_KEYS`
@@ -340,6 +340,8 @@ app/
 eval/                     # 量化評估：標注資料集 + 評估腳本；diarize_poc.py 講者分離實測
 tests/                    # pytest 測試（830，全部離線、不需金鑰；前端講者判斷另需 node）
 Dockerfile                # 雲端部署映像（Python + ffmpeg，轉錄用 Gemini）
+requirements-cloud.lock   # 雲端完整鎖定版本（Dockerfile 與 CI 共用）
+ruff.toml                 # lint 規則（CI 跑 ruff check .）
 render.yaml               # Render 一鍵部署藍圖
 data/samples/             # 模擬會議紀錄（中英夾雜、含邊界案例）
 data/output/              # 任務庫與通知產出
