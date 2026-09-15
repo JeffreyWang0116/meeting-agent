@@ -277,6 +277,13 @@ class GeminiTranscriber:
             # 切不動就照舊整份送出：品質可能較差，但不該讓整個轉錄失敗
             logger.warning("音檔分段失敗（%s），改為整份轉錄", exc)
             return []
+        if len(chunks) > 1:
+            # 切段到第一段吐出時間戳之前，進度條完全不動。這行是那段空白的第一個
+            # 座標：知道切成幾段，才知道總共要等幾輪
+            logger.info(
+                "音檔 %.0f 秒切成 %d 段（每段 %d 秒）",
+                duration, len(chunks), self.chunk_seconds,
+            )
         return chunks if len(chunks) > 1 else []
 
     def _transcribe_chunked(
@@ -340,6 +347,7 @@ class GeminiTranscriber:
                     [{"label": c, "path": p} for c, p in voice_book.items()]
                     if voice_book else None
                 )
+                logger.info("開始轉錄第 %d/%d 段", index + 1, len(chunks))
                 try:
                     text, used_fallback, retries_used = self._transcribe_labelled(
                         chunk,

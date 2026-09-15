@@ -12,10 +12,13 @@
 """
 from __future__ import annotations
 
+import logging
 import random
 import threading
 import time
 from typing import Callable, Iterable, TypeVar
+
+logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
 
@@ -112,7 +115,17 @@ def call_with_rotation(
             elif is_transient_error(exc):
                 transient_fails += 1
                 if transient_fails > len(_BACKOFF_SECONDS):
+                    logger.warning(
+                        "Google 端持續過載，退避重試 %d 次後放棄", len(_BACKOFF_SECONDS)
+                    )
                     raise  # 退避重試仍然過載，放棄
-                sleep(_backoff_delay(transient_fails - 1))
+                delay = _backoff_delay(transient_fails - 1)
+                # 沉默地等兩分鐘，從外面看跟當掉一模一樣：進度條不動、logs 空白。
+                # 這行是「它還在等」唯一的證據
+                logger.warning(
+                    "Google 端過載（503），等 %.1f 秒後重試（%d/%d）",
+                    delay, transient_fails, len(_BACKOFF_SECONDS),
+                )
+                sleep(delay)
             else:
                 raise

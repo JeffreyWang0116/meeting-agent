@@ -373,3 +373,30 @@ def test_broken_recorder_never_breaks_the_call():
         raise OSError("磁碟滿了")
 
     assert call_with_rotation(KeyPool(["k1"]), lambda key: "ok", on_call=boom) == "ok"
+
+
+# ---- 退避要留下紀錄（沉默地等兩分鐘和當掉，從外面看一模一樣）----
+
+def test_each_backoff_wait_is_logged(caplog):
+    """退避從 7 秒拉長到約兩分鐘之後，沉默就變成問題：使用者看到進度停在 0%，
+    無從分辨它是在等、還是整個工作已經死了，而 Render Logs 也一片空白。"""
+    with caplog.at_level("WARNING", logger="app.gemini_keys"):
+        with pytest.raises(RuntimeError, match="UNAVAILABLE"):
+            call_with_rotation(
+                KeyPool(["k1"]),
+                lambda key: (_ for _ in ()).throw(_unavailable_exc()),
+                sleep=lambda s: None,
+            )
+    msgs = [r.getMessage() for r in caplog.records if r.name == "app.gemini_keys"]
+    waits = [m for m in msgs if "重試（" in m]
+    assert len(waits) == len(_BACKOFF_SECONDS)  # 每次退避各記一行
+    assert "過載" in waits[0] and "秒" in waits[0], "要講清楚是過載、要等幾秒"
+    assert "1/5" in waits[0] and "5/5" in waits[-1], "要看得出是第幾次、總共幾次"
+    assert "放棄" in msgs[-1], "最後真的放棄時要有一行收尾，否則看不出結局"
+
+
+def test_successful_call_logs_nothing(caplog):
+    """沒有退避就不該有雜訊——logs 要留給真的在等的時候。"""
+    with caplog.at_level("WARNING", logger="app.gemini_keys"):
+        call_with_rotation(KeyPool(["k1"]), lambda key: "ok")
+    assert [r for r in caplog.records if r.name == "app.gemini_keys"] == []

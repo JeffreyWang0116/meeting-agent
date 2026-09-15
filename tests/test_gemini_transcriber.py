@@ -336,6 +336,29 @@ def test_failed_chunk_leaves_a_visible_gap_marker(monkeypatch, tmp_path):
     assert marker[0].startswith("[4:00]")  # 缺漏區間的起點（整場絕對時間）
 
 
+def test_chunk_pipeline_is_logged_so_the_zero_percent_phase_is_legible(
+    monkeypatch, tmp_path, caplog
+):
+    """進度條要等到第一段吐出時間戳才離開 0%，在那之前（切段、上傳、等首個
+    回應）畫面完全靜止。30 分鐘的檔這段可能好幾分鐘，logs 一片空白時無從
+    分辨是在跑還是已經死了。"""
+    src = tmp_path / "long.wav"
+    src.write_bytes(b"RIFF-fake")
+    setup = FakeChunkedSetup(monkeypatch, tmp_path, duration=600, chunk_texts=[
+        "[0:05] 講者A：第一段",
+        "[0:05] 講者A：第二段",
+    ])
+    with caplog.at_level("INFO", logger="app.transcription.gemini_transcriber"):
+        setup.transcriber(chunk_seconds=240).transcribe(src)
+    msgs = [
+        r.getMessage() for r in caplog.records
+        if r.name == "app.transcription.gemini_transcriber"
+    ]
+    assert any("2 段" in m for m in msgs), "要講清楚切成幾段，才知道總共要等幾輪"
+    assert sum("1/2" in m for m in msgs) == 1  # 每段開始各記一行
+    assert sum("2/2" in m for m in msgs) == 1
+
+
 def test_chunk_after_a_failure_is_not_told_it_overlaps(monkeypatch, tmp_path):
     """重疊對照樣本是「你這段開頭就是這些內容，請比對聲音接回同一個標籤」。
     中間那段整段沒轉出來時，那份樣本跟本段音訊差了四分鐘，照舊送出就是叫模型
