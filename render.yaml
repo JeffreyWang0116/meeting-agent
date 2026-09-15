@@ -14,12 +14,12 @@ services:
       # 分析模型：免費層 gemini-3.5-flash 每天每專案僅 20 次且常過載，
       # 暫用額度高又穩定的 lite 版；配額充足或升級付費後可改回 gemini-3.5-flash 提高品質
       - key: GEMINI_MODEL
-        value: gemini-flash-lite-latest
+        value: gemini-3.5-flash-lite
       - key: TRANSCRIBE_ENGINE
         value: gemini
       # 轉錄專用模型：吃掉絕大多數請求，用免費額度高的輕量版
       - key: TRANSCRIBE_MODEL
-        value: gemini-flash-lite-latest
+        value: gemini-3.5-flash-lite
       # 強模型：講者分辨比 lite 好，但每日只有 20 次且實測連打 5 次會中 1 次 503。
       # 預設不啟用——長檔一律走 lite 分段（TRANSCRIBE_LONG_FILE_THRESHOLD_SECONDS
       # 預設 0）。留著這個值是為了讓「想換回去」只要設一個門檻秒數就好：

@@ -74,7 +74,7 @@ class SpeakerNamerAgent:
     def __init__(
         self,
         api_key: str | None = None,
-        model: str = "gemini-flash-lite-latest",
+        model: str = "gemini-3.5-flash-lite",
         generate=None,
         api_keys=None,
         on_call=None,

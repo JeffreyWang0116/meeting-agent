@@ -63,7 +63,7 @@
 
 | 用途 | 環境變數 | 預設模型 | 免費額度（每專案每日）|
 |------|----------|----------|----------------------|
-| 音訊轉錄 | `TRANSCRIBE_MODEL` | `gemini-flash-lite-latest` | 500 次/日、15 次/分 |
+| 音訊轉錄 | `TRANSCRIBE_MODEL` | `gemini-3.5-flash-lite` | 500 次/日、15 次/分 |
 | 長音檔分段秒數 | `TRANSCRIBE_CHUNK_SECONDS` | `240`（0＝不分段） | 每段各算一次轉錄請求；**六分鐘以內的檔案不分段**，整份送出 |
 | 標註率不足時的 Lite 重試次數 | `TRANSCRIBE_LABEL_RETRIES` | `2` | 每次僅佔每日額度 0.2% |
 | 長檔／講者標註備援的強模型 | `TRANSCRIBE_FALLBACK_MODEL` | `gemini-3.5-flash`（空＝關閉） | 比 lite 分講者好，但每日僅 20 次且常 503 |
@@ -72,8 +72,8 @@
 | 單一檔案的重試總上限 | `TRANSCRIBE_MAX_RETRY_CALLS` | `10` | 讓重試成本與影片長度脫鉤 |
 | 分段之間往前多抓幾秒 | `TRANSCRIBE_OVERLAP_SECONDS` | `20` | 讓講者標籤跨段接得起來 |
 | 聲紋接力最多記幾位講者 | `VOICE_RELAY_MAX_SPEAKERS` | `20`（設 0 停用） | 只影響長檔分段轉錄；每段重傳全部樣本，77 分鐘的檔約多花數分鐘。**設了 `PYANNOTE_API_KEY` 時自動跳過** |
-| 會議分析、跨會議問答 | `GEMINI_MODEL` | `gemini-flash-lite-latest` | 同上 |
-| 錯字校正（選用） | `CORRECT_MODEL` | `gemini-flash-lite-latest` | 同上 |
+| 會議分析、跨會議問答 | `GEMINI_MODEL` | `gemini-3.5-flash-lite` | 同上 |
+| 錯字校正（選用） | `CORRECT_MODEL` | `gemini-3.5-flash-lite` | 同上 |
 | 預錄聲音辨識人（選用） | `VOICE_MATCH_MODEL` | `gemini-3.5-flash` | 一場會議只打 1 次，用強模型換準確度 |
 | 最多可註冊幾個人的聲音 | `LIVE_ENROLL_MAX_SPEAKERS` | `4`（0＝停用整個功能） | 未勾選就完全不產生請求 |
 | 專門的講者分離（選用） | `PYANNOTE_API_KEY` | 空＝不啟用 | 非 Gemini 額度；pyannoteAI 試用 150 小時，見下方 |
@@ -88,7 +88,7 @@
 >
 > **品質 vs 額度**：想要更好的分析品質，可把 `GEMINI_MODEL` 設為 `gemini-3.5-flash`（推理較強，但免費層每日僅 20 次，適合少量分析）。
 >
-> **多人會議的講者分辨**：轉錄的 prompt 已強力要求標註講者，但實測 `gemini-flash-lite` 對「誰在講話」的辨識仍不穩定，3 人以上時常被併成一兩位。需要準確標出多位講者時，把 `TRANSCRIBE_MODEL` 設為 `gemini-3.5-flash`（可正確分出多位講者，代價是免費每日額度較低）。不要用 `gemini-flash-latest`——那是會飄到當下最新版的別名，實測常飄到過載的版本回 503。
+> **多人會議的講者分辨**：轉錄的 prompt 已強力要求標註講者，但實測 `gemini-flash-lite` 對「誰在講話」的辨識仍不穩定，3 人以上時常被併成一兩位。需要準確標出多位講者時，把 `TRANSCRIBE_MODEL` 設為 `gemini-3.5-flash`（可正確分出多位講者，代價是免費每日額度較低）。**不要用任何 `-latest` 結尾的別名**（`gemini-flash-latest`、`gemini-flash-lite-latest`…）——那會飄到當下最新版，而剛發布的版本正在被全世界搶，回的就是 `503 UNAVAILABLE / This model is currently experiencing high demand`。2026-09 一支 10 分鐘的上傳整份失敗即是此因，之後所有預設模型都改成釘死版本。
 >
 > **講者標註失敗會自動重試**：實測同一段音訊、同一個模型、`temperature=0`，講者標註率可能是 20% 也可能是 100%——這是**執行間的變異**，不是音訊太難，也不是分段太長（縮短分段沒有改善）。所以某一段的標註率低於 **80%** 時會自動重跑。門檻訂在 0.8 而非 0.5：prompt 要求每一行都標講者，一半沒標就是模型沒照做。重跑仍失敗時可改用 `TRANSCRIBE_FALLBACK_MODEL` 跑那一段，但**預設 `TRANSCRIBE_MAX_FALLBACK_CHUNKS=0`，等於預設不啟用**——要開再設 1。
 >
@@ -173,7 +173,7 @@ repo 已附 `Dockerfile`（含 ffmpeg）、`requirements-cloud.txt`（精簡依�
 3. 等 Docker build 完成，就會拿到一個公開網址（如 `https://meeting-agent.onrender.com`）
 4. （選填）要用專門的講者分離：在 Render 後台 **Environment** 新增 `PYANNOTE_API_KEY`，存檔後會自動重新部署；打開 `https://你的網址/api/health` 看到 `"speaker_diarization": "pyannote"` 就是生效了
 
-`render.yaml` 已預設好雲端需要的環境變數（`TRANSCRIBE_ENGINE=gemini`、轉錄與分析模型皆為 `gemini-flash-lite-latest`）；金鑰類（`GEMINI_API_KEY`、`FIREBASE_CREDENTIALS_JSON`）標記 `sync: false`，不進 repo、由你在 Render 後台填。`API_TOKEN` 例外：標記 `generateValue: true`，由 Render 自己產一串隨機值，所以**新部署一開始就是鎖上的**——要登入時到後台 Environment 分頁把值複製出來。
+`render.yaml` 已預設好雲端需要的環境變數（`TRANSCRIBE_ENGINE=gemini`、轉錄與分析模型皆為 `gemini-3.5-flash-lite`）；金鑰類（`GEMINI_API_KEY`、`FIREBASE_CREDENTIALS_JSON`）標記 `sync: false`，不進 repo、由你在 Render 後台填。`API_TOKEN` 例外：標記 `generateValue: true`，由 Render 自己產一串隨機值，所以**新部署一開始就是鎖上的**——要登入時到後台 Environment 分頁把值複製出來。
 
 > 免費方案注意：閒置一段時間後容器會休眠，下次連線需等約 30 秒冷啟動；檔案系統是暫時性的（重啟後 `db.json` 會清空）。要**永久保存任務資料**，加設 `FIREBASE_CREDENTIALS_JSON` 環境變數（見下方）即可切成 Firestore——跨會議問答的向量索引也一起存進去，所以重新部署之後不必把所有會議重新向量化。
 

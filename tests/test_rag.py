@@ -347,9 +347,13 @@ def test_reset_can_clear_only_one_user(tmp_path):
 
 
 def test_ask_agent_default_model_is_not_a_drifting_alias(tmp_path):
-    """gemini-flash-latest 會飄到「當下最新版」，實測常飄到過載版本回 503（README 明講別用）。
-    main.py 會用設定值覆蓋，但直接建 AskAgent 的人不該一不小心就踩到。"""
+    """任何 -latest 都會飄到「當下最新版」，而剛發布的版本正在被全世界搶，
+    實測會回 503（README 明講別用）。main.py 會用設定值覆蓋，但直接建 AskAgent
+    的人不該一不小心就踩到。
+
+    原本只查 endswith("-flash-latest")，"gemini-flash-lite-latest" 結尾是
+    "-flash-lite-latest" 就從旁邊溜過去了——守的是字串不是那條規則。
+    """
     store = LocalJsonStore(tmp_path / "db.json")
     agent = AskAgent(index=RagIndex(store, embedder=None), store=store)
-    assert not agent.model.endswith("-flash-latest")
-    assert agent.model == "gemini-flash-lite-latest"
+    assert not agent.model.endswith("-latest")

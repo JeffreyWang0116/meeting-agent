@@ -29,18 +29,24 @@ class Settings:
     gemini_api_key: str | None = None
     # 多把 key 輪替：免費層配額爆掉（429）時自動換下一把
     gemini_api_keys: tuple[str, ...] = ()
+    # 模型一律用釘死版本，不用任何「-latest」別名：那會飄到當下最新版，而剛
+    # 發布的版本正在被全世界搶，回的就是 503 UNAVAILABLE（This model is
+    # currently experiencing high demand）。2026-09 一支 10 分鐘的上傳整份失敗
+    # 就是這樣來的——當時 gemini-flash-lite-latest 指向發布才兩個月的
+    # 3.5-flash-lite。強模型早就釘死了，承擔絕大多數請求的 lite 反而漏掉。
+    #
     # 分析模型。與轉錄同樣預設用高額度的 lite：免費層 Flash 每日只有 20 次、
     # Lite 有 500 次，預設值選 Flash 會讓照著 README 部署的人很快撞牆。
     # 想要更強的推理再用 .env 覆蓋（如 gemini-3.5-flash），代價是額度剩 1/25
-    gemini_model: str = "gemini-flash-lite-latest"
+    gemini_model: str = "gemini-3.5-flash-lite"
     # 轉錄後端：local = 本地 faster-whisper（需 GPU）；gemini = 雲端用 Gemini 聽音訊
     transcribe_engine: str = "local"
     # Gemini 轉錄專用模型：轉錄吃掉絕大多數請求（即時聆聽每段一次）但不需要
     # 聰明模型，預設用免費額度高的輕量版，與分析模型（gemini_model）脫鉤
-    transcribe_model: str = "gemini-flash-lite-latest"
+    transcribe_model: str = "gemini-3.5-flash-lite"
     # 錯字校正專用模型：機械性工作（找同音錯字），不需要聰明模型，
     # 與分析模型脫鉤才不會在 GEMINI_MODEL 換成高階模型時一起吃掉稀有額度
-    correct_model: str = "gemini-flash-lite-latest"
+    correct_model: str = "gemini-3.5-flash-lite"
     # None 代表自動：有 CUDA 用 GPU（依 VRAM 選 medium），否則 CPU + small
     whisper_model: str | None = None
     whisper_device: str | None = None
@@ -56,9 +62,7 @@ class Settings:
     # 實測整份送出 17 分鐘錄音時，Gemini 會整份放棄講者標註、時間戳也會漂掉
     transcribe_chunk_seconds: int = 240
     # 較強的轉錄模型：長檔整份單次轉錄、以及某段講者標註率過低時重跑那一段
-    # （空字串＝不啟用）。不用 gemini-flash-latest：那是會飄到「當下最新版」的
-    # 別名，實測常飄到過載的版本回 503，長檔整份一次呼叫撞上就整份失敗。改用
-    # 釘死版本 gemini-3.5-flash（實測穩定且能聽音訊），不會被別名帶去踩過載。
+    # （空字串＝不啟用）。同樣是釘死版本，理由見 gemini_model 上方那段。
     transcribe_fallback_model: str | None = "gemini-3.5-flash"
     # 單一檔案最多幾段可以動用備援模型。免費層實測額度：Flash Lite 每日 500 次、
     # Flash 每日只有 20 次——備援跑一次就吃掉每日 Flash 額度的 5%，遠高於重試
@@ -162,10 +166,10 @@ def get_settings() -> Settings:
     return Settings(
         gemini_api_key=keys[0] if keys else None,
         gemini_api_keys=keys,
-        gemini_model=os.environ.get("GEMINI_MODEL", "gemini-flash-lite-latest"),
+        gemini_model=os.environ.get("GEMINI_MODEL", "gemini-3.5-flash-lite"),
         transcribe_engine=os.environ.get("TRANSCRIBE_ENGINE", "local").lower(),
-        transcribe_model=os.environ.get("TRANSCRIBE_MODEL", "gemini-flash-lite-latest"),
-        correct_model=os.environ.get("CORRECT_MODEL", "gemini-flash-lite-latest"),
+        transcribe_model=os.environ.get("TRANSCRIBE_MODEL", "gemini-3.5-flash-lite"),
+        correct_model=os.environ.get("CORRECT_MODEL", "gemini-3.5-flash-lite"),
         whisper_model=os.environ.get("WHISPER_MODEL") or None,
         whisper_device=os.environ.get("WHISPER_DEVICE") or None,
         live_chunk_seconds=int(os.environ.get("LIVE_CHUNK_SECONDS", "45")),

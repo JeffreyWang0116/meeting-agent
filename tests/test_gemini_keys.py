@@ -299,7 +299,7 @@ def test_settings_transcribe_model_defaults_to_lite(monkeypatch):
     monkeypatch.setattr(config, "load_dotenv", lambda *a, **k: None)
     monkeypatch.delenv("TRANSCRIBE_MODEL", raising=False)
     s = config.get_settings()
-    assert s.transcribe_model == "gemini-flash-lite-latest"
+    assert s.transcribe_model == "gemini-3.5-flash-lite"
 
 
 def test_settings_transcribe_model_overridable(monkeypatch):

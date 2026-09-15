@@ -31,7 +31,7 @@ class Translator:
         api_key: str | None = None,
         api_keys=None,
         on_call=None,
-        model: str = "gemini-flash-lite-latest",
+        model: str = "gemini-3.5-flash-lite",
         generate=None,
     ):
         self._pool = KeyPool(api_keys if api_keys else [api_key])

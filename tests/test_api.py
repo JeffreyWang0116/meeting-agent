@@ -681,12 +681,12 @@ def test_gemini_engine_uses_transcribe_model_not_analysis_model(tmp_path):
         gemini_api_key="k",
         transcribe_engine="gemini",
         gemini_model="gemini-3.5-flash",
-        transcribe_model="gemini-flash-lite-latest",
+        transcribe_model="gemini-3.5-flash-lite",
         data_dir=tmp_path,
     )
     app = create_app(settings)
     body = TestClient(app).get("/api/health").json()
-    assert body["whisper_model"] == "gemini-flash-lite-latest"  # 轉錄模型
+    assert body["whisper_model"] == "gemini-3.5-flash-lite"  # 轉錄模型
     assert body["gemini_model"] == "gemini-3.5-flash"  # 分析模型不受影響
 
 

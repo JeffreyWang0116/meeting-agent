@@ -8,7 +8,7 @@ import pytest
 from app.config import Settings, get_settings
 
 # 免費層每日額度差 25 倍（Lite 500、Flash 20），預設值選錯的代價不是慢一點而是直接不能用
-LITE = "gemini-flash-lite-latest"
+LITE = "gemini-3.5-flash-lite"
 
 
 @pytest.fixture
@@ -40,6 +40,24 @@ def test_dataclass_defaults_match_env_defaults():
 def test_env_var_still_wins(monkeypatch):
     monkeypatch.setenv("GEMINI_MODEL", "gemini-3.5-flash")
     assert get_settings().gemini_model == "gemini-3.5-flash"
+
+
+def test_no_default_model_is_a_drifting_latest_alias():
+    """「-latest」是會飄到當下最新版的別名，而剛發布的版本正在被全世界搶——
+    2026-09 那次長檔上傳收到的 503（This model is currently experiencing high
+    demand）就是這樣來的：別名當時指向發布才兩個月的 gemini-3.5-flash-lite。
+
+    強模型早就釘死了，承擔絕大多數請求的 lite 卻一直掛在別名上。原本的守門
+    測試查的是 endswith("-flash-latest")，而 "gemini-flash-lite-latest" 結尾是
+    "-flash-lite-latest"，剛好從旁邊溜過去——所以這裡改查整個 "-latest"。
+    """
+    settings = Settings()
+    for field in (
+        "gemini_model", "transcribe_model", "correct_model",
+        "transcribe_fallback_model", "voice_match_model",
+    ):
+        value = getattr(settings, field)
+        assert value and not value.endswith("-latest"), f"{field}={value} 是浮動別名"
 
 
 # ---- .env 裡的相對路徑 ----

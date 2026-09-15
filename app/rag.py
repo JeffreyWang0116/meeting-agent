@@ -239,7 +239,7 @@ class AskAgent:
         api_keys=None,
         on_call=None,
         # 與 Settings.gemini_model 的預設同一顆：高額度、不會飄版本（main.py 仍以設定值覆蓋）
-        model: str = "gemini-flash-lite-latest",
+        model: str = "gemini-3.5-flash-lite",
         generate=None,
         top_k: int = 4,
     ):
