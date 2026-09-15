@@ -252,3 +252,28 @@ def test_pyannote_voiceprint_is_off_by_default(monkeypatch):
     assert get_settings().pyannote_voiceprint_enabled is False
     monkeypatch.setenv("PYANNOTE_VOICEPRINT_ENABLED", "1")
     assert get_settings().pyannote_voiceprint_enabled is True
+
+
+# ---- 雲端 logs 看不看得到 INFO ----
+
+def test_app_logger_emits_info_so_cloud_logs_are_not_silent(tmp_path, monkeypatch):
+    """uvicorn 只設定 uvicorn / uvicorn.error / uvicorn.access 三個 logger，
+    root 沒有 handler——app.* 的記錄於是落到 Python 的 lastResort，而那個只
+    放行 WARNING 以上。結果是所有 logger.info 在 Render 上完全看不到：
+    「音檔切成 N 段」「開始轉錄第 N/M 段」「講者分離對齊」全都是 INFO。
+
+    退避訊息是 WARNING 看得到，但少了 INFO 就分不出「還在切段」與「已經在
+    等 Gemini」——而那正是進度條停在 0% 時唯一想知道的事。
+    """
+    import logging
+
+    from app.main import create_app
+
+    monkeypatch.setattr("app.config.load_dotenv", lambda *a, **k: None)
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    create_app(Settings(data_dir=tmp_path, transcribe_engine="gemini"))
+
+    app_logger = logging.getLogger("app")
+    assert app_logger.handlers, "app logger 要有自己的 handler，否則記錄無處可去"
+    child = logging.getLogger("app.transcription.gemini_transcriber")
+    assert child.getEffectiveLevel() <= logging.INFO

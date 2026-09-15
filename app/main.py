@@ -7,6 +7,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import sys
 import uuid
 from datetime import date
 from pathlib import Path
@@ -340,6 +341,29 @@ def current_user(request: Request | None = None) -> str:
     return CURRENT_USER.get()
 
 
+def _configure_logging() -> None:
+    """讓 app.* 的 INFO 真的印得出來。
+
+    uvicorn 只設定 uvicorn / uvicorn.error / uvicorn.access 三個 logger，不碰
+    root。app.* 的記錄於是一路 propagate 到沒有 handler 的 root，落進 Python
+    的 lastResort——而那個只放行 WARNING 以上。結果是所有 logger.info 在雲端
+    完全看不到：「音檔切成 N 段」「開始轉錄第 N/M 段」「講者分離對齊」全是
+    INFO，而那些正是進度條停在 0% 時唯一想知道的事。
+
+    掛在 "app" 而不是 root：只管自己的記錄，不去改動 uvicorn 或第三方套件的
+    輸出。不設 propagate=False——pytest 的 caplog 靠 root 收記錄，關掉會讓
+    測試收不到。有 handler 就不重複掛，create_app 被呼叫幾次都一樣。
+    """
+    logger = logging.getLogger("app")
+    if not logger.handlers:
+        handler = logging.StreamHandler(sys.stdout)
+        handler.setFormatter(
+            logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s")
+        )
+        logger.addHandler(handler)
+    logger.setLevel(logging.INFO)
+
+
 def create_app(
     settings: Settings | None = None,
     *,
@@ -353,6 +377,7 @@ def create_app(
     verify_token=None,
     diarizer=None,
 ) -> FastAPI:
+    _configure_logging()
     settings = settings or get_settings()
     store = store or make_store(settings)
     # 用量統計要在 agent 之前建好：每個會打 Gemini 的元件都得拿到 record_call，
