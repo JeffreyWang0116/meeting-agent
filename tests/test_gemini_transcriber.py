@@ -276,7 +276,10 @@ class FakeChunkedSetup:
             def _transcribe_one(self, audio_path, hint, model=None, on_partial=None,
                             voice_refs=None, user=None):
                 setup.hints.append(hint)
-                return setup.texts[str(audio_path)]
+                result = setup.texts[str(audio_path)]
+                if isinstance(result, Exception):  # 讓測試能指定「這一段轉錄失敗」
+                    raise result
+                return result
 
         return Recording(
             api_key="k", chunk_seconds=chunk_seconds, overlap_seconds=overlap_seconds
@@ -293,6 +296,72 @@ def test_long_audio_is_chunked_and_timestamps_shifted(monkeypatch, tmp_path):
     ])
     text = setup.transcriber(chunk_seconds=240).transcribe(src)
     assert text == "[0:05] 講者A：第一段開頭\n[4:05] 講者A：第二段開頭"
+
+
+def _overload_exc():
+    return RuntimeError(
+        "503 UNAVAILABLE. {'error': {'code': 503, 'message': "
+        "'This model is currently experiencing high demand.'}}"
+    )
+
+
+def test_one_failed_chunk_does_not_discard_the_whole_transcript(monkeypatch, tmp_path):
+    """一段撞到 503 就整份報錯的話，前面已經轉好的段落全部作廢、使用者白等
+    十分鐘。缺一段可以接受，白等一場然後什麼都沒有不行。"""
+    src = tmp_path / "long.wav"
+    src.write_bytes(b"RIFF-fake")
+    setup = FakeChunkedSetup(monkeypatch, tmp_path, duration=900, chunk_texts=[
+        "[0:05] 講者A：第一段",
+        _overload_exc(),
+        "[0:05] 講者A：第三段",
+    ])
+    text = setup.transcriber(chunk_seconds=240).transcribe(src)
+    assert "第一段" in text and "第三段" in text
+    assert "[8:05] 講者A：第三段" in text  # 中間那段失敗不該讓後面的時間戳錯位
+
+
+def test_failed_chunk_leaves_a_visible_gap_marker(monkeypatch, tmp_path):
+    """缺漏要標出來。少了標記，使用者看到的是一份「看起來完整」但中間憑空
+    少了四分鐘的逐字稿，而且無從察覺。"""
+    src = tmp_path / "long.wav"
+    src.write_bytes(b"RIFF-fake")
+    setup = FakeChunkedSetup(monkeypatch, tmp_path, duration=900, chunk_texts=[
+        "[0:05] 講者A：第一段",
+        _overload_exc(),
+        "[0:05] 講者A：第三段",
+    ])
+    text = setup.transcriber(chunk_seconds=240).transcribe(src)
+    marker = [ln for ln in text.split("\n") if "轉錄失敗" in ln]
+    assert len(marker) == 1
+    assert marker[0].startswith("[4:00]")  # 缺漏區間的起點（整場絕對時間）
+
+
+def test_chunk_after_a_failure_is_not_told_it_overlaps(monkeypatch, tmp_path):
+    """重疊對照樣本是「你這段開頭就是這些內容，請比對聲音接回同一個標籤」。
+    中間那段整段沒轉出來時，那份樣本跟本段音訊差了四分鐘，照舊送出就是叫模型
+    拿對不上的文字去配聲音。講者清單仍然有效，只有重疊的宣稱要拿掉。"""
+    src = tmp_path / "long.wav"
+    src.write_bytes(b"RIFF-fake")
+    setup = FakeChunkedSetup(monkeypatch, tmp_path, duration=900, chunk_texts=[
+        "[0:05] 講者A：第一段\n[0:30] 講者B：我補充",
+        _overload_exc(),
+        "[0:05] 講者A：第三段",
+    ])
+    setup.transcriber(chunk_seconds=240).transcribe(src)
+    assert "與前一段重疊" not in setup.hints[2]
+    assert "講者A、講者B" in setup.hints[2]  # 講者清單不受影響，仍要沿用
+
+
+def test_all_chunks_failing_still_raises(monkeypatch, tmp_path):
+    """全部都失敗時沒有任何內容可交，要照舊報錯——不能回一份只有缺漏標記的
+    逐字稿，那會被當成「轉錄成功但整場沒人說話」。"""
+    src = tmp_path / "long.wav"
+    src.write_bytes(b"RIFF-fake")
+    setup = FakeChunkedSetup(monkeypatch, tmp_path, duration=900, chunk_texts=[
+        _overload_exc(), _overload_exc(), _overload_exc(),
+    ])
+    with pytest.raises(RuntimeError, match="UNAVAILABLE"):
+        setup.transcriber(chunk_seconds=240).transcribe(src)
 
 
 def test_known_speakers_passed_as_hint_to_later_chunks(monkeypatch, tmp_path):

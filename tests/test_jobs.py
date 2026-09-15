@@ -374,3 +374,32 @@ def test_diarizer_does_not_relabel_when_transcription_is_empty(tmp_path):
     mgr.wait(job_id, timeout=5)
     assert mgr.get(job_id)["status"] == "error"
     assert diarizer.applied == []  # 沒有逐字稿可重標
+
+
+def test_overload_error_is_translated_to_actionable_message(tmp_path):
+    """Google 端過載時，使用者看到的不該是 SDK 吐的原始 JSON——那既看不懂，
+    也不知道該重試還是該換檔案。503 是等一下就會好的暫時狀況，要講明。"""
+    audio = tmp_path / "meeting.wav"
+    audio.write_bytes(b"x")
+    overload = RuntimeError(
+        "503 UNAVAILABLE. {'error': {'code': 503, 'message': "
+        "'This model is currently experiencing high demand.'}}"
+    )
+    mgr = MediaJobManager(FakeTranscriber(error=overload), FakeOrchestrator(), tmp_path)
+    job_id = mgr.submit(audio)
+    mgr.wait(job_id, timeout=5)
+    message = mgr.get(job_id)["error"]
+    assert "UNAVAILABLE" not in message and "{" not in message
+    assert "再試" in message  # 要講清楚這是可以重試的暫時狀況
+
+
+def test_other_errors_keep_their_original_message(tmp_path):
+    """只有暫時性過載該被改寫。其他錯誤的原始訊息是唯一的線索，不能吃掉。"""
+    audio = tmp_path / "meeting.wav"
+    audio.write_bytes(b"x")
+    mgr = MediaJobManager(
+        FakeTranscriber(error=ValueError("音檔格式不支援")), FakeOrchestrator(), tmp_path
+    )
+    job_id = mgr.submit(audio)
+    mgr.wait(job_id, timeout=5)
+    assert mgr.get(job_id)["error"] == "音檔格式不支援"

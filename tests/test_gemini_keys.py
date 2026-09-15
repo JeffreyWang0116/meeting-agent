@@ -6,7 +6,13 @@ KeyPool 用 round-robin：每次呼叫都換下一把 key（循環），把配�
 """
 import pytest
 
-from app.gemini_keys import KeyPool, call_with_rotation, is_quota_error, is_transient_error
+from app.gemini_keys import (
+    _BACKOFF_SECONDS,
+    KeyPool,
+    call_with_rotation,
+    is_quota_error,
+    is_transient_error,
+)
 
 
 # ---- is_quota_error / is_transient_error ----
@@ -152,7 +158,7 @@ def test_rotation_retries_on_503_with_backoff_then_succeeds():
 
     assert call_with_rotation(pool, fn, sleep=sleeps.append) == "ok"
     assert used == ["k1", "k2"]
-    assert sleeps == [1]  # 重試前有退避等待
+    assert len(sleeps) == 1 and sleeps[0] >= _BACKOFF_SECONDS[0]  # 重試前有退避等待
 
 
 def test_rotation_backoff_grows_then_gives_up_on_persistent_503():
@@ -165,8 +171,41 @@ def test_rotation_backoff_grows_then_gives_up_on_persistent_503():
 
     with pytest.raises(RuntimeError, match="UNAVAILABLE"):
         call_with_rotation(pool, fn, sleep=sleeps.append)
-    assert len(calls) == 4  # 首次 + 3 次重試
-    assert sleeps == [1, 2, 4]  # 指數退避
+    assert len(calls) == len(_BACKOFF_SECONDS) + 1  # 首次 + 每段退避各一次重試
+    assert sleeps == sorted(sleeps)  # 指數退避：一次等得比一次久
+
+
+def test_backoff_window_spans_minutes_not_seconds():
+    """Google 的過載尖峰動輒持續數十秒到數分鐘。舊的 (1,2,4) 秒退避只撐 7 秒，
+    等於還沒等就放棄——長檔轉到一半撞上，使用者白等十分鐘才看到 503。"""
+    pool = KeyPool(["k1"])
+    sleeps = []
+
+    with pytest.raises(RuntimeError, match="UNAVAILABLE"):
+        call_with_rotation(
+            pool, lambda key: (_ for _ in ()).throw(_unavailable_exc()),
+            sleep=sleeps.append,
+        )
+    assert sum(sleeps) >= 90, "整個重試窗口至少要撐過一分半的過載尖峰"
+
+
+def test_backoff_is_jittered_so_parallel_retries_do_not_resync():
+    """固定退避會讓同時撞牆的多個請求在同一刻一起重試，等於再次集中打擊
+    同一顆過載的模型。加亂數讓它們錯開。"""
+    runs = []
+    for _ in range(8):
+        sleeps = []
+        with pytest.raises(RuntimeError):
+            call_with_rotation(
+                KeyPool(["k1"]),
+                lambda key: (_ for _ in ()).throw(_unavailable_exc()),
+                sleep=sleeps.append,
+            )
+        runs.append(tuple(sleeps))
+    assert len(set(runs)) > 1, "每次退避都一模一樣＝沒有 jitter"
+    for sleeps in runs:
+        for base, actual in zip(_BACKOFF_SECONDS, sleeps):
+            assert base <= actual <= base * 1.5, "jitter 只該微調，不該量級改變"
 
 
 def test_rotation_handles_mixed_quota_and_transient_errors():
@@ -313,7 +352,7 @@ def test_on_call_counts_the_transient_retries_too():
 
     with pytest.raises(RuntimeError, match="UNAVAILABLE"):
         call_with_rotation(pool, fn, sleep=lambda s: None, on_call=lambda: calls.append(1))
-    assert len(calls) == 4  # 首次 + 3 次退避重試
+    assert len(calls) == len(_BACKOFF_SECONDS) + 1  # 首次 + 每段退避各一次重試
 
 
 def test_on_call_fires_even_without_keys():

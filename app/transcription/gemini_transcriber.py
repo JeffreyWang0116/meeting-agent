@@ -23,6 +23,7 @@ from app.transcription.segments import (
     collect_speakers,
     drop_empty_lines,
     drop_lines_before,
+    format_time,
     last_timestamp_seconds,
     normalize_timestamps,
     shift_timestamps,
@@ -293,6 +294,11 @@ class GeminiTranscriber:
         voice_book: dict[str, Path] = {}
         # 已回報過的最高進度：段內重試會讓時間戳從頭來過，不能讓進度倒退
         highest = 0.0
+        # 單段失敗會被記下來然後跳過（見迴圈內的 except）。全部段落都沒轉出
+        # 東西時要把它拋出去，不能回一份只有缺漏標記的逐字稿——那會被當成
+        # 「轉錄成功但整場沒人說話」
+        last_error: Exception | None = None
+        transcribed = 0
 
         def inner_reporter(index: int):
             """回報「這一段轉到哪了」。段與段之間隔數十秒，只有段完成才更新
@@ -334,15 +340,36 @@ class GeminiTranscriber:
                     [{"label": c, "path": p} for c, p in voice_book.items()]
                     if voice_book else None
                 )
-                text, used_fallback, retries_used = self._transcribe_labelled(
-                    chunk,
-                    this_hint,
-                    allow_fallback=fallback_used < self.max_fallback_chunks,
-                    retry_budget=retries_left,
-                    on_partial=inner_reporter(index),
-                    voice_refs=voice_refs,
-                    user=user,
-                )
+                try:
+                    text, used_fallback, retries_used = self._transcribe_labelled(
+                        chunk,
+                        this_hint,
+                        allow_fallback=fallback_used < self.max_fallback_chunks,
+                        retry_budget=retries_left,
+                        on_partial=inner_reporter(index),
+                        voice_refs=voice_refs,
+                        user=user,
+                    )
+                except Exception as exc:
+                    # 一段失敗不該讓整份作廢。金鑰輪替已經退避重試過（見
+                    # gemini_keys），走到這裡代表這一段真的拿不到——但前面已經
+                    # 轉好的段落還在，丟掉它們等於讓使用者白等十分鐘換一則錯誤。
+                    # 缺漏標記讓使用者知道哪一段沒有內容，而不是拿到一份看起來
+                    # 完整、中間卻憑空少了四分鐘的逐字稿
+                    logger.exception("第 %d 段轉錄失敗，略過該段繼續", index + 1)
+                    last_error = exc
+                    # 重疊對照樣本是「你這段開頭就是這些內容」。這段整段沒轉出來，
+                    # 下一段的開頭跟這份樣本差了一整段，照舊送出就是叫模型拿對不上
+                    # 的文字去配聲音。講者清單不受影響，仍然沿用
+                    previous_tail = ""
+                    marker = self._gap_marker(own_start, own_start + self.chunk_seconds)
+                    parts.append(marker)
+                    if on_progress:
+                        on_progress(
+                            (index + 1) / len(chunks),
+                            marker if index == 0 else "\n" + marker,
+                        )
+                    continue
                 if used_fallback:
                     fallback_used += 1
                 retries_left -= retries_used
@@ -364,6 +391,7 @@ class GeminiTranscriber:
                 collect_speakers(text, speakers)
                 previous_tail = transcript_tail(text)
                 parts.append(text)
+                transcribed += 1
                 if on_progress:
                     # jobs.py 會把每次回報的文字接起來當即時預覽，
                     # 段與段之間要自己補換行才不會黏成一行
@@ -372,7 +400,15 @@ class GeminiTranscriber:
                     )
         finally:
             shutil.rmtree(chunk_dir, ignore_errors=True)
+        if last_error is not None and not transcribed:
+            raise last_error
         return "\n".join(parts).strip()
+
+    def _gap_marker(self, start: float, end: float) -> str:
+        """標出「這段沒有內容」。少了它，使用者拿到的是一份看起來完整、中間
+        卻憑空少了幾分鐘的逐字稿，而且完全無從察覺。"""
+        span = f"{format_time(start)}~{format_time(end)}"
+        return f"[{format_time(start)}] ——（{span} 這段轉錄失敗，未取得內容）——"
 
     def _grow_voice_book(
         self, voice_book: dict[str, Path], text: str, chunk: Path

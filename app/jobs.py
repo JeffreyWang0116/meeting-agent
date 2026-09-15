@@ -11,11 +11,28 @@ import uuid
 from datetime import date
 from pathlib import Path
 
+from app.gemini_keys import is_transient_error
 from app.glossary import terms_hint_line
 from app.stores.base import DEFAULT_USER
 from app.transcription import media
 
 logger = logging.getLogger(__name__)
+
+
+def _error_message(exc: BaseException) -> str:
+    """把例外轉成使用者看得懂的訊息。
+
+    Google 端過載（503）吐的是一整包英文 JSON，使用者既看不懂，也不知道該
+    重試還是該換檔案——而這偏偏是所有錯誤裡最值得重試的一種。其餘錯誤保留
+    原始訊息：那是唯一的線索。MemoryError、OSError 等的 str() 是空字串，
+    只記訊息會讓前端退回顯示無資訊的「轉錄失敗」，型別名稱是這時唯一的線索。
+    """
+    if is_transient_error(exc):
+        return (
+            "Google 的 AI 模型目前流量過載，自動重試多次仍未成功。"
+            "這是暫時狀況，請過幾分鐘再試一次（檔案本身沒有問題）。"
+        )
+    return str(exc) or type(exc).__name__
 
 
 class MediaJobManager:
@@ -187,9 +204,7 @@ class MediaJobManager:
             # 背景執行緒的例外沒有人會看到 traceback，這裡是唯一的記錄點；
             # 少了它，雲端 Logs 一片空白，遠端只能靠猜
             logger.exception("背景轉錄工作失敗：%s", job_id)
-            # MemoryError、OSError、TimeoutError 等的 str() 是空字串，只記訊息
-            # 會讓前端退回顯示無資訊的「轉錄失敗」。型別名稱是這時唯一的線索
-            self._update(job_id, status="error", error=str(exc) or type(exc).__name__)
+            self._update(job_id, status="error", error=_error_message(exc))
         finally:
             # 轉錄後原始上傳檔與抽出的音軌都不再需要，刪掉釋放磁碟
             for p in {file_path, path}:

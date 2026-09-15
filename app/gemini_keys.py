@@ -6,21 +6,31 @@
 單次呼叫內的錯誤處理：
 - 429（RESOURCE_EXHAUSTED，配額爆）：立刻換下一把 key 續試；
   全部 key 都爆掉才報錯。
-- 503（UNAVAILABLE，Google 端暫時過載）：指數退避（1s→2s→4s）後
-  換下一把重試，最多 3 次；大檔轉錄常撞到這個，等一下通常就過。
+- 503（UNAVAILABLE，Google 端暫時過載）：指數退避後換下一把重試；
+  大檔轉錄常撞到這個，等一下通常就過。
 - 其他錯誤（網路、格式…）：直接往外拋，不重試。
 """
 from __future__ import annotations
 
+import random
 import threading
 import time
 from typing import Callable, Iterable, TypeVar
 
 T = TypeVar("T")
 
-# 503 重試次數與每次重試前的退避秒數
-_TRANSIENT_RETRIES = 3
-_BACKOFF_SECONDS = (1, 2, 4)
+# 每次 503 重試前的退避秒數（長度＝重試次數）。總窗口約兩分鐘：Google 的過載
+# 尖峰動輒持續數十秒到數分鐘，舊的 (1,2,4) 只撐 7 秒，等於還沒等就放棄——
+# 長檔轉到一半撞上，使用者白等十分鐘才看到一則 503。
+_BACKOFF_SECONDS = (2, 5, 12, 30, 60)
+# 退避加上 0~25% 的亂數。固定退避會讓同時撞牆的多個請求（多把 key、長檔的
+# 相鄰分段）在同一刻一起重試，等於對同一顆過載的模型再次集中打擊
+_JITTER_RATIO = 0.25
+
+
+def _backoff_delay(attempt: int) -> float:
+    base = _BACKOFF_SECONDS[attempt]
+    return base + random.uniform(0, base * _JITTER_RATIO)
 
 
 def is_quota_error(exc: BaseException) -> bool:
@@ -70,7 +80,7 @@ def call_with_rotation(
     """每次呼叫先取下一把 key（round-robin）給 fn。
 
     fn(key) 撞到配額錯誤（429）時換下一把續試，直到所有不同的 key 都
-    確認爆掉才放棄；撞到暫時性過載（503）時退避後重試，最多 3 次。
+    確認爆掉才放棄；撞到暫時性過載（503）時退避後重試（見 _BACKOFF_SECONDS）。
     空池會以 None 呼叫一次，讓 fn 自己丟出「未設定金鑰」的友善錯誤；
     其他錯誤直接往外拋，不再試。`sleep` 可注入以便測試不真的等待。
 
@@ -101,8 +111,8 @@ def call_with_rotation(
                     raise  # 所有 key 的配額都爆了
             elif is_transient_error(exc):
                 transient_fails += 1
-                if transient_fails > _TRANSIENT_RETRIES:
+                if transient_fails > len(_BACKOFF_SECONDS):
                     raise  # 退避重試仍然過載，放棄
-                sleep(_BACKOFF_SECONDS[transient_fails - 1])
+                sleep(_backoff_delay(transient_fails - 1))
             else:
                 raise
