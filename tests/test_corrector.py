@@ -36,9 +36,9 @@ def test_replaces_every_occurrence_and_counts_them():
 
 
 def test_timestamps_and_line_structure_preserved():
-    text, _ = agent([{"wrong": "林家容", "right": "林佳蓉"}]).correct(TRANSCRIPT)
+    text, _ = agent([{"wrong": "我下週", "right": "我下周"}]).correct(TRANSCRIPT)
     assert text.startswith("[0:05] ")
-    assert "[1:02] 林佳蓉：" in text
+    assert "[1:02] 林家容：我下周" in text
     assert text.count("\n") == TRANSCRIPT.count("\n")
 
 
@@ -83,11 +83,86 @@ def test_code_fence_stripped():
 
 def test_glossary_terms_enter_prompt():
     a = CorrectorAgent(generate=lambda p: fake([]), glossary=lambda user=None: [
-        {"term": "林佳蓉", "note": "人名"}
+        {"term": "TaskHub", "note": "產品名"}
     ])
     prompt = a.build_prompt(TRANSCRIPT)
-    assert "林佳蓉（人名）" in prompt
+    assert "TaskHub（產品名）" in prompt
     assert "詞彙表" not in CorrectorAgent(generate=lambda p: fake([])).build_prompt("x")
+
+
+# ---- 人名與稱謂一律不改 ----
+# 實測交通部預算協商（12 分鐘）：逐字稿把「陳清龍」聽成「曾清農」，校正每跑一次就換成
+# 不同的立委——陳菁徽、曾玟培、陳素月、林楚茵——而且詞彙表是空的也照編；使用者回報的
+# 「陳總召」被改成歷史詞彙裡的「陳澤安」是同一類。人名錯了用「詞彙統一替換」手動改。
+
+HEARING = "[3:22] 講者A：那91案陳總召到交通部的回答\n[3:40] 講者B：曾清農委員的提案"
+
+
+def test_prompt_forbids_touching_names_and_titles():
+    prompt = CorrectorAgent(generate=lambda p: fake([])).build_prompt(HEARING)
+    assert "人名" in prompt and "稱謂" in prompt and "不要修改" in prompt
+    assert "type" in prompt
+
+
+def test_glossary_line_no_longer_pushes_similar_sounds_onto_names():
+    """舊提示：「人名一律以此寫法為準，聽到相近發音卻寫成別的字就要修正」——正是把
+    「陳總召」改成詞彙表裡「陳澤安」的推手。"""
+    prompt = CorrectorAgent(
+        generate=lambda p: fake([]), glossary=lambda user=None: [{"term": "陳澤安", "note": "人名"}]
+    ).build_prompt(HEARING)
+    assert "聽到相近發音卻寫成別的字就要修正" not in prompt
+    assert "人名一律以此寫法為準" not in prompt
+
+
+def test_name_typed_corrections_are_rejected():
+    text, applied = agent([
+        {"wrong": "曾清農", "right": "陳素月", "reason": "聽錯", "type": "人名"},
+        {"wrong": "交通部", "right": "交通部門", "reason": "漏字", "type": "稱謂"},
+    ]).correct(HEARING)
+    assert text == HEARING and applied == []
+
+
+def test_name_corrections_are_rejected_even_when_mislabelled():
+    """模型的 type 不可靠：理由裡寫著人名、立委、姓名，就當成改人名。"""
+    for reason in ["人名誤植", "立委應為林楚茵", "立委姓名聽錯", "近音及名字誤植"]:
+        text, applied = agent(
+            [{"wrong": "曾清農", "right": "林楚茵", "reason": reason, "type": "一般"}]
+        ).correct(HEARING)
+        assert text == HEARING and applied == [], reason
+
+
+def test_titles_cannot_be_swapped_for_names_or_other_titles():
+    """「陳總召」→「陳澤安」、「原長」→「主席」：稱謂出現或消失都代表在改人。"""
+    src = "[0:01] 講者A：請問陳總召\n[0:05] 講者B：謝謝原長"
+    for wrong, right in [("陳總召", "陳澤安"), ("原長", "主席"), ("原長", "院長")]:
+        text, applied = agent([{"wrong": wrong, "right": right, "reason": "同音"}]).correct(src)
+        assert text == src and applied == [], (wrong, right)
+
+
+def test_typo_inside_an_unchanged_title_is_still_fixed():
+    src = "[0:01] 講者A：交通委員匯的決議"
+    text, _ = agent([{"wrong": "交通委員匯", "right": "交通委員會", "reason": "同音"}]).correct(src)
+    assert text == "[0:01] 講者A：交通委員會的決議"
+
+
+def test_glossary_names_are_not_used_as_correction_targets():
+    """「完全不動人名」包含詞彙表裡的名字：詞彙表只影響轉錄聽寫。"""
+    a = CorrectorAgent(
+        generate=lambda p: fake([{"wrong": "陳總", "right": "陳澤安", "reason": "同音"}]),
+        glossary=lambda user=None: [{"term": "陳澤安", "note": "人名"}],
+    )
+    text, applied = a.correct(HEARING)
+    assert text == HEARING and applied == []
+
+
+def test_ordinary_typos_still_corrected_alongside_rejected_names():
+    src = "[0:01] 講者A：交通部路珍道安司，曾清農委員"
+    text, applied = agent([
+        {"wrong": "路珍", "right": "路政", "reason": "同音字", "type": "一般"},
+        {"wrong": "曾清農", "right": "陳菁徽", "reason": "人名誤植", "type": "人名"},
+    ]).correct(src)
+    assert text == "[0:01] 講者A：交通部路政道安司，曾清農委員"
+    assert [a["right"] for a in applied] == ["路政"]
 
 
 # ---- 防呆：模型亂回傳時不能破壞逐字稿 ----
