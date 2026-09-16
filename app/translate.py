@@ -5,7 +5,7 @@ Gemini 文字翻譯則兩個轉錄後端都通用，中↔英雙向。
 """
 from __future__ import annotations
 
-from app.gemini_keys import KeyPool, call_with_rotation
+from app.gemini_keys import KeyPool, call_with_model_fallback
 
 TARGETS = {"en": "英文", "zh": "繁體中文"}
 
@@ -53,15 +53,19 @@ class Translator:
     def _generate_with_gemini(self, prompt: str) -> str:
         if not self._pool:
             raise TranslateError("未設定 GEMINI_API_KEY：翻譯需要 Gemini 金鑰")
-        return call_with_rotation(
-            self._pool, lambda key: self._call_gemini(key, prompt), on_call=self._on_call
+        # 過載時自動改用另一個模型（見 call_with_model_fallback）
+        return call_with_model_fallback(
+            self._pool,
+            self.model,
+            lambda key, model: self._call_gemini(key, prompt, model),
+            on_call=self._on_call,
         )
 
-    def _call_gemini(self, key: str, prompt: str) -> str:
+    def _call_gemini(self, key: str, prompt: str, model: str | None = None) -> str:
         from google import genai
 
         client = genai.Client(api_key=key)
         response = client.models.generate_content(
-            model=self.model, contents=prompt, config={"temperature": 0.1}
+            model=model or self.model, contents=prompt, config={"temperature": 0.1}
         )
         return response.text or ""

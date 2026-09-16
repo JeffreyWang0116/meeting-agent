@@ -14,7 +14,7 @@ import shutil
 import time
 from pathlib import Path
 
-from app.gemini_keys import KeyPool, call_with_rotation
+from app.gemini_keys import KeyPool, call_with_model_fallback
 from app.glossary import terms_hint_line
 from app.stores.base import DEFAULT_USER
 from app.transcription import media
@@ -551,10 +551,12 @@ class GeminiTranscriber:
             return text.strip()
         # 上傳的檔案綁在該 key 的專案底下，所以「上傳＋轉錄」必須整組用同一把 key
         return (
-            call_with_rotation(
+            # 過載時自動改用另一個模型（見 call_with_model_fallback）
+            call_with_model_fallback(
                 self._pool,
-                lambda key: self._transcribe_with_key(
-                    key, audio_path, hint, model, on_partial, voice_refs, user
+                model or self.model,
+                lambda key, chosen: self._transcribe_with_key(
+                    key, audio_path, hint, chosen, on_partial, voice_refs, user
                 ),
                 on_call=self._on_call,
             )

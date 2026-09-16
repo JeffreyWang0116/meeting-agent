@@ -18,7 +18,7 @@ from __future__ import annotations
 import json
 import re
 
-from app.gemini_keys import KeyPool, call_with_rotation
+from app.gemini_keys import KeyPool, call_with_model_fallback
 from app.glossary import glossary_prompt_line
 from app.stores.base import DEFAULT_USER
 
@@ -109,16 +109,20 @@ class CorrectorAgent:
     def _generate_with_gemini(self, prompt: str) -> str:
         if not self._pool:
             return '{"corrections": []}'  # 沒金鑰就等同「沒有要修正的地方」
-        return call_with_rotation(
-            self._pool, lambda key: self._call_gemini(key, prompt), on_call=self._on_call
+        # 過載時自動改用另一個模型（見 call_with_model_fallback）
+        return call_with_model_fallback(
+            self._pool,
+            self.model,
+            lambda key, model: self._call_gemini(key, prompt, model),
+            on_call=self._on_call,
         )
 
-    def _call_gemini(self, key: str, prompt: str) -> str:
+    def _call_gemini(self, key: str, prompt: str, model: str | None = None) -> str:
         from google import genai
 
         client = genai.Client(api_key=key)
         response = client.models.generate_content(
-            model=self.model,
+            model=model or self.model,
             contents=prompt,
             # temperature=0：校正是機械性工作，不要創意
             config={"response_mime_type": "application/json", "temperature": 0.0},

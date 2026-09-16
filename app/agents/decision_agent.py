@@ -14,7 +14,7 @@ from datetime import date
 
 from pydantic import ValidationError
 
-from app.gemini_keys import KeyPool, call_with_rotation
+from app.gemini_keys import KeyPool, call_with_model_fallback
 from app.glossary import glossary_prompt_line
 from app.models import MeetingAnalysis
 from app.stores.base import DEFAULT_USER
@@ -318,16 +318,20 @@ class DecisionAgent:
                 "未設定 GEMINI_API_KEY：請到 https://aistudio.google.com/apikey "
                 "取得金鑰並填入專案根目錄的 .env 檔"
             )
-        return call_with_rotation(
-            self._pool, lambda key: self._call_gemini(key, prompt), on_call=self._on_call
+        # 過載時自動改用另一個模型（見 call_with_model_fallback）
+        return call_with_model_fallback(
+            self._pool,
+            self.model,
+            lambda key, model: self._call_gemini(key, prompt, model),
+            on_call=self._on_call,
         )
 
-    def _call_gemini(self, key: str, prompt: str) -> str:
+    def _call_gemini(self, key: str, prompt: str, model: str | None = None) -> str:
         from google import genai
 
         client = genai.Client(api_key=key)
         response = client.models.generate_content(
-            model=self.model,
+            model=model or self.model,
             contents=prompt,
             config={"response_mime_type": "application/json", "temperature": 0.2},
         )

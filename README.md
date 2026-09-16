@@ -130,6 +130,7 @@
 - **多把金鑰輪替**：`GEMINI_API_KEYS`（逗號分隔）round-robin，每次呼叫換下一把；撞 429 自動跳下一把
 - **503 過載自動退避重試**：Google 端暫時過載時指數退避（2s→5s→12s→30s→60s，各加 0~25% 亂數避免多個請求同時重試）重試最多 5 次，整個窗口約兩分鐘
 - **長檔單段失敗不整份作廢**：分段轉錄時某一段重試用盡仍失敗，只在逐字稿留下「這段轉錄失敗」的缺漏標記並繼續轉下一段；全部段落都失敗才報錯
+- **持續過載時自動換模型**：退避重試用盡仍是 503（「This model is currently experiencing high demand」），就改用另一個模型整輪重試——`gemini-3.5-flash-lite` ↔ `gemini-3.5-flash`，兩者負載與額度分開計算，一個過載另一個常常正常。涵蓋轉錄、分析、錯字校正、講者姓名、聲紋比對、翻譯、問答；只有過載才換（429 額度用完不換，免得把另一顆額度也吃掉）。代價是 lite 過載時會用到 3.5-flash 每日僅 20 次的額度
 - **JSON 驗證失敗自動重試**：把 Pydantic 錯誤訊息回饋給模型，最多 3 次
 
 ## 快速開始
@@ -340,7 +341,7 @@ app/
 ├── atomicio.py           # 原子寫檔（斷電不壞資料）
 └── evaluation.py         # 任務抽取 precision/recall（供 eval/run.py）
 eval/                     # 量化評估：標注資料集 + 評估腳本；diarize_poc.py 講者分離實測
-tests/                    # pytest 測試（844，全部離線、不需金鑰；前端講者判斷另需 node）
+tests/                    # pytest 測試（871，全部離線、不需金鑰；前端講者判斷另需 node）
 Dockerfile                # 雲端部署映像（Python + ffmpeg，轉錄用 Gemini）
 requirements-cloud.lock   # 雲端完整鎖定版本（Dockerfile 與 CI 共用）
 ruff.toml                 # lint 規則（CI 跑 ruff check .）

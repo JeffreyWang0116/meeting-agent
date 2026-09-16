@@ -9,6 +9,7 @@ import pytest
 from app.gemini_keys import (
     _BACKOFF_SECONDS,
     KeyPool,
+    call_with_model_fallback,
     call_with_rotation,
     is_quota_error,
     is_transient_error,
@@ -234,7 +235,7 @@ def test_decision_agent_rotates_key_on_quota_error(monkeypatch):
     agent = DecisionAgent(api_keys=["k1", "k2"])
     used = []
 
-    def fake_call(key, prompt):
+    def fake_call(key, prompt, model=None):
         used.append(key)
         if key == "k1":
             raise _quota_exc()
@@ -400,3 +401,176 @@ def test_successful_call_logs_nothing(caplog):
     with caplog.at_level("WARNING", logger="app.gemini_keys"):
         call_with_rotation(KeyPool(["k1"]), lambda key: "ok")
     assert [r for r in caplog.records if r.name == "app.gemini_keys"] == []
+
+# ---- 過載時換模型 ----
+# 實例：同學上傳立法院質詢影片，跑了很久最後整份失敗在
+# 「503 UNAVAILABLE ... This model is currently experiencing high demand」。
+# 過載是「這個模型」忙，另一個模型的負載與額度是分開的，常常完全正常。
+
+LITE = "gemini-3.5-flash-lite"
+FLASH = "gemini-3.5-flash"
+
+
+def test_persistent_overload_switches_to_the_alternate_model():
+    pool = KeyPool(["k1"])
+    calls, sleeps = [], []
+
+    def fn(key, model):
+        calls.append(model)
+        if model == LITE:
+            raise _unavailable_exc()
+        return f"ok from {model}"
+
+    assert call_with_model_fallback(pool, LITE, fn, sleep=sleeps.append) == f"ok from {FLASH}"
+    attempts = 1 + len(_BACKOFF_SECONDS)
+    assert calls == [LITE] * attempts + [FLASH]  # 原模型照舊退避重試用盡，才換模型
+    assert len(sleeps) == len(_BACKOFF_SECONDS)
+
+
+def test_alternate_works_in_both_directions():
+    pool = KeyPool(["k1"])
+
+    def fn(key, model):
+        if model == FLASH:
+            raise _unavailable_exc()
+        return model
+
+    assert call_with_model_fallback(pool, FLASH, fn, sleep=lambda s: None) == LITE
+
+
+def test_success_on_the_first_model_never_touches_the_alternate():
+    calls = []
+
+    def fn(key, model):
+        calls.append(model)
+        return "ok"
+
+    assert call_with_model_fallback(KeyPool(["k1"]), LITE, fn) == "ok"
+    assert calls == [LITE]
+
+
+def test_quota_exhaustion_does_not_switch_models():
+    """429 是額度用完不是過載：換模型只會把另一個模型的額度也吃掉，還掩蓋真正原因。"""
+    calls = []
+
+    def fn(key, model):
+        calls.append(model)
+        raise _quota_exc()
+
+    with pytest.raises(RuntimeError, match="RESOURCE_EXHAUSTED"):
+        call_with_model_fallback(KeyPool(["k1"]), LITE, fn, sleep=lambda s: None)
+    assert set(calls) == {LITE}
+
+
+def test_other_errors_do_not_switch_models():
+    calls = []
+
+    def fn(key, model):
+        calls.append(model)
+        raise ValueError("bad request")
+
+    with pytest.raises(ValueError):
+        call_with_model_fallback(KeyPool(["k1"]), LITE, fn, sleep=lambda s: None)
+    assert calls == [LITE]
+
+
+def test_model_without_alternate_raises_the_overload():
+    def fn(key, model):
+        raise _unavailable_exc()
+
+    with pytest.raises(RuntimeError, match="UNAVAILABLE"):
+        call_with_model_fallback(KeyPool(["k1"]), "gemini-embedding-001", fn, sleep=lambda s: None)
+
+
+def test_both_models_overloaded_raises():
+    calls = []
+
+    def fn(key, model):
+        calls.append(model)
+        raise _unavailable_exc()
+
+    with pytest.raises(RuntimeError, match="UNAVAILABLE"):
+        call_with_model_fallback(KeyPool(["k1"]), LITE, fn, sleep=lambda s: None)
+    attempts = 1 + len(_BACKOFF_SECONDS)
+    assert calls == [LITE] * attempts + [FLASH] * attempts  # 換過去的模型一樣會退避重試，但不會無限來回
+
+
+def test_decision_agent_falls_back_when_its_model_is_overloaded(monkeypatch):
+    from app.agents.decision_agent import DecisionAgent
+    from tests.test_decision import valid_json
+
+    monkeypatch.setattr("app.gemini_keys.time.sleep", lambda s: None)
+    agent = DecisionAgent(api_keys=["k1"], model=FLASH)
+    models = []
+
+    def fake_call(key, prompt, model=None):
+        models.append(model or agent.model)
+        if (model or agent.model) == FLASH:
+            raise _unavailable_exc()
+        return valid_json()
+
+    monkeypatch.setattr(agent, "_call_gemini", fake_call)
+    assert agent.analyze("志明下週一交 prompt").meeting.title
+    assert models[-1] == LITE
+
+
+def test_gemini_transcriber_falls_back_when_its_model_is_overloaded(tmp_path, monkeypatch):
+    from app.transcription.gemini_transcriber import GeminiTranscriber
+
+    monkeypatch.setattr("app.gemini_keys.time.sleep", lambda s: None)
+    wav = tmp_path / "a.wav"
+    wav.write_bytes(b"RIFF")
+    t = GeminiTranscriber(api_keys=["k1"], model=LITE)
+    models = []
+
+    def fake_run(key, path, hint=None, model=None, on_partial=None, voice_refs=None, user=None):
+        models.append(model)
+        if model == LITE:
+            raise _unavailable_exc()
+        return "逐字稿"
+
+    monkeypatch.setattr(t, "_transcribe_with_key", fake_run)
+    assert t.transcribe(wav) == "逐字稿"
+    assert models[-1] == FLASH
+
+
+@pytest.mark.parametrize("factory", [
+    lambda: __import__("app.agents.corrector_agent", fromlist=["CorrectorAgent"]).CorrectorAgent(api_keys=["k1"], model=LITE),
+    lambda: __import__("app.agents.speaker_namer_agent", fromlist=["SpeakerNamerAgent"]).SpeakerNamerAgent(api_keys=["k1"], model=LITE),
+    lambda: __import__("app.translate", fromlist=["Translator"]).Translator(api_keys=["k1"], model=LITE),
+    lambda: __import__("app.transcription.voice_match", fromlist=["VoiceMatcher"]).VoiceMatcher(api_keys=["k1"], model=LITE),
+])
+def test_other_gemini_components_fall_back_too(factory, monkeypatch):
+    monkeypatch.setattr("app.gemini_keys.time.sleep", lambda s: None)
+    component = factory()
+    models = []
+
+    def fake_call(key, payload, model=None):
+        models.append(model or component.model)
+        if (model or component.model) == LITE:
+            raise _unavailable_exc()
+        return "ok"
+
+    monkeypatch.setattr(component, "_call_gemini", fake_call)
+    assert component._generate_with_gemini("prompt") == "ok"
+    assert models[-1] == FLASH
+
+
+def test_ask_agent_falls_back_too(tmp_path, monkeypatch):
+    from app.rag import AskAgent, RagIndex
+    from app.stores.local_store import LocalJsonStore
+
+    monkeypatch.setattr("app.gemini_keys.time.sleep", lambda s: None)
+    store = LocalJsonStore(tmp_path / "db.json")
+    agent = AskAgent(index=RagIndex(store, embedder=None), store=store, api_keys=["k1"], model=LITE)
+    models = []
+
+    def fake_call(key, prompt, model=None):
+        models.append(model or agent.model)
+        if (model or agent.model) == LITE:
+            raise _unavailable_exc()
+        return "ok"
+
+    monkeypatch.setattr(agent, "_call_gemini", fake_call)
+    assert agent._generate_with_gemini("prompt") == "ok"
+    assert models[-1] == FLASH

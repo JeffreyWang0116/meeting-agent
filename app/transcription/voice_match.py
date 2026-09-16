@@ -26,7 +26,7 @@ import uuid
 from pathlib import Path
 
 from app.agents.speaker_namer_agent import is_safe_name
-from app.gemini_keys import KeyPool, call_with_rotation
+from app.gemini_keys import KeyPool, call_with_model_fallback
 from app.transcription import media
 from app.transcription.segments import collect_speakers, speaker_of
 
@@ -146,11 +146,17 @@ class VoiceMatcher:
     def _generate_with_gemini(self, parts: list[str | Path]) -> str:
         if not self._pool:
             return '{"speakers": []}'  # 沒金鑰就等同「認不出任何人」
-        return call_with_rotation(
-            self._pool, lambda key: self._call_gemini(key, parts), on_call=self._on_call
+        # 過載時自動改用另一個模型（見 call_with_model_fallback）
+        return call_with_model_fallback(
+            self._pool,
+            self.model,
+            lambda key, model: self._call_gemini(key, parts, model),
+            on_call=self._on_call,
         )
 
-    def _call_gemini(self, key: str, parts: list[str | Path]) -> str:
+    def _call_gemini(
+        self, key: str, parts: list[str | Path], model: str | None = None
+    ) -> str:
         from google import genai
 
         client = genai.Client(api_key=key)
@@ -169,7 +175,7 @@ class VoiceMatcher:
                 else:
                     contents.append(part)
             response = client.models.generate_content(
-                model=self.model,
+                model=model or self.model,
                 contents=contents,
                 # temperature=0：這是比對判讀，不要創意
                 config={"response_mime_type": "application/json", "temperature": 0.0},

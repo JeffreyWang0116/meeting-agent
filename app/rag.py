@@ -17,7 +17,7 @@ from __future__ import annotations
 import math
 import threading
 
-from app.gemini_keys import KeyPool, call_with_rotation
+from app.gemini_keys import KeyPool, call_with_model_fallback, call_with_rotation
 from app.stores.base import DEFAULT_USER
 
 # 向量維度：gemini-embedding-001 預設 3072 維，每場會議的索引 JSON 會膨脹到
@@ -287,15 +287,19 @@ class AskAgent:
     def _generate_with_gemini(self, prompt: str) -> str:
         if not self._pool:
             raise RagError("未設定 GEMINI_API_KEY：跨會議問答需要 Gemini 金鑰")
-        return call_with_rotation(
-            self._pool, lambda key: self._call_gemini(key, prompt), on_call=self._on_call
+        # 過載時自動改用另一個模型（見 call_with_model_fallback）
+        return call_with_model_fallback(
+            self._pool,
+            self.model,
+            lambda key, model: self._call_gemini(key, prompt, model),
+            on_call=self._on_call,
         )
 
-    def _call_gemini(self, key: str, prompt: str) -> str:
+    def _call_gemini(self, key: str, prompt: str, model: str | None = None) -> str:
         from google import genai
 
         client = genai.Client(api_key=key)
         response = client.models.generate_content(
-            model=self.model, contents=prompt, config={"temperature": 0.2}
+            model=model or self.model, contents=prompt, config={"temperature": 0.2}
         )
         return response.text or ""

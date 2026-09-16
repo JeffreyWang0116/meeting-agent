@@ -9,6 +9,11 @@
 - 503（UNAVAILABLE，Google 端暫時過載）：指數退避後換下一把重試；
   大檔轉錄常撞到這個，等一下通常就過。
 - 其他錯誤（網路、格式…）：直接往外拋，不重試。
+
+call_with_model_fallback 再多一層：503 退避用盡仍過載時，改用另一個模型整輪重試
+（lite ↔ 3.5-flash）。實例：上傳一支立法院質詢影片跑了很久，最後整份失敗在
+「This model is currently experiencing high demand」——過載是那一個模型忙，
+另一個模型的負載與額度分開計算，常常完全正常。
 """
 from __future__ import annotations
 
@@ -34,6 +39,13 @@ _JITTER_RATIO = 0.25
 def _backoff_delay(attempt: int) -> float:
     base = _BACKOFF_SECONDS[attempt]
     return base + random.uniform(0, base * _JITTER_RATIO)
+
+# 過載（退避用盡仍 503）時改用的模型（雙向）。只列本專案實際在用、確定能處理同樣
+# 請求（含音訊）的兩顆，而且都是釘死版本；其他模型（例如向量嵌入）沒有替代，過載照舊往外拋
+OVERLOAD_ALTERNATES = {
+    "gemini-3.5-flash-lite": "gemini-3.5-flash",
+    "gemini-3.5-flash": "gemini-3.5-flash-lite",
+}
 
 
 def is_quota_error(exc: BaseException) -> bool:
@@ -129,3 +141,30 @@ def call_with_rotation(
                 sleep(delay)
             else:
                 raise
+
+
+def call_with_model_fallback(
+    pool: KeyPool,
+    model: str,
+    fn: Callable[[str | None, str], T],
+    *,
+    sleep: Callable[[float], None] | None = None,
+    on_call: Callable[[], None] | None = None,
+) -> T:
+    """fn(key, model)。先用 model 走 call_with_rotation；若 503 退避重試用盡仍過載，
+    改用 OVERLOAD_ALTERNATES[model] 再走一整輪（一樣會輪替金鑰、退避）。
+
+    只有「過載」才換：429 是額度用完，換模型只會把另一顆的額度也吃掉、還掩蓋真正
+    原因；其他錯誤與模型無關。換過去的模型再失敗就往外拋，不會兩顆之間無限來回。
+
+    代價：lite 過載時改用 3.5-flash，會用到它每日僅 20 次的額度。
+    """
+    wait = sleep or time.sleep  # 執行時才取，測試 monkeypatch time.sleep 才有效
+    try:
+        return call_with_rotation(pool, lambda key: fn(key, model), sleep=wait, on_call=on_call)
+    except Exception as exc:
+        alternate = OVERLOAD_ALTERNATES.get(model)
+        if not alternate or is_quota_error(exc) or not is_transient_error(exc):
+            raise
+        logger.warning("%s 持續過載（%s），改用 %s 重試", model, exc, alternate)
+        return call_with_rotation(pool, lambda key: fn(key, alternate), sleep=wait, on_call=on_call)
