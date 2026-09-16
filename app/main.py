@@ -451,6 +451,8 @@ def create_app(
                 voice_relay_max_speakers=(
                     0 if diarizer else settings.voice_relay_max_speakers
                 ),
+                # 同理：講者標籤標得再差也會被重標，只為整段放棄轉錄重跑
+                speaker_labels_needed=diarizer is None,
             )
         else:
             transcriber = Transcriber(

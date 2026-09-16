@@ -17,6 +17,7 @@ from app.transcription.segments import (
     shift_timestamps,
     speaker_label_ratio,
     speaker_of,
+    timed_speech_ratio,
     transcript_tail,
     speaker_hint,
 )
@@ -334,6 +335,25 @@ def test_label_ratio_ignores_punctuation_only_lines():
 
 def test_label_ratio_still_counts_labelled_lines_with_content():
     assert speaker_label_ratio("[0:00] 講者A：一\n[0:05] 講者B：二") == 1.0
+
+
+# ---- 有時間戳且有內容的比例（有 pyannote 時的重試依據）----
+# pyannote 只靠時間戳重標講者，Gemini 標不標講者都無所謂；真正要防的是模型整段放棄：
+# 沒時間戳（重標對不上）或只剩空標籤、標點（沒有內容）。
+
+def test_timed_speech_ratio_ignores_missing_speaker_labels():
+    assert timed_speech_ratio("[0:00] 沒標\n[0:05] 也沒標") == 1.0
+    assert timed_speech_ratio("[0:00] 講者A：一\n[0:05] 沒標") == 1.0
+
+
+def test_timed_speech_ratio_catches_abandoned_content_and_missing_timestamps():
+    assert timed_speech_ratio("[0:00] 講者A：\n[0:05] 講者A：。") == 0.0
+    assert timed_speech_ratio("講者A：有內容但沒時間\n[0:05] 有時間") == 0.5
+
+
+def test_timed_speech_ratio_of_empty_text_is_not_a_failure():
+    assert timed_speech_ratio("") == 1.0
+    assert timed_speech_ratio("\n\n") == 1.0
 
 
 # ---- 移除沒有實際內容的行 ----

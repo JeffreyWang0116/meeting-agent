@@ -90,7 +90,7 @@
 >
 > **多人會議的講者分辨**：轉錄的 prompt 已強力要求標註講者，但實測 `gemini-flash-lite` 對「誰在講話」的辨識仍不穩定，3 人以上時常被併成一兩位。需要準確標出多位講者時，把 `TRANSCRIBE_MODEL` 設為 `gemini-3.5-flash`（可正確分出多位講者，代價是免費每日額度較低）。**不要用任何 `-latest` 結尾的別名**（`gemini-flash-latest`、`gemini-flash-lite-latest`…）——那會飄到當下最新版，而剛發布的版本正在被全世界搶，回的就是 `503 UNAVAILABLE / This model is currently experiencing high demand`。2026-09 一支 10 分鐘的上傳整份失敗即是此因，之後所有預設模型都改成釘死版本。
 >
-> **講者標註失敗會自動重試**：實測同一段音訊、同一個模型、`temperature=0`，講者標註率可能是 20% 也可能是 100%——這是**執行間的變異**，不是音訊太難，也不是分段太長（縮短分段沒有改善）。所以某一段的標註率低於 **80%** 時會自動重跑。門檻訂在 0.8 而非 0.5：prompt 要求每一行都標講者，一半沒標就是模型沒照做。重跑仍失敗時可改用 `TRANSCRIBE_FALLBACK_MODEL` 跑那一段，但**預設 `TRANSCRIBE_MAX_FALLBACK_CHUNKS=0`，等於預設不啟用**——要開再設 1。
+> **講者標註失敗會自動重試**：實測同一段音訊、同一個模型、`temperature=0`，講者標註率可能是 20% 也可能是 100%——這是**執行間的變異**，不是音訊太難，也不是分段太長（縮短分段沒有改善）。所以某一段的標註率低於 **80%** 時會自動重跑。門檻訂在 0.8 而非 0.5：prompt 要求每一行都標講者，一半沒標就是模型沒照做。重跑仍失敗時可改用 `TRANSCRIBE_FALLBACK_MODEL` 跑那一段，但**預設 `TRANSCRIBE_MAX_FALLBACK_CHUNKS=0`，等於預設不啟用**——要開再設 1。**設了 `PYANNOTE_API_KEY` 時不為講者標籤重跑**：講者會依時間戳整份重標，Gemini 標得再差都用不到，重試只留給「整段放棄轉錄」（有時間戳且有內容的行低於 80%）。實測 10.5 分鐘質詢：3 段原本全因標註率低各重跑 2 次，9 次呼叫 114 秒 → 3 次 39 秒，重標後 58 行全部有講者。
 >
 > **為什麼重試次數多、降級次數少**：Flash Lite 每日 500 次、Flash 只有 20 次（差 25 倍）。既然失敗是執行間的變異，多試幾次的累積成功率就很划算——實測單次成功率約 6 成，試 3 次約 94%，只花掉 Lite 額度的 0.6%；而降級一次就吃掉 Flash 額度的 5%。所以預設是「Lite 重試 2 次，Flash 完全不用」（`TRANSCRIBE_MAX_FALLBACK_CHUNKS=0`）——把額度全花在便宜又有效的 Lite 重試上。
 >
@@ -341,7 +341,7 @@ app/
 ├── atomicio.py           # 原子寫檔（斷電不壞資料）
 └── evaluation.py         # 任務抽取 precision/recall（供 eval/run.py）
 eval/                     # 量化評估：標注資料集 + 評估腳本；diarize_poc.py 講者分離實測
-tests/                    # pytest 測試（859，全部離線、不需金鑰；前端講者判斷另需 node）
+tests/                    # pytest 測試（865，全部離線、不需金鑰；前端講者判斷另需 node）
 Dockerfile                # 雲端部署映像（Python + ffmpeg，轉錄用 Gemini）
 requirements-cloud.lock   # 雲端完整鎖定版本（Dockerfile 與 CI 共用）
 ruff.toml                 # lint 規則（CI 跑 ruff check .）

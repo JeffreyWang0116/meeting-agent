@@ -617,6 +617,46 @@ def test_half_labelled_chunk_is_retried(monkeypatch, tmp_path):
     assert setup.calls["n"] >= 3  # 第一段重跑過（否則兩段只會有 2 次）
 
 
+# ---- 有 pyannote 時不為講者標籤重跑 ----
+# 實測 10.5 分鐘質詢：3 段全因標註率低各重跑 2 次，9 次呼叫 114 秒——但講者最後會被
+# pyannote 依時間戳整份重標，Gemini 的標籤根本用不到。只留「整段放棄轉錄」的防護。
+
+def test_missing_labels_are_not_retried_when_diarizer_relabels(monkeypatch, tmp_path):
+    src = tmp_path / "long.wav"
+    src.write_bytes(b"RIFF-fake")
+    setup = RetryingSetup(monkeypatch, tmp_path, duration=600, chunk_texts=["", ""])
+    t = setup.transcriber_with_sequence(
+        ["[0:00] 沒標\n[0:05] 也沒標"], label_retries=2, speaker_labels_needed=False
+    )
+    assert "也沒標" in t.transcribe(src)
+    assert setup.calls["n"] == 2  # 兩段各一次
+
+
+def test_abandoned_content_is_still_retried_when_diarizer_relabels(monkeypatch, tmp_path):
+    src = tmp_path / "long.wav"
+    src.write_bytes(b"RIFF-fake")
+    setup = RetryingSetup(monkeypatch, tmp_path, duration=600, chunk_texts=["", ""])
+    t = setup.transcriber_with_sequence(
+        ["[0:00] 講者A：\n[0:05] 講者A：。", "[0:00] 有內容\n[0:05] 沒標也沒關係"],
+        label_retries=2, speaker_labels_needed=False,
+    )
+    assert "有內容" in t.transcribe(src)
+    assert setup.calls["n"] == 3  # 第一段重跑一次，第二段一次
+
+
+def test_missing_timestamps_are_still_retried_when_diarizer_relabels(monkeypatch, tmp_path):
+    """沒有時間戳的行 pyannote 對不上，等於講者全部歸屬不明。"""
+    src = tmp_path / "long.wav"
+    src.write_bytes(b"RIFF-fake")
+    setup = RetryingSetup(monkeypatch, tmp_path, duration=600, chunk_texts=["", ""])
+    t = setup.transcriber_with_sequence(
+        ["講者A：整段沒時間\n講者B：也沒有", "[0:00] 有時間\n[0:05] 也有"],
+        label_retries=2, speaker_labels_needed=False,
+    )
+    assert "有時間" in t.transcribe(src)
+    assert setup.calls["n"] == 3  # 第一段重跑一次，第二段一次
+
+
 # ---- 每檔重試次數上限 ----
 # 重試是「每段」獨立判斷的，只設每段上限的話，總量會隨影片長度線性膨脹：
 # 一支 60 分鐘的質詢影片切成 15 段，每段重試 2 次就是 30 次額外請求，

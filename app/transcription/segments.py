@@ -146,6 +146,18 @@ def speaker_label_ratio(text: str) -> float:
     return sum(1 for ln in lines if speaker_of(ln) and _has_speech(ln)) / len(lines)
 
 
+def timed_speech_ratio(text: str) -> float:
+    """有時間戳「且有內容」的行數佔比（0~1）。空字串回傳 1.0。
+
+    有 pyannote 時的重試依據：講者會依時間戳整份重標，Gemini 標不標講者都無所謂，
+    要防的只剩模型整段放棄——沒時間戳（重標對不上）或只剩空標籤、標點。
+    """
+    lines = [ln for ln in text.split("\n") if ln.strip()]
+    if not lines:
+        return 1.0
+    return sum(1 for ln in lines if TIME_PREFIX_RE.match(ln) and _has_speech(ln)) / len(lines)
+
+
 def collect_speakers(text: str, known: list[str]) -> None:
     """把 text 裡新出現的講者依出場序追加進 known（就地修改）。"""
     for line in text.split("\n"):
