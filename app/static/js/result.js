@@ -307,10 +307,17 @@ $("rSpeakerChips").addEventListener("click", async e => {
   const a = currentResult.analysis;
   try {
     const updated = await renameSpeaker(
-      currentResult.meeting_id, currentTranscript, a.meeting.attendees, oldName, newName);
+      currentResult.meeting_id, { ...a.meeting, transcript: currentTranscript }, oldName, newName);
     currentTranscript = (updated.transcript || "").trim();
     currentResult.transcript = updated.transcript;
     a.meeting.attendees = updated.meeting.attendees || [];
+    if (a.meeting.summary) {
+      a.meeting.summary = updated.meeting.summary;
+      $("rSummary").textContent = a.meeting.summary || "";
+      // 摘要換過了，之前翻好的譯文已經過期
+      $("rSummaryTrans").textContent = "";
+      $("rSummaryTrans").style.display = "none";
+    }
     a.todos.forEach(t => { if (t.owner === oldName) t.owner = newName; });
     renderMeta();
     renderTodos(a.todos);

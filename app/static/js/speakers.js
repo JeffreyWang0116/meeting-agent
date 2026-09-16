@@ -77,6 +77,28 @@ function renameInList(list, oldName, newName) {
   return [...new Set((list || []).map(x => (x === oldName ? newName : x)))];
 }
 
+// 摘要等自由文字裡的講者名稱。沒有講者欄可以對，所以要防三種誤換：
+// - 「講者A」撞上「講者AB」、「Speaker 2」撞上「Speaker 20」：英數字頭尾要落在英數字邊界
+// - 新名字包含舊名字（翁曉→翁曉玲）：已經寫對的地方不能再換一次變成「翁曉玲玲」
+// - 單字名（王、林）在中文裡到處都是，不換
+const ASCII_WORD = /[A-Za-z0-9]/;
+function renameInText(text, oldName, newName) {
+  const src = String(text || "");
+  if (!oldName || oldName.length < 2) return src;
+  const within = newName.indexOf(oldName);  // 舊名在新名裡的位置（-1＝不包含）
+  let out = "", from = 0, at;
+  while ((at = src.indexOf(oldName, from)) !== -1) {
+    const end = at + oldName.length;
+    const cutsWord =
+      (ASCII_WORD.test(oldName[0]) && at > 0 && ASCII_WORD.test(src[at - 1])) ||
+      (ASCII_WORD.test(oldName[oldName.length - 1]) && end < src.length && ASCII_WORD.test(src[end]));
+    const alreadyNew = within >= 0 && src.startsWith(newName, at - within);
+    out += src.slice(from, at) + (cutsWord || alreadyNew ? oldName : newName);
+    from = end;
+  }
+  return out + src.slice(from);
+}
+
 // 新名字不合格的原因；合格回空字串。與後端 speaker_names.is_safe_name 同一套
 function speakerNameProblem(name) {
   const n = String(name || "").trim();
@@ -86,4 +108,4 @@ function speakerNameProblem(name) {
   return "";
 }
 
-export { LABEL_RE, TIME_RE, matchSpeaker, renameInList, renameSpeakerInTranscript, speakerLabels, speakerNameProblem };
+export { LABEL_RE, TIME_RE, matchSpeaker, renameInList, renameInText, renameSpeakerInTranscript, speakerLabels, speakerNameProblem };

@@ -6,7 +6,7 @@ import { refreshReminders, remindersLoaded, renderReminders } from "./reminders.
 import { copyWithFeedback } from "./result.js";
 import { correctTypos } from "./setup.js";
 import { refreshTasks, renderTasks, tasksLoaded } from "./tasks.js";
-import { renameInList, renameSpeakerInTranscript, speakerLabels, speakerNameProblem } from "./speakers.js";
+import { renameInList, renameInText, renameSpeakerInTranscript, speakerLabels, speakerNameProblem } from "./speakers.js";
 import { TIME_RE, jumpToTranscript, renderChat } from "./transcript.js";
 
 let meetingsLoaded = false;
@@ -47,13 +47,16 @@ function askSpeakerName(oldName) {
   return newName;
 }
 
-// 改名：逐字稿講者欄＋出席者＋負責人剛好是舊代號的任務。回傳更新後的會議紀錄。
-// 摘要、重點等 AI 文字不動（使用者選定的範圍）；負責人在會議中有講出姓名時本來就不是代號
-async function renameSpeaker(id, transcript, attendees, oldName, newName) {
-  const updated = await api.updateMeeting(id, {
+// 改名：逐字稿講者欄＋出席者＋摘要＋負責人剛好是舊代號的任務。回傳更新後的會議紀錄。
+// 重點、決議等其他 AI 文字不動（使用者選定的範圍）；負責人在會議中有講出姓名時本來就不是代號
+async function renameSpeaker(id, { transcript, attendees, summary }, oldName, newName) {
+  const fields = {
     transcript: renameSpeakerInTranscript(transcript, oldName, newName),
     attendees: renameInList(attendees, oldName, newName),
-  });
+  };
+  // 沒產出摘要的種類（或關掉摘要）不送這個欄位，免得把 null 寫成空字串
+  if (summary) fields.summary = renameInText(summary, oldName, newName);
+  const updated = await api.updateMeeting(id, fields);
   meetingDetailCache[id] = updated;
   // 直接查一次任務：剛分析完就改名時，任務庫的清單可能還沒載進來
   const { tasks } = await api.listTasks();
@@ -407,7 +410,10 @@ $("meetingRows").addEventListener("click", async e => {
     const newName = askSpeakerName(oldName);
     if (!newName) return;
     try {
-      await renameSpeaker(id, d.transcript, d.meeting.attendees, oldName, newName);
+      await renameSpeaker(id, { ...d.meeting, transcript: d.transcript }, oldName, newName);
+      // 摘要換過了，之前翻好的譯文已經過期
+      const trans = document.getElementById("dSummaryTrans");
+      if (trans) { trans.textContent = ""; trans.style.display = "none"; }
       renderMeetings();
     } catch (err) { showError("講者改名失敗：" + err.message); }
   }
