@@ -27,7 +27,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
 
-from app.agents.speaker_namer_agent import is_safe_name
 from app.glossary import terms_hint_line
 from app.stores.base import DEFAULT_USER
 from app.transcription.segments import (
@@ -41,6 +40,7 @@ from app.transcription.segments import (
     transcript_tail,
 )
 from app.transcription.speaker_align import split_by_starts
+from app.transcription.speaker_names import is_safe_name
 
 
 logger = logging.getLogger(__name__)

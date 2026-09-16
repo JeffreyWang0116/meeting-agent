@@ -19,7 +19,7 @@
     home        首頁儀表板
     ask         跨會議問答
     inputs      三條輸入路徑：文字貼上／檔案上傳／即時聆聽
-    settings    主題、設定選單、詞彙表、講者名冊、備份、PWA
+    settings    主題、設定選單、詞彙表、備份、PWA
 */
 import "./core.js";
 import "./auth.js";

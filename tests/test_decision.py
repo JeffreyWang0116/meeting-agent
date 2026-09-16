@@ -454,6 +454,32 @@ def test_side_tables_only_mention_kinds_that_exist():
         assert kind in MEETING_KINDS, f"「{kind}」已不在選單裡"
 
 
+def _rule(prompt: str, no: int) -> str:
+    return next(line for line in prompt.splitlines() if line.startswith(f"{no}. "))
+
+
+def test_attendees_copy_speaker_codes_instead_of_guessing_names():
+    """實測（翁曉玲詢問王榮璋）：attendees 列出了陳菊、李俊毅、卓榮泰、賴清德——
+    全是質詢中被批評或引用、根本不在場的人；舊規則還要模型「從上下文推斷真實名字」，
+    它就把講者口中的「王委員」「主席」安到講者身上。講者一律維持代號，姓名由使用者
+    事後改名（改名會同步換掉 attendees 裡的代號）。"""
+    from app.agents.decision_agent import build_prompt
+
+    rule = _rule(build_prompt("測試", MEETING_DATE), 8)
+    assert "attendees" in rule
+    assert "代號" in rule and "禁止" in rule and "推斷" in rule
+    assert "第三人" in rule and "不列" in rule
+    assert "盡量從上下文推斷真實名字" not in build_prompt("測試", MEETING_DATE)
+
+
+def test_owner_uses_spoken_name_otherwise_the_speaker_code():
+    """負責人：會議中講出姓名就用姓名；只知道是哪位講者承接就用代號，不去猜代號背後是誰。"""
+    from app.agents.decision_agent import build_prompt
+
+    rule = _rule(build_prompt("測試", MEETING_DATE), 3)
+    assert "owner" in rule and "姓名" in rule and "代號" in rule and "null" in rule
+
+
 def test_prompt_lists_confirmed_attendees():
     """會前錄過聲音樣本的人＝確定在場，姓名寫法也確定。
 

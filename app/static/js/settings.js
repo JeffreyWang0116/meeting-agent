@@ -53,7 +53,6 @@ function renderGlossary() {
   $("glosList").innerHTML = glosTerms.length
     ? glosTerms.map((t, i) => `<div class="glos-item">
         <b>${esc(t.term)}</b>
-        ${t.person ? `<span class="glos-note">人名</span>` : ""}
         ${t.note ? `<span class="glos-note">${esc(t.note)}</span>` : ""}
         <button class="del-btn" data-i="${i}" title="刪除此詞彙" aria-label="刪除">${icon("x", "i-sm")}</button>
       </div>`).join("")
@@ -103,14 +102,9 @@ $("glossaryModal").addEventListener("click", e => {
 $("btnGlosAdd").addEventListener("click", () => {
   const term = $("glosTerm").value.trim();
   if (!term) return;
-  glosTerms.push({
-    term,
-    note: $("glosNote").value.trim(),
-    person: $("glosPerson").checked,
-  });
+  glosTerms.push({ term, note: $("glosNote").value.trim() });
   $("glosTerm").value = "";
   $("glosNote").value = "";
-  $("glosPerson").checked = false;
   saveGlossary();
   $("glosTerm").focus();
 });

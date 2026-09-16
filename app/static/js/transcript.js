@@ -1,5 +1,5 @@
 import { $, esc } from "./core.js";
-import { LABEL_RE, matchSpeaker, speakerLabels } from "./speakers.js";
+import { LABEL_RE, TIME_RE, matchSpeaker, speakerLabels } from "./speakers.js";
 
 /* ==================================================================
    3. 逐字稿：連續文件式渲染（時間欄＋講者＋內文）與時間/引用句跳轉
@@ -8,9 +8,7 @@ import { LABEL_RE, matchSpeaker, speakerLabels } from "./speakers.js";
 // 偵測行首「[1:02]」時間標記與「講者A：」「王小明：」等講者前綴（哪些算講者見 speakers.js）。
 // 帶時間標記的行自成一句（時間軸不能被合併吃掉）；沒有時間標記時維持
 // 「同講者連續行合併」——轉錄結果常常一句一行，不合併會太碎。
-// 各段放寬成 1~2 位數：模型會吐出 [00]（漏掉「0:」）和 [0:1]（秒數一位數），
-// 嚴格比對的話那些行會整個看不到時間（後端 segments.py 是同一套規則）
-const TIME_RE = /^\[(\d{1,2}(?::\d{1,2}){0,2})\]\s*/;
+// TIME_RE 定義在 speakers.js（講者改名也要用同一套時間標記規則）
 
 // "1:02" / "1:02:03" → 秒數
 function timeLabelToSeconds(label) {

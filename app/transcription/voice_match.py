@@ -1,12 +1,8 @@
 """VoiceMatcher：用會前錄的聲音樣本，把講者代號對到真實姓名。
 
-與 SpeakerNamerAgent 互補，兩者判斷「誰是誰」的依據不同：
-- SpeakerNamerAgent 讀**文字**線索（有人喊「請王委員發言」、某人自我介紹）
-- 這裡比對**聲音**（會前每人錄一小段，模型拿它跟會議音訊對嗓音）
-
-文字線索在沒人被點名的會議裡完全失效，聲紋則不受稱謂有無影響；反過來說，
-聲紋在音質差或嗓音相近時會認錯，而文字線索是明確的。所以兩者併用，聲紋的
-結果優先（它是使用者主動提供的第一手資訊），沒對到的再交給文字線索。
+這是系統自動填姓名的唯一來源：姓名是使用者會前自己登記的，這裡只比對嗓音。
+系統不從對話內容推斷姓名（「主席好」「謝謝王委員的提問」這類稱謂指的是別人，
+模型會誤判），沒比對到的代號留給使用者事後自己改名。
 
 **為什麼不在轉錄階段直接標姓名**：轉錄 prompt 刻意規定一律輸出代號（見
 _TRANSCRIBE_PROMPT），因為模型沒有跨段記憶，允許它自由選用姓名會讓同一個人
@@ -25,9 +21,9 @@ import time
 import uuid
 from pathlib import Path
 
-from app.agents.speaker_namer_agent import is_safe_name
 from app.gemini_keys import KeyPool, call_with_model_fallback
 from app.transcription import media
+from app.transcription.speaker_names import is_safe_name
 from app.transcription.segments import collect_speakers, speaker_of
 
 _CODE_FENCE = re.compile(r"^\s*```(?:json)?\s*|\s*```\s*$")

@@ -1,7 +1,7 @@
 import { api } from "./api.js";
 import { setCalendarEvents } from "./calendar.js";
 import { $, PRIORITY_ZH, esc, icon, showError, showNotice, skelBlocks, skelLine } from "./core.js";
-import { refreshMeetings } from "./meetings.js";
+import { askSpeakerName, detectSpeakers, refreshMeetings, renameSpeaker } from "./meetings.js";
 import { refreshReminders } from "./reminders.js";
 import { WIDE, showView } from "./router.js";
 import { maybePromoteTerms } from "./setup.js";
@@ -58,6 +58,7 @@ function showResultSkeleton() {
   $("rSections").style.display = "none";
   $("rTransSec").style.display = "none";
   $("rCorrSec").style.display = "none";
+  $("rSpeakers").hidden = true;
   $("result").classList.add("is-loading");
   $("result").style.display = "flex";
   $("navResult").hidden = false;
@@ -90,32 +91,72 @@ function renderSections(sections) {
     </div>`).join("");
 }
 
+// 改名後只重畫受影響的幾塊（出席者、逐字稿、負責人、講者清單），不重跑整份 renderResult——
+// 那會重新整理任務庫與會議清單、清掉耗時統計
+let currentResult = null;
+let metaKind = "", metaStats = "";
+
+function renderMeta() {
+  const a = currentResult.analysis, m = a.meeting;
+  $("rMeta").innerHTML =
+    `<span class="meta-chip">${icon("calendar", "i-sm")}${esc(m.date)}</span>` +
+    `<span class="meta-chip">${esc(metaKind)}</span>` +
+    (m.attendees || []).map(p => `<span class="meta-chip">${icon("user", "i-sm")}${esc(p)}</span>`).join("") +
+    (a.tags || []).map(t => `<span class="meta-chip"><span class="mtag">${esc(t)}</span></span>`).join("") +
+    metaStats;
+}
+
+function renderSpeakers() {
+  const m = currentResult.analysis.meeting;
+  // 出席者＋預錄比對出的姓名：只講一句話的人也要掛得上名字
+  const knownNames = [...(m.attendees || []), ...(currentResult.speaker_names || []).map(s => s.name)];
+  renderChat($("rTranscript"), currentTranscript, knownNames);
+  const speakers = currentResult.meeting_id ? detectSpeakers(currentTranscript, knownNames) : [];
+  $("rSpeakers").hidden = !speakers.length;
+  $("rSpeakerChips").innerHTML = speakers.map(s =>
+    `<span class="speaker-chip" data-speaker="${esc(s)}">✎ ${esc(s)}</span>`).join("");
+}
+
+function renderTodos(todos) {
+  const showTodos = todos.length > 0;
+  $("hTodos").style.display = showTodos ? "flex" : "none";
+  $("rTodos").style.display = showTodos ? "flex" : "none";
+  $("rTodos").innerHTML = todos.length
+    ? todos.map(t => `
+      <div class="todo-card p-${t.priority}">
+        <div class="todo-head"><span class="led"></span><span class="todo-task">${esc(t.task)}</span></div>
+        <div class="badges">
+          <span class="badge ${t.owner ? "" : "owner-none"}">負責人 <b>${esc(t.owner || "未指派")}</b></span>
+          <span class="badge">期限 <b>${esc(t.due_date || "未定")}</b></span>
+          <span class="badge pr-${t.priority}" ${t.priority_reason ? `title="${esc(t.priority_reason)}"` : ""}>優先級 <b>${PRIORITY_ZH[t.priority]}</b></span>
+        </div>
+        ${t.priority_reason ? `<p class="why">判斷依據：${esc(t.priority_reason)}</p>` : ""}
+        ${t.source_quote ? `<p class="quote clickable" data-quote="${esc(t.source_quote)}" title="點擊跳到逐字稿出處">${esc(t.source_quote)}</p>` : ""}
+      </div>`).join("")
+    : `<p class="empty-note">未偵測到代辦事項</p>`;
+}
+
 function renderResult(result, transcript) {
   $("result").classList.remove("is-loading");
   maybePromoteTerms();
+  currentResult = result;
   // 後端校正過的話，result.transcript 才是最終版本（傳進來的可能是校正前的）
   currentTranscript = (result.transcript || transcript || "").trim();
   $("rTransSec").style.display = currentTranscript ? "block" : "none";
   // 雙欄版面下逐字稿是常駐對照欄，預設攤開；單欄（窄螢幕）才收起來免得洗版
   $("rTransSec").open = WIDE.matches;
   const a = result.analysis, m = a.meeting;
-  // 出席者＋本次對應出的講者姓名：只講一句話的人也要掛得上名字
-  const knownNames = [...(m.attendees || []), ...(result.speaker_names || []).map(s => s.name)];
-  renderChat($("rTranscript"), currentTranscript, knownNames);
+  renderSpeakers();
   renderCorrections(result.corrections || []);
   // 成效指標：這場會議 AI 幫你做了多少事、花了多久
   const elapsed = analysisStartTime ? ((Date.now() - analysisStartTime) / 1000).toFixed(1) : null;
   analysisStartTime = null;
-  const statsChip =
+  metaStats =
     `<span class="meta-chip stats-chip">${currentTranscript ? `${currentTranscript.length} 字 → ` : ""}` +
     `${a.todos.length} 任務・${a.decisions.length} 決議${elapsed ? `・${elapsed}s` : ""}</span>`;
+  metaKind = $("meetingKind").value;
   $("rTitle").textContent = m.title;
-  $("rMeta").innerHTML =
-    `<span class="meta-chip">${icon("calendar", "i-sm")}${esc(m.date)}</span>` +
-    `<span class="meta-chip">${esc($("meetingKind").value)}</span>` +
-    m.attendees.map(p => `<span class="meta-chip">${icon("user", "i-sm")}${esc(p)}</span>`).join("") +
-    (a.tags || []).map(t => `<span class="meta-chip"><span class="mtag">${esc(t)}</span></span>`).join("") +
-    statsChip;
+  renderMeta();
   // 摘要／重點／決議／代辦：這場會議的種類沒產出這個區塊時整節隱藏。
   // 改版後每種類都有自己的預設區塊，所以一律改成「有內容才顯示」，
   // 不再把某一個種類寫死在前端
@@ -149,22 +190,7 @@ function renderResult(result, transcript) {
     ? a.decisions.map(d => `<li>${esc(d.description)}${d.context ? ` <span class="ctx">（${esc(d.context)}）</span>` : ""}</li>`).join("")
     : `<p class="empty-note">本次會議無正式決議</p>`;
 
-  const showTodos = a.todos.length > 0;
-  $("hTodos").style.display = showTodos ? "flex" : "none";
-  $("rTodos").style.display = showTodos ? "flex" : "none";
-  $("rTodos").innerHTML = a.todos.length
-    ? a.todos.map(t => `
-      <div class="todo-card p-${t.priority}">
-        <div class="todo-head"><span class="led"></span><span class="todo-task">${esc(t.task)}</span></div>
-        <div class="badges">
-          <span class="badge ${t.owner ? "" : "owner-none"}">負責人 <b>${esc(t.owner || "未指派")}</b></span>
-          <span class="badge">期限 <b>${esc(t.due_date || "未定")}</b></span>
-          <span class="badge pr-${t.priority}" ${t.priority_reason ? `title="${esc(t.priority_reason)}"` : ""}>優先級 <b>${PRIORITY_ZH[t.priority]}</b></span>
-        </div>
-        ${t.priority_reason ? `<p class="why">判斷依據：${esc(t.priority_reason)}</p>` : ""}
-        ${t.source_quote ? `<p class="quote clickable" data-quote="${esc(t.source_quote)}" title="點擊跳到逐字稿出處">${esc(t.source_quote)}</p>` : ""}
-      </div>`).join("")
-    : `<p class="empty-note">未偵測到代辦事項</p>`;
+  renderTodos(a.todos);
 
   $("rPending").innerHTML = a.pending_items.length
     ? a.pending_items.map(p => `<div class="pending-item">${icon("circle-help")}<span>${esc(p.topic)}${p.reason ? `<span class="reason">${esc(p.reason)}</span>` : ""}</span></div>`).join("")
@@ -269,6 +295,28 @@ $("btnCopyTranscript").addEventListener("click", e => {
   e.preventDefault();  // 按鈕在 <summary> 裡，避免同時觸發展開/收合
   e.stopPropagation();
   copyWithFeedback($("btnCopyTranscript"), currentTranscript);
+});
+
+// ---- 講者改名：分析一結束就能把「講者A」換成真名 ----
+$("rSpeakerChips").addEventListener("click", async e => {
+  const chip = e.target.closest(".speaker-chip");
+  if (!chip || !currentResult || !currentResult.meeting_id) return;
+  const oldName = chip.dataset.speaker;
+  const newName = askSpeakerName(oldName);
+  if (!newName) return;
+  const a = currentResult.analysis;
+  try {
+    const updated = await renameSpeaker(
+      currentResult.meeting_id, currentTranscript, a.meeting.attendees, oldName, newName);
+    currentTranscript = (updated.transcript || "").trim();
+    currentResult.transcript = updated.transcript;
+    a.meeting.attendees = updated.meeting.attendees || [];
+    a.todos.forEach(t => { if (t.owner === oldName) t.owner = newName; });
+    renderMeta();
+    renderTodos(a.todos);
+    renderSpeakers();
+    refreshMeetings();
+  } catch (err) { showError("講者改名失敗：" + err.message); }
 });
 
 // ---- 逐字稿對照：點任務卡的引用句 → 展開逐字稿、標亮出處行 ----

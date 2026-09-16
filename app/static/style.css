@@ -705,6 +705,8 @@
     transition: border-color .15s, color .15s;
   }
   .speaker-chip:hover { border-color: var(--accent); color: var(--accent); }
+  .speaker-rename { display: flex; flex-direction: column; gap: 6px; }
+  .speaker-rename[hidden] { display: none; }
   .term-tool { display: flex; flex-direction: column; gap: 8px; }
   .term-replace { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
   .term-replace input[type="text"] {

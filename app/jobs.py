@@ -57,7 +57,6 @@ class MediaJobManager:
         terms: list[dict] | None = None,
         features: set[str] | None = None,
         correct_typos: bool = False,
-        name_speakers: bool = False,
         user: str = DEFAULT_USER,
     ) -> str:
         job_id = uuid.uuid4().hex[:12]
@@ -79,7 +78,7 @@ class MediaJobManager:
             target=self._run,
             args=(
                 job_id, Path(file_path), meeting_date, kind, features,
-                correct_typos, name_speakers, terms, user,
+                correct_typos, terms, user,
             ),
             daemon=True,
         )
@@ -136,7 +135,6 @@ class MediaJobManager:
         kind: str | None = None,
         features: set[str] | None = None,
         correct_typos: bool = False,
-        name_speakers: bool = False,
         terms: list[dict] | None = None,
         user: str = DEFAULT_USER,
     ) -> None:
@@ -188,7 +186,6 @@ class MediaJobManager:
                 kind=kind,
                 features=features,
                 correct_typos=correct_typos,
-                name_speakers=name_speakers,
                 terms=terms,
                 # 背景執行緒沒有請求上下文，使用者在 submit 當下就捕捉好
                 user=user,

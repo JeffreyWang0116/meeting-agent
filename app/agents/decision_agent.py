@@ -35,7 +35,7 @@ def _schema_example(features: set[str], section_labels: list[str] | None = None)
     meeting: dict = {"title": "會議標題（從內容歸納）", "date": "YYYY-MM-DD"}
     if "summary" in features:
         meeting["summary"] = "3~5 句繁體中文摘要"
-    meeting["attendees"] = ["發言或被提及在場的人名"]
+    meeting["attendees"] = ["實際發言者，照抄逐字稿講者欄（代號就填代號）"]
 
     schema: dict = {"meeting": meeting}
     if "decisions" in features:
@@ -46,7 +46,7 @@ def _schema_example(features: set[str], section_labels: list[str] | None = None)
         schema["todos"] = [
             {
                 "task": "具體的代辦事項",
-                "owner": "負責人名字，無法確定填 null",
+                "owner": "會議中講出的負責人姓名；沒講出姓名就填承接的講者代號；無法確定填 null",
                 "due_date": "YYYY-MM-DD，無法確定填 null",
                 "priority": "high 或 medium 或 low",
                 "priority_reason": "一句話說明優先級判斷依據，不明顯就填 null",
@@ -196,12 +196,12 @@ PROMPT_TEMPLATE = """你是「會議助手」的決策模組。以下是一場�
 務必遵守的規則：
 1. 只輸出一個 JSON 物件。不要 markdown 圍欄、不要任何額外說明文字。
 2. 所有相對日期（「下週五」「月底前」「後天」等）必須以上面的會議日期為基準，換算成 YYYY-MM-DD 絕對日期；無法確定具體日期時 due_date 填 null，禁止猜測。
-3. 找不到明確負責人的代辦事項，owner 填 null，並同時在 pending_items 加入一筆「需指派負責人」的說明。
+3. owner：會議中有講出負責人的姓名或稱謂（例如「這份資料請王委員提供」）就填該姓名；只知道是哪位講者承接（例如講者A 說「這個我來處理」）就填該講者的代號，不要推斷代號背後的真實姓名。找不到明確負責人的代辦事項，owner 填 null，並同時在 pending_items 加入一筆「需指派負責人」的說明。
 4. 每個代辦事項的 source_quote 必須引用紀錄中的原句（可截斷），方便人工核對。
 5. 只記錄紀錄中真實出現的內容，禁止編造。討論過但沒有結論的議題放入 pending_items。
 6. priority 依急迫性與影響程度判斷：high / medium / low，並在 priority_reason 用一句話說明判斷依據。
 7. 摘要與說明使用繁體中文；人名與專有名詞（如工具、技術名）保留原文寫法。
-8. attendees 列出所有發言者或被明確提及在場的人；逐字稿若有「講者A」等標註，盡量從上下文推斷真實名字。
+8. attendees 只列逐字稿中實際發言的人，照抄講者欄的寫法：講者欄是「講者A」等代號就原樣填代號，禁止從對話內容推斷他的真實姓名（講者口中的「主席」「王委員」指的是對話的另一方，姓名由使用者事後自行替換）；講者欄已經是姓名就照寫。只在談話中被提到、討論、批評、引用的第三人一律不列。
 9. 同一件事在會議中被提到多次時，只輸出一筆代辦，把補充資訊（負責人、期限）合併進去，禁止重複。
 10. highlights（會議重點）挑出整場最關鍵的 3~8 個時刻，依時間順序排列；time 一律照抄該重點出處行首方括號內的時間標記（如逐字稿有「[1:02]」就填「1:02」），逐字稿完全沒有時間標記時填 null，禁止自行推算或編造時間。
 {feature_note}

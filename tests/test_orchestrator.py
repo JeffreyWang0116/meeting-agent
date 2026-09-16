@@ -60,78 +60,28 @@ def test_analysis_is_json_serializable(orchestrator):
     json.dumps(result, ensure_ascii=False)  # 不應丟例外（date 需序列化為字串）
 
 
-# ---- 講者代號換成姓名 ----
-# 轉錄一律輸出「講者A/B/C」，姓名在 pipeline 最後一步統一填回。
-# 順序在校正之後：先修掉同音錯字，姓名判讀才不會被誤植的稱謂誤導。
+# ---- 講者姓名 ----
+# 講者一律維持「講者A/B/C」代號，只有預錄聲音比對出的姓名（使用者自己填的）會自動套用。
 
-def _namer(mapping):
-    import json
-
-    from app.agents.speaker_namer_agent import SpeakerNamerAgent
-
-    reply = json.dumps(
-        {"speakers": [{"label": k, "name": v} for k, v in mapping.items()]},
-        ensure_ascii=False,
-    )
-    return SpeakerNamerAgent(api_key="k", generate=lambda p: reply)
-
-
-def test_speaker_codes_are_replaced_with_names_when_enabled(tmp_path):
+def test_stored_transcript_uses_prior_names(tmp_path):
+    """預錄姓名套用後，存進資料庫的必須是換上姓名的版本。"""
     store = LocalJsonStore(tmp_path / "db.json")
     pipeline = Orchestrator(
         parser=ParserAgent(),
         decision=DecisionAgent(generate=lambda prompt: valid_json()),
         executor=ExecutorAgent(store),
         notifier=NotifierAgent(tmp_path / "notifications"),
-        namer=_namer({"講者A": "吳宗憲"}),
     )
     result = pipeline.process_transcript(
-        "[0:05] 講者A：我下週一前把 prompt 寫好", name_speakers=True
-    )
-    assert "吳宗憲：" in result["transcript"]
-    assert result["speaker_names"][0]["name"] == "吳宗憲"
-
-
-def test_names_are_not_inferred_by_default(tmp_path):
-    """預設不對應姓名：台語等辨識不穩的場合，猜錯的名字比代號更糟。
-    即使注入了 namer，沒開旗標就維持講者A/B/C。"""
-    store = LocalJsonStore(tmp_path / "db.json")
-    pipeline = Orchestrator(
-        parser=ParserAgent(),
-        decision=DecisionAgent(generate=lambda prompt: valid_json()),
-        executor=ExecutorAgent(store),
-        notifier=NotifierAgent(tmp_path / "notifications"),
-        namer=_namer({"講者A": "吳宗憲"}),
-    )
-    result = pipeline.process_transcript("[0:05] 講者A：我下週一前把 prompt 寫好")
-    assert "講者A：" in result["transcript"]
-    assert "吳宗憲" not in result["transcript"]
-    assert result["speaker_names"] == []
-
-
-def test_stored_transcript_uses_the_named_version_when_enabled(tmp_path):
-    """開啟姓名對應時，存進資料庫的必須是換上姓名的版本。"""
-    store = LocalJsonStore(tmp_path / "db.json")
-    pipeline = Orchestrator(
-        parser=ParserAgent(),
-        decision=DecisionAgent(generate=lambda prompt: valid_json()),
-        executor=ExecutorAgent(store),
-        notifier=NotifierAgent(tmp_path / "notifications"),
-        namer=_namer({"講者A": "吳宗憲"}),
-    )
-    result = pipeline.process_transcript(
-        "[0:05] 講者A：我下週一前把 prompt 寫好", name_speakers=True
+        "[0:05] 講者A：我下週一前把 prompt 寫好", speaker_prior={"講者A": "吳宗憲"}
     )
     stored = store.get_meeting(result["meeting_id"])
     assert "吳宗憲：" in stored["transcript"]
 
 
-def test_pipeline_works_without_a_namer(orchestrator):
-    """沒有注入 namer 時維持原行為，代號原樣保留。"""
+def test_speakers_stay_as_codes_without_prior(orchestrator):
     pipeline, _ = orchestrator
-    result = pipeline.process_transcript(
-        "[0:05] 講者A：我下週一前把 prompt 寫好", name_speakers=True
-    )
+    result = pipeline.process_transcript("[0:05] 講者A：我是吳宗憲，我下週一前把 prompt 寫好")
     assert "講者A：" in result["transcript"]
     assert result["speaker_names"] == []
 

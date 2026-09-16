@@ -76,3 +76,47 @@ def test_known_name_absent_from_transcript_is_not_invented():
 def test_ascii_name_with_space_is_allowed_but_not_cjk_phrases_with_spaces():
     out = run(["Kevin Lin: hello", "Kevin Lin: again", "今天 重點：一", "今天 重點：二"])
     assert out["labels"] == ["Kevin Lin"]
+
+
+# ---- 講者改名：系統一律標代號，使用者結束後自己換成姓名 ----
+
+def call(fn: str, *args):
+    script = f"""
+import {{ {fn} }} from {json.dumps(MODULE.as_uri())};
+process.stdout.write(JSON.stringify({fn}(...{json.dumps(list(args), ensure_ascii=False)})));
+"""
+    proc = subprocess.run(
+        [NODE, "--input-type=module", "-e", script],
+        capture_output=True, text=True, encoding="utf-8", timeout=30,
+    )
+    assert proc.returncode == 0, proc.stderr
+    return json.loads(proc.stdout)
+
+
+def test_rename_only_touches_the_speaker_field():
+    text = "[0:21] 講者A：王委員您好\n講者A：續行\n[2:08] 講者B：謝謝，剛剛講者A問的\n[2:30]講者AB：不是同一人"
+    out = call("renameSpeakerInTranscript", text, "講者A", "翁曉玲")
+    assert out == (
+        "[0:21] 翁曉玲：王委員您好\n翁曉玲：續行\n[2:08] 講者B：謝謝，剛剛講者A問的\n[2:30]講者AB：不是同一人"
+    )
+
+
+def test_rename_accepts_halfwidth_colon_and_leading_spaces():
+    out = call("renameSpeakerInTranscript", "  [1:02:03] Speaker 2: hi", "Speaker 2", "Kevin Lin")
+    assert out == "  [1:02:03] Kevin Lin: hi"
+
+
+def test_rename_treats_regex_characters_literally():
+    out = call("renameSpeakerInTranscript", "A.B：x\nAxB：y", "A.B", "王")
+    assert out == "王：x\nAxB：y"
+
+
+def test_attendees_are_renamed_without_duplicates():
+    assert call("renameInList", ["講者A", "講者B", "翁曉玲"], "講者A", "翁曉玲") == ["翁曉玲", "講者B"]
+
+
+def test_speaker_name_validation_blocks_names_that_break_the_transcript():
+    """冒號會在行首造出假講者、換行會拆行、方括號會被當成時間標記——與後端 is_safe_name 同一套。"""
+    for bad in ["", "  ", "王委員：他說", "a:b", "兩\n行", "[1:00]", "王" * 21]:
+        assert call("speakerNameProblem", bad), bad
+    assert call("speakerNameProblem", " 翁曉玲 ") == ""

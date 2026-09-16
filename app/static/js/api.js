@@ -56,7 +56,7 @@ const api = {
   usage: () => get("/api/usage"),
   health: () => get("/api/health"),
 
-  // ---- 詞彙表 / 講者名冊 ----
+  // ---- 詞彙表 ----
   glossary: () => get("/api/glossary"),
   saveGlossary: payload => put("/api/glossary", payload),          // { terms }
 

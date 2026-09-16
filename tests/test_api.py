@@ -648,29 +648,26 @@ def test_glossary_roundtrip_and_validation(client):
 
     resp = client.put(
         "/api/glossary",
-        json={"terms": [{"term": "林佳蓉", "note": "人名", "person": False}, {"term": "TaskHub"}]},
+        json={"terms": [{"term": "林佳蓉", "note": "人名"}, {"term": "TaskHub"}]},
     )
     assert resp.status_code == 200
     assert resp.json()["terms"] == [
-        {"term": "林佳蓉", "note": "人名", "person": False},
-        {"term": "TaskHub", "note": "", "person": False},
+        {"term": "林佳蓉", "note": "人名"},
+        {"term": "TaskHub", "note": ""},
     ]
     assert client.get("/api/glossary").json()["terms"][0]["term"] == "林佳蓉"
     # 空詞彙要擋
     assert client.put("/api/glossary", json={"terms": [{"term": "  "}]}).status_code == 400
 
 
-# ---- 講者名冊 ----
-
-def test_person_terms_survive_backup(client):
-    """講者名冊已併入詞彙表：標成人名的項目要跟著備份走。"""
+def test_glossary_survives_backup_without_the_removed_person_flag(client):
+    """「人名」勾選已移除：舊前端送來的 person 被丟掉，詞彙本身照樣跟著備份走。"""
     client.put(
         "/api/glossary",
         json={"terms": [{"term": "林佳蓉", "person": True}, {"term": "TaskHub"}]},
     )
     terms = client.get("/api/backup").json()["glossary"]
-    assert [t["term"] for t in terms] == ["林佳蓉", "TaskHub"]
-    assert [t["person"] for t in terms] == [True, False]
+    assert terms == [{"term": "林佳蓉", "note": ""}, {"term": "TaskHub", "note": ""}]
 
 
 # ---- 其他 ----
@@ -909,7 +906,7 @@ def test_enroll_rejects_unsafe_name_400(client):
     assert resp.status_code == 400
 
 
-def _voice_app(tmp_path, transcriber, matcher, namer=None):
+def _voice_app(tmp_path, transcriber, matcher):
     """建一個「只有聲紋比對是真的」的 app：LLM 全部以假 generate 取代。"""
     from app.transcription.live_session import LiveSessionManager
 
@@ -920,7 +917,6 @@ def _voice_app(tmp_path, transcriber, matcher, namer=None):
         decision=DecisionAgent(generate=lambda prompt: valid_json()),
         executor=ExecutorAgent(store),
         notifier=NotifierAgent(tmp_path / "notifications"),
-        namer=namer,
     )
     return TestClient(create_app(
         settings,
@@ -953,11 +949,7 @@ def test_live_flow_without_enrollment_never_touches_the_matcher(tmp_path):
 
 
 def test_enrolled_voices_rename_the_speaker_labels(tmp_path):
-    """錄了樣本就該看到名字，不必再另外勾「辨識名稱」——錄樣本本身就是開啟。
-
-    namer 的假 generate 回傳空對應，所以這裡改到名字**只可能**來自聲紋比對。
-    """
-    from app.agents.speaker_namer_agent import SpeakerNamerAgent
+    """預錄樣本的姓名是使用者自己填的，比對到就直接換上——這是唯一會自動填姓名的路徑。"""
 
     class LabelledTranscriber:
         device = "cpu"
@@ -970,12 +962,7 @@ def test_enrolled_voices_rename_the_speaker_labels(tmp_path):
         def match(self, enrollments, evidence):
             return {"講者A": "王小明"}
 
-    c = _voice_app(
-        tmp_path,
-        LabelledTranscriber(),
-        FixedMatcher(),
-        namer=SpeakerNamerAgent(generate=lambda prompt: '{"speakers": []}'),
-    )
+    c = _voice_app(tmp_path, LabelledTranscriber(), FixedMatcher())
     sid = c.post("/api/live/start").json()["session_id"]
     assert c.post(
         f"/api/live/{sid}/enroll",

@@ -4,9 +4,9 @@ import { $, PAGE_SIZE, esc, icon, loadFail, pageNo, paginate, registerPager, reg
 import { renderHome } from "./home.js";
 import { refreshReminders, remindersLoaded, renderReminders } from "./reminders.js";
 import { copyWithFeedback } from "./result.js";
-import { correctTypos, nameSpeakers } from "./setup.js";
-import { allTasks, refreshTasks, renderTasks, tasksLoaded } from "./tasks.js";
-import { speakerLabels } from "./speakers.js";
+import { correctTypos } from "./setup.js";
+import { refreshTasks, renderTasks, tasksLoaded } from "./tasks.js";
+import { renameInList, renameSpeakerInTranscript, speakerLabels, speakerNameProblem } from "./speakers.js";
 import { TIME_RE, jumpToTranscript, renderChat } from "./transcript.js";
 
 let meetingsLoaded = false;
@@ -34,6 +34,33 @@ function meetingLabel(id) {
 function detectSpeakers(text, knownNames = []) {
   const lines = String(text || "").split("\n").map(l => l.trim().replace(TIME_RE, ""));
   return [...speakerLabels(lines, knownNames)].slice(0, 12);
+}
+
+// 講者一律標代號（系統不猜姓名），由使用者點講者改名。問新名字並驗證；取消或不合格回 null
+function askSpeakerName(oldName) {
+  const input = prompt(`把「${oldName}」改名為：`, oldName);
+  if (input === null) return null;
+  const newName = input.trim();
+  if (newName === oldName) return null;
+  const problem = speakerNameProblem(newName);
+  if (problem) { showError(problem); return null; }
+  return newName;
+}
+
+// 改名：逐字稿講者欄＋出席者＋負責人剛好是舊代號的任務。回傳更新後的會議紀錄。
+// 摘要、重點等 AI 文字不動（使用者選定的範圍）；負責人在會議中有講出姓名時本來就不是代號
+async function renameSpeaker(id, transcript, attendees, oldName, newName) {
+  const updated = await api.updateMeeting(id, {
+    transcript: renameSpeakerInTranscript(transcript, oldName, newName),
+    attendees: renameInList(attendees, oldName, newName),
+  });
+  meetingDetailCache[id] = updated;
+  // 直接查一次任務：剛分析完就改名時，任務庫的清單可能還沒載進來
+  const { tasks } = await api.listTasks();
+  const owned = tasks.filter(t => t.meeting_id === id && t.owner === oldName);
+  for (const t of owned) await api.updateTask(t.id, { owner: newName });
+  if (owned.length) { refreshTasks(); refreshReminders(); }
+  return updated;
 }
 
 function meetingDetailHtml(id) {
@@ -281,8 +308,7 @@ $("meetingRows").addEventListener("click", async e => {
     if (!confirm(`重新分析會用目前的逐字稿重跑 AI${note}，這場會議的任務會整批換新。繼續？`)) return;
     rean.disabled = true; rean.textContent = "分析中…";
     try {
-      const r = await api.reanalyze(rean.dataset.id, { correct_typos: correct, name_speakers: nameSpeakers(),
-      });
+      const r = await api.reanalyze(rean.dataset.id, { correct_typos: correct });
       const cached = meetingDetailCache[rean.dataset.id];
       if (cached) {
         cached.meeting = r.analysis.meeting;
@@ -378,26 +404,11 @@ $("meetingRows").addEventListener("click", async e => {
     const d = meetingDetailCache[id];
     if (!d || !d.transcript) return;
     const oldName = chip.dataset.speaker;
-    const newName = (prompt(`把「${oldName}」改名為：`, oldName) || "").trim();
-    if (!newName || newName === oldName) return;
-    const renamed = d.transcript.split("\n").map(line => {
-      const t = line.trimStart().replace(TIME_RE, "");  // 行首可能還有 [1:02] 時間標記
-      if (t.startsWith(oldName + "：") || t.startsWith(oldName + ":")) {
-        return line.replace(oldName, newName);  // 只換行首的講者標註
-      }
-      return line;
-    }).join("\n");
-    // 出席者名單裡的舊名一併換成新名（下游不再殘留「講者A」）
-    const attendees = (d.meeting.attendees || []).map(a => (a === oldName ? newName : a));
+    const newName = askSpeakerName(oldName);
+    if (!newName) return;
     try {
-      meetingDetailCache[id] = await api.updateMeeting(id, { transcript: renamed, attendees });
-      // 這場會議中「負責人＝舊名」的任務也跟著改名
-      const owned = allTasks.filter(t => t.meeting_id === id && t.owner === oldName);
-      for (const t of owned) {
-        await api.updateTask(t.id, { owner: newName });
-      }
+      await renameSpeaker(id, d.transcript, d.meeting.attendees, oldName, newName);
       renderMeetings();
-      if (owned.length) { refreshTasks(); refreshReminders(); }
     } catch (err) { showError("講者改名失敗：" + err.message); }
   }
 });
@@ -418,4 +429,4 @@ $("tagFilter").addEventListener("click", e => {
 registerRefresher("meetings", refreshMeetings);
 registerPager("meetings", renderMeetings);  // 讓 core 的翻頁按鈕知道要重繪誰
 
-export { TAG_FILTER_LIMIT, activeTag, allMeetings, detailEditing, detectSpeakers, expandedMeetingId, filteredMeetings, focusMeetingPage, meetingDetailCache, meetingDetailHtml, meetingLabel, meetingShareText, meetingsLoaded, openMeetingDetail, refreshMeetings, renderMeetings, renderTagFilter, tagsExpanded };
+export { TAG_FILTER_LIMIT, activeTag, allMeetings, askSpeakerName, detailEditing, detectSpeakers, expandedMeetingId, filteredMeetings, focusMeetingPage, meetingDetailCache, meetingDetailHtml, meetingLabel, meetingShareText, meetingsLoaded, openMeetingDetail, refreshMeetings, renameSpeaker, renderMeetings, renderTagFilter, tagsExpanded };

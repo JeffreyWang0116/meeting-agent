@@ -536,7 +536,6 @@ def test_gemini_transcriber_falls_back_when_its_model_is_overloaded(tmp_path, mo
 
 @pytest.mark.parametrize("factory", [
     lambda: __import__("app.agents.corrector_agent", fromlist=["CorrectorAgent"]).CorrectorAgent(api_keys=["k1"], model=LITE),
-    lambda: __import__("app.agents.speaker_namer_agent", fromlist=["SpeakerNamerAgent"]).SpeakerNamerAgent(api_keys=["k1"], model=LITE),
     lambda: __import__("app.translate", fromlist=["Translator"]).Translator(api_keys=["k1"], model=LITE),
     lambda: __import__("app.transcription.voice_match", fromlist=["VoiceMatcher"]).VoiceMatcher(api_keys=["k1"], model=LITE),
 ])

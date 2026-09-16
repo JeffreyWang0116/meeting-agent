@@ -1,7 +1,7 @@
 import { api } from "./api.js";
 import { $, clearError, esc, showError, showNotice } from "./core.js";
 import { hideResultSkeleton, markAnalysisStart, renderResult, showResultSkeleton } from "./result.js";
-import { chunkSeconds, correctTypos, meetingTerms, micConstraints, nameSpeakers, populateMicDevices, selectedFeatures, sysSourceValue, wantSystemAudio } from "./setup.js";
+import { chunkSeconds, correctTypos, meetingTerms, micConstraints, populateMicDevices, selectedFeatures, sysSourceValue, wantSystemAudio } from "./setup.js";
 import { chatHtml, renderChat } from "./transcript.js";
 
 /* ==================================================================
@@ -22,7 +22,6 @@ $("btnAnalyzeText").addEventListener("click", async () => {
         kind: $("meetingKind").value,
         features: selectedFeatures(),
         correct_typos: correctTypos(),
-        name_speakers: nameSpeakers(),
         terms: meetingTerms(),
     });
     renderResult(result, $("textInput").value);
@@ -57,7 +56,6 @@ $("btnUpload").addEventListener("click", async () => {
     const features = selectedFeatures();
     if (features !== null) form.append("features", features.join(","));
     if (correctTypos()) form.append("correct_typos", "true");
-    if (nameSpeakers()) form.append("name_speakers", "true");
     const { job_id } = await api.uploadMedia(form);
 
     let lastPct = -1, stalled = 0;
@@ -1000,7 +998,6 @@ async function finishLiveSession() {
     kind: $("meetingKind").value,
     features: selectedFeatures(),
     correct_typos: correctTypos(),
-    name_speakers: nameSpeakers(),
     terms: meetingTerms(),
   };
   try {

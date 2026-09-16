@@ -54,7 +54,7 @@ def clean_terms(terms: list[dict], max_terms: int = MAX_TERMS) -> list[dict]:
         if term in seen:
             continue
         seen.add(term)
-        cleaned.append({"term": term, "note": note, "person": bool(t.get("person"))})
+        cleaned.append({"term": term, "note": note})
     if len(cleaned) > max_terms:
         raise ValueError(f"詞彙最多 {max_terms} 條")
     return cleaned
@@ -79,18 +79,15 @@ class Glossary:
         self._cache: dict[str, list[dict]] = {}
 
     def _load(self, user: str) -> list[dict]:
-        """讀出詞彙表，順手把舊版另外存放的講者名冊搬進來標成人名。
+        """讀出詞彙表，順手把舊版另外存放的講者名冊搬進來。
 
-        名冊原本是獨立的一份清單，使用者得維護兩處；合併後只留詞彙表這一份，
-        標成人名的項目同時餵轉錄（別聽錯字）與講者命名（寫法一致）。
+        名冊原本用來統一 AI 對應出的講者姓名；系統已不再自動對應姓名（講者一律
+        代號、使用者事後改名），「人名」標記也跟著移除，舊資料帶的 person 一律丟掉。
+        名冊裡的姓名仍然有用——轉錄時不會被聽錯字——所以搬成一般詞彙、註明人名。
         沒搬的話舊使用者的名冊會像憑空消失。
         """
         terms = [
-            {
-                "term": str(t.get("term") or ""),
-                "note": str(t.get("note") or ""),
-                "person": bool(t.get("person")),
-            }
+            {"term": str(t.get("term") or ""), "note": str(t.get("note") or "")}
             for t in self._store.get_glossary(user=user)
         ]
         try:
@@ -99,12 +96,7 @@ class Glossary:
             legacy = []
         if legacy:
             known = {t["term"] for t in terms}
-            for t in terms:
-                if t["term"] in set(legacy):
-                    t["person"] = True
-            terms += [
-                {"term": n, "note": "", "person": True} for n in legacy if n not in known
-            ]
+            terms += [{"term": n, "note": "人名"} for n in legacy if n not in known]
             self._store.save_glossary(terms, user=user)
             self._store.save_speaker_roster([], user=user)  # 搬完清空，不再搬第二次
         return terms
@@ -114,10 +106,6 @@ class Glossary:
             if user not in self._cache:
                 self._cache[user] = self._load(user)
             return [dict(t) for t in self._cache[user]]
-
-    def person_names(self, user: str) -> list[str]:
-        """標成人名的詞彙——餵給 SpeakerNamerAgent，讓姓名寫法跨會議一致。"""
-        return [t["term"] for t in self.terms(user) if t.get("person")]
 
     def replace(self, terms: list[dict], user: str) -> list[dict]:
         """整份取代（前端每次送完整清單，邏輯最單純）。回傳清理後的結果。"""

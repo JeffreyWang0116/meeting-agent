@@ -90,15 +90,6 @@ async function maybePromoteTerms() {
 })();
 function correctTypos() { return $("featCorrect").checked; }
 
-// AI 辨識講者姓名：把講者A/B/C 換成真實姓名。預設關閉——台語等語者辨識不穩的
-// 錄音容易對錯，猜錯的名字比代號更糟；想要姓名時再手動勾。記住選擇。
-(function () {
-  if (localStorage.getItem("nameSpeakers") === "1") $("featNameSpeakers").checked = true;
-  $("featNameSpeakers").addEventListener("change", () =>
-    localStorage.setItem("nameSpeakers", $("featNameSpeakers").checked ? "1" : "0"));
-})();
-function nameSpeakers() { return $("featNameSpeakers").checked; }
-
 // 即時聆聽同時收系統／耳機音源：線上會議戴耳機時麥克風收不到對方，勾了才會把對方
 // 的聲音一起錄。預設關閉（多一次權限、且僅桌機支援），記住選擇。
 (function () {
@@ -234,4 +225,4 @@ async function loadHealth() {
 }
 loadHealth();
 
-export { FEATURE_BOX, LOOPBACK_RE, applyKindDefaults, chunkSeconds, correctTypos, enrollMaxSpeakers, featuresTouched, kindDefaults, kindHints, loadHealth, maybePromoteTerms, meetingTerms, micConstraints, nameSpeakers, populateMicDevices, populateSysSources, selectedFeatures, sysSourceValue, wantSystemAudio };
+export { FEATURE_BOX, LOOPBACK_RE, applyKindDefaults, chunkSeconds, correctTypos, enrollMaxSpeakers, featuresTouched, kindDefaults, kindHints, loadHealth, maybePromoteTerms, meetingTerms, micConstraints, populateMicDevices, populateSysSources, selectedFeatures, sysSourceValue, wantSystemAudio };

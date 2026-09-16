@@ -19,7 +19,6 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from app.agents.corrector_agent import CorrectorAgent
-from app.agents.speaker_namer_agent import SpeakerNamerAgent
 from app.agents.decision_agent import (
     FEATURE_KEYS,
     DEFAULT_KIND,
@@ -272,9 +271,6 @@ class MeetingRequest(BaseModel):
     features: Optional[list[str]] = None
     # 分析前先用 AI 修掉語音辨識的同音錯字（多一次 API 請求）
     correct_typos: bool = False
-    # 把講者A/B/C 代號換成真實姓名（多一次 API 請求）。預設關閉：台語等
-    # 語者辨識不穩的錄音容易對錯，猜錯的名字比代號更糟
-    name_speakers: bool = False
     # 本次會議專用詞彙，與全域詞彙表合併使用
     terms: Optional[list[dict]] = None
 
@@ -284,14 +280,12 @@ class FinishRequest(BaseModel):
     kind: Optional[str] = None
     features: Optional[list[str]] = None
     correct_typos: bool = False
-    name_speakers: bool = False
     terms: Optional[list[dict]] = None
 
 
 class ReanalyzeRequest(BaseModel):
     features: Optional[list[str]] = None
     correct_typos: bool = False
-    name_speakers: bool = False
 
 
 class ReplaceTermRequest(BaseModel):
@@ -422,21 +416,6 @@ def create_app(
             on_call=record_call,
             model=settings.correct_model,
             glossary=glossary.terms,
-        ),
-        namer=SpeakerNamerAgent(
-            api_key=settings.gemini_api_key,
-            api_keys=settings.gemini_api_keys,
-            on_call=record_call,
-            # 依上下文判讀「誰是誰」，與校正同屬機械性工作，用便宜模型即可
-            model=settings.correct_model,
-            # 人名就是詞彙表裡標成人名的項目：使用者只維護一份清單，
-            # 而且那些名字同時餵進轉錄，不會再被聽成別的字
-            known_names=glossary.person_names,
-            # 沒有任何「把姓名寫回詞彙表」的掛鉤：自動記憶會形成迴圈——認出
-            # 一次就寫進去，之後每一場的轉錄與分析 prompt 都帶著它，模型於是把
-            # 它套到不相干的講者身上，然後又被記住一次。使用者從沒輸入過那個
-            # 名字，卻場場都看到，而且完全查不出是哪來的。
-            # 姓名進詞彙表只剩一條路：設定 → 自訂詞彙 → 手動新增。
         ),
     )
     # pyannote 講者分離（選用）：沒設 PYANNOTE_API_KEY 就是 None，講者照舊由轉錄模型標
@@ -622,7 +601,6 @@ def create_app(
         kind: str | None = None,
         features: set[str] | None = None,
         correct_typos: bool = False,
-        name_speakers: bool = False,
         terms: list[dict] | None = None,
         speaker_prior: dict[str, str] | None = None,
         attendees: list[str] | None = None,
@@ -630,11 +608,6 @@ def create_app(
         usage.record("analysis")
         if correct_typos:
             usage.record("correct")  # 校正是額外一次請求，用量面板要分開看得到
-        # 會前錄了聲音樣本就等於明確要求對應姓名了，不必再另外勾一次「辨識名稱」
-        # ——錄了樣本卻還看到「講者A」，在使用者眼裡就是功能沒生效
-        name_speakers = name_speakers or bool(speaker_prior)
-        if name_speakers and orchestrator.namer:
-            usage.record("speaker_names")  # 講者代號換姓名也是獨立一次請求
         try:
             return orchestrator.process_transcript(
                 text,
@@ -642,7 +615,6 @@ def create_app(
                 kind=kind,
                 features=features,
                 correct_typos=correct_typos,
-                name_speakers=name_speakers,
                 terms=terms,
                 user=current_user(),
                 speaker_prior=speaker_prior,
@@ -728,7 +700,6 @@ def create_app(
             kind,
             resolve_features(req.features, kind),
             correct_typos=req.correct_typos,
-            name_speakers=req.name_speakers,
             terms=validate_terms(req.terms),
         )
 
@@ -866,11 +837,6 @@ def create_app(
             usage.record("correct")
             transcript, corrections = orchestrator.corrector.correct(transcript)
 
-        speaker_names: list[dict] = []
-        if req and req.name_speakers and orchestrator.namer:
-            usage.record("speaker_names")
-            transcript, speaker_names = orchestrator.namer.name_speakers(transcript)
-
         try:
             analysis = orchestrator.decision.analyze(
                 transcript,
@@ -895,7 +861,7 @@ def create_app(
             "highlights": dumped.get("highlights", []),
             "tags": dumped.get("tags", []),
         }
-        if corrections or speaker_names:  # 逐字稿被改過才回寫，沒改就不動原紀錄
+        if corrections:  # 逐字稿被改過才回寫，沒改就不動原紀錄
             updates["transcript"] = transcript
         store.update_meeting(meeting_id, updates, user=current_user())
         tasks = store.replace_tasks(meeting_id, dumped["todos"], user=current_user())
@@ -908,7 +874,6 @@ def create_app(
             "tasks": tasks,
             "transcript": transcript,
             "corrections": corrections,
-            "speaker_names": speaker_names,
         }
 
     @app.get("/api/tasks")
@@ -1128,7 +1093,6 @@ def create_app(
         kind: Optional[str] = Form(None),
         features: Optional[str] = Form(None),
         correct_typos: Optional[str] = Form(None),
-        name_speakers: Optional[str] = Form(None),
         terms: Optional[str] = Form(None),
     ):
         limit("media")  # 在存檔之前擋：被擋下的上傳不佔暫存磁碟
@@ -1142,7 +1106,6 @@ def create_app(
         # multipart 表單只有字串，"true"/"1" 都當開啟
         _truthy = ("1", "true", "on", "yes")
         correct = str(correct_typos or "").lower() in _truthy
-        name_speakers_on = str(name_speakers or "").lower() in _truthy
 
         suffix = validate_media_suffix(file.filename)
         uploads_dir.mkdir(parents=True, exist_ok=True)
@@ -1153,8 +1116,6 @@ def create_app(
         usage.record("media_upload")
         if correct:
             usage.record("correct")
-        if name_speakers_on and orchestrator.namer:
-            usage.record("speaker_names")
         return {
             "job_id": job_manager.submit(
                 dest,
@@ -1163,7 +1124,6 @@ def create_app(
                 kind=kind,
                 features=resolved_features,
                 correct_typos=correct,
-                name_speakers=name_speakers_on,
                 terms=resolved_terms,
             )
         }
@@ -1275,7 +1235,6 @@ def create_app(
             kind,
             features,
             correct_typos=bool(req and req.correct_typos),
-            name_speakers=bool(req and req.name_speakers),
             terms=validate_terms(req.terms if req else None),
             speaker_prior=speaker_prior,
             # 會前登記的人＝使用者親自指認「這些人在場、姓名這樣寫」

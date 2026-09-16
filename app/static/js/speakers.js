@@ -49,4 +49,41 @@ function matchSpeaker(line, labels) {
   return { speaker: m[1].trim(), rest: text.slice(m[0].length) };
 }
 
-export { LABEL_RE, matchSpeaker, speakerLabels };
+/* ------------------------------------------------------------------
+   講者改名：系統一律標「講者A/B/C」，不從對話內容猜姓名——講者口中的
+   「主席」「王委員」指的是別人，AI 會標錯。由使用者結束後自己替換。
+   ------------------------------------------------------------------ */
+// 行首時間標記。各段放寬成 1~2 位數：模型會吐出 [00] 與 [0:1]（後端 segments.py 同一套規則）
+const TIME_RE = /^\[(\d{1,2}(?::\d{1,2}){0,2})\]\s*/;
+const TIME_SRC = TIME_RE.source.slice(1);  // 去掉 ^，嵌進改名用的 regex
+const MAX_NAME_LEN = 20;
+
+const escapeRe = s => String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+// 只換講者欄：內文裡提到的「講者A」是說話內容，「講者AB」是另一個人
+function renameSpeakerInTranscript(text, oldName, newName) {
+  // 具名群組：TIME_SRC 自己帶一個捕捉群組，用位置取會錯位
+  const re = new RegExp(`^(?<head>\\s*(?:${TIME_SRC})?)${escapeRe(oldName)}(?<colon>\\s*[：:])`);
+  return String(text || "").split("\n")
+    .map(line => line.replace(re, (...args) => {
+      const { head, colon } = args[args.length - 1];
+      return head + newName + colon;
+    }))
+    .join("\n");
+}
+
+// 出席者名單：換掉舊名，已經有同名的（兩個代號其實是同一人）就併成一筆
+function renameInList(list, oldName, newName) {
+  return [...new Set((list || []).map(x => (x === oldName ? newName : x)))];
+}
+
+// 新名字不合格的原因；合格回空字串。與後端 speaker_names.is_safe_name 同一套
+function speakerNameProblem(name) {
+  const n = String(name || "").trim();
+  if (!n) return "名字不可為空";
+  if (n.length > MAX_NAME_LEN) return `名字最多 ${MAX_NAME_LEN} 個字`;
+  if (/[：:\n[\]]/.test(n)) return "名字不可包含冒號、換行或方括號（會破壞逐字稿格式）";
+  return "";
+}
+
+export { LABEL_RE, TIME_RE, matchSpeaker, renameInList, renameSpeakerInTranscript, speakerLabels, speakerNameProblem };

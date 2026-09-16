@@ -1,21 +1,21 @@
 """Orchestrator：把各個 Agent 串成完整 pipeline。
 
-文字（貼上 / 轉錄產生）→ Parser →（Corrector）→（SpeakerNamer）→ Decision
+文字（貼上 / 轉錄產生）→ Parser →（Corrector）→（預錄姓名）→ Decision
 → Executor → Notifier。
 
 Corrector 是選用的：開啟時先修掉語音辨識的同音錯字，後面的分析與存檔
 都吃校正後的版本（存進資料庫的逐字稿也是校正後的）。
 
-SpeakerNamer 是選用的（預設關閉）：把轉錄產生的「講者A/B/C」代號換成真實
-姓名。排在 Corrector 之後：先修掉同音錯字，「請王委員發言」這類判斷依據
-才不會因為稱謂被聽錯（「王委員」→「黃委員」）而對應到錯的人。台語等語者
-辨識不穩的錄音容易對錯，所以預設維持代號，由呼叫端明確開啟才對應姓名。
+講者一律維持「講者A/B/C」代號，系統不從對話內容推斷姓名——講者口中的稱謂
+指的是別人，模型會把「主席好」的人標成主席。唯一的例外是即時聆聽會前預錄的
+聲音樣本：姓名是使用者自己填的，比對出來就直接套用。其餘由使用者事後改名。
 """
 from __future__ import annotations
 
 from datetime import date
 
 from app.stores.base import DEFAULT_USER
+from app.transcription.speaker_names import apply_speaker_names, is_safe_name
 
 from app.agents.decision_agent import DecisionAgent
 from app.agents.executor_agent import ExecutorAgent
@@ -31,14 +31,12 @@ class Orchestrator:
         executor: ExecutorAgent,
         notifier: NotifierAgent,
         corrector=None,
-        namer=None,
     ):
         self.parser = parser
         self.decision = decision
         self.executor = executor
         self.notifier = notifier
         self.corrector = corrector
-        self.namer = namer
 
     def process_transcript(
         self,
@@ -47,7 +45,6 @@ class Orchestrator:
         kind: str | None = None,
         features: set[str] | None = None,
         correct_typos: bool = False,
-        name_speakers: bool = False,
         terms: list[dict] | None = None,
         user: str = DEFAULT_USER,
         speaker_prior: dict[str, str] | None = None,
@@ -58,15 +55,11 @@ class Orchestrator:
         if correct_typos and self.corrector:
             text, corrections = self.corrector.correct(text, user)
         speaker_names: list[dict] = []
-        # 預設不對應姓名：轉錄輸出的講者A/B/C 已可用，補真名是選用的加分項。
-        # 台語等語者辨識不穩的錄音，猜錯的名字比代號更糟，所以由呼叫端明確開啟
-        if name_speakers and self.namer:
-            # speaker_prior：會前錄的聲音樣本比對出來的對應，勝過從上下文推斷。
-            # 沒錄樣本時不帶這個參數，呼叫形狀與這個功能出現之前完全相同
-            text, speaker_names = (
-                self.namer.name_speakers(text, user=user, prior=speaker_prior)
-                if speaker_prior
-                else self.namer.name_speakers(text, user=user)
+        # speaker_prior：會前預錄聲音樣本比對出的 {代號: 使用者填的姓名}。
+        # 姓名來自其他模組，一樣要過安全檢查——來源不同不是跳過驗證的理由
+        if speaker_prior:
+            text, speaker_names = apply_speaker_names(
+                text, {k: v for k, v in speaker_prior.items() if is_safe_name(v)}
             )
         analysis = self.decision.analyze(
             text, meeting_date=meeting_date, kind=kind, features=features,
@@ -87,6 +80,6 @@ class Orchestrator:
             # 而不是傳進來的原始文字
             "transcript": text,
             "corrections": corrections,
-            # 實際套用的講者對應（代號 → 姓名），供前端顯示「誰是誰」
+            # 實際套用的預錄姓名（代號 → 姓名），供前端顯示「誰是誰」
             "speaker_names": speaker_names,
         }

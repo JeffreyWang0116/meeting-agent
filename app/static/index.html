@@ -281,13 +281,6 @@
             </label>
           </div>
 
-          <!-- 講者姓名對應：預設關閉。台語等語者辨識不穩的錄音容易對錯，猜錯的名字比代號更糟 -->
-          <div class="field-row feature-row">
-            <label class="chk" title="轉錄後多花一次 AI 請求，依對話內容把「講者A/B/C」換成真實姓名。台語或多口音、語者難分辨的錄音建議關閉，維持代號較不易出錯">
-              <input type="checkbox" id="featNameSpeakers"> 辨識名稱
-            </label>
-          </div>
-
           <!-- 文字貼上 -->
           <div class="pane active" id="paneText">
             <div class="field">
@@ -421,6 +414,11 @@
           <div class="report-head">
             <h2 id="rTitle"></h2>
             <div class="meta-chips" id="rMeta"></div>
+            <!-- 講者一律標代號（系統不猜姓名），由使用者在這裡自己換成真名 -->
+            <div class="speaker-rename" id="rSpeakers" hidden>
+              <span class="hint">講者（點擊改名，逐字稿與出席者跟著更新）</span>
+              <div class="speaker-chips" id="rSpeakerChips"></div>
+            </div>
           </div>
 
           <div class="report-grid">
@@ -677,13 +675,10 @@
         <svg class="i-sm" aria-hidden="true"><use href="/static/icons.svg#x"/></svg>
       </button>
     </div>
-    <p class="hint">會議中常出現的名稱，加進詞彙表後，轉錄會優先採用這些寫法。勾「人名」的項目另外會用來統一講者姓名——同一個人在每場會議都叫同一個名字；你在歷史會議改過的講者名字也會自動記進來。</p>
+    <p class="hint">會議中常出現的名稱（人名、產品名、專案代號），加進詞彙表後，轉錄會優先採用這些寫法。講者不會自動換成這裡的姓名——一律標「講者A/B/C」，分析完再點講者改名。</p>
     <div class="glossary-add">
       <input type="text" id="glosTerm" placeholder="名稱">
-      <input type="text" id="glosNote" placeholder="說明（選填）">
-      <label class="chk" title="勾選後，辨識講者時會用這個寫法統一姓名">
-        <input type="checkbox" id="glosPerson"> 人名
-      </label>
+      <input type="text" id="glosNote" placeholder="說明（選填，如：人名）">
       <button class="primary" id="btnGlosAdd">新增</button>
     </div>
     <div id="glosList"><p class="empty-note">尚無詞彙</p></div>
