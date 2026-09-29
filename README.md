@@ -39,7 +39,7 @@
 | 檢索與決策 | `app/agents/decision_agent.py` | Gemini 產出結構化 JSON | — |
 | 跨會議問答（RAG） | `app/rag.py` | Gemini 向量嵌入 + 語意檢索，跨所有會議回答提問；索引與會議／任務同一個 store（本地 JSON 或 Firestore） | — |
 | 資料庫與任務分發 | `app/agents/executor_agent.py`、`app/stores/` | 本地 JSON（`data/output/db.json`）；填 Firebase 金鑰即自動改用 Firestore 雲端持久化 | ✅ Firestore 已接（`FirestoreStore` 實作同一 `TaskStore` 介面） |
-| 時程同步與通知 | `app/agents/notifier_agent.py` | 產生信件草稿與事件 JSON 存本地 | 9 月串 Gmail / Google Calendar API |
+| 時程同步與通知 | `app/agents/notifier_agent.py` | 產生確認信草稿與行事曆事件 | ✅ 已接（Gmail 一鍵開信；開了 Google 登入後可一鍵加入 Google 行事曆）|
 
 ### 轉錄後端可切換
 
