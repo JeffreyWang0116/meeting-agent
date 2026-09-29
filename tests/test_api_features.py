@@ -320,6 +320,30 @@ def test_meeting_kinds_endpoint_covers_every_kind(client):
     assert first["hint"] and isinstance(first["features"], list)
 
 
+def test_kind_hint_shown_to_users_is_not_the_prompt_fragment(client):
+    """選單底下那行說明是給人看的，不該漏出寫給模型的字。
+
+    這兩個用途原本共用同一份 KIND_HINTS：它是拼進 prompt 的片段，所以直接寫
+    JSON schema 的欄位名（pending_items、attendees）與內部術語，而同一個字串又
+    被 /api/meeting-kinds 當成 hint 送給前端顯示。使用者選「專案會議」，畫面上
+    就會冒出「還沒拍板的放 pending_items」——看不懂，而且像是程式漏出來的東西。
+
+    prompt 那份不能跟著改（措辭是照模型的反應調出來的），所以改成兩份分開維護。
+    """
+    from app.agents.decision_agent import KIND_HINTS
+
+    body = client.get("/api/meeting-kinds").json()
+    kinds = [k for g in body["groups"] for k in g["kinds"]]
+
+    for k in kinds:
+        assert k["hint"], f"{k['value']} 沒有給使用者看的說明"
+        assert k["hint"] != KIND_HINTS[k["value"]], (
+            f"{k['value']} 直接把 prompt 片段當成使用者說明"
+        )
+        for leaked in ("pending_items", "attendees", "BANT", "_"):
+            assert leaked not in k["hint"], f"{k['value']} 的說明漏出「{leaked}」"
+
+
 # ---- 本次會議專用詞彙 ----
 
 def test_per_meeting_terms_are_stored_and_reused_on_reanalyze(client):

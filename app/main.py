@@ -24,7 +24,7 @@ from app.agents.decision_agent import (
     DEFAULT_KIND,
     KIND_DEFAULT_FEATURES,
     KIND_GROUPS,
-    KIND_HINTS,
+    KIND_DESCRIPTIONS,
     LEGACY_KINDS,
     MEETING_KINDS,
     DecisionAgent,
@@ -743,7 +743,8 @@ def create_app(
                     "kinds": [
                         {
                             "value": k,
-                            "hint": KIND_HINTS[k],
+                            # 給人看的說明，不是拼進 prompt 的 KIND_HINTS
+                            "hint": KIND_DESCRIPTIONS[k],
                             "features": sorted(KIND_DEFAULT_FEATURES.get(k, FEATURE_KEYS)),
                         }
                         for k in kinds
