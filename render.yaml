@@ -26,6 +26,14 @@ services:
       # TRANSCRIBE_LONG_FILE_THRESHOLD_SECONDS=600 即恢復長檔用強模型整份轉錄。
       - key: TRANSCRIBE_FALLBACK_MODEL
         value: gemini-3.5-flash
+      # 單檔上傳上限。程式預設 500，那是給有正常磁碟的機器用的——免費方案是
+      # 只有幾百 MB 的暫時性磁碟，而且一支影片會同時佔掉「上傳的原檔」與
+      # 「ffmpeg 抽出來的音軌」兩份。寫爆之後連 db.json 都存不進去，整個服務
+      # 跟著停擺，症狀還完全不指向磁碟。200 放得下 2 小時的會議錄音
+      #（單聲道約 60~120MB）還有餘裕；超過的檔案會收到乾淨的 413，不會留下
+      # 半截檔案。之後換到有持久磁碟的方案再往上調
+      - key: MAX_UPLOAD_MB
+        value: "200"
       # 選填：貼上 Firebase service account JSON 即改用 Firestore 永久保存資料；
       # 留空則用本地 JSON（重啟會清空）
       - key: FIREBASE_CREDENTIALS_JSON
