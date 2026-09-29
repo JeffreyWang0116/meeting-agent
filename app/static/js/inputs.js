@@ -47,6 +47,18 @@ $("btnUpload").addEventListener("click", async () => {
   $("fileTranscript").style.display = "block";
   $("fileTranscript").textContent = "";
 
+  // 瀏覽器端的逐字稿副本，與即時聆聽的 liveTranscriptText 同一個用途：轉錄
+  // 工作只存在伺服器記憶體，行程一重啟就連同暫時性磁碟上的上傳檔一起消失，
+  // 這份副本是那時唯一還救得回來的內容。見下方輪詢的 404 退路。
+  let fileTranscriptText = "";
+  const options = {
+    meeting_date: $("meetingDate").value || null,
+    kind: $("meetingKind").value,
+    features: selectedFeatures(),
+    correct_typos: correctTypos(),
+    terms: meetingTerms(),
+  };
+
   try {
     const form = new FormData();
     form.append("file", file);
@@ -61,7 +73,24 @@ $("btnUpload").addEventListener("click", async () => {
     let lastPct = -1, stalled = 0;
     while (true) {
       await new Promise(r => setTimeout(r, 1500));
-      const job = await api.mediaJob(job_id);
+      let job;
+      try {
+        job = await api.mediaJob(job_id);
+      } catch (e) {
+        // 404＝工作不見了。它只存在伺服器記憶體，行程一重啟（雲端重新部署、
+        // 當掉重生）就永遠找不回來，再輪詢幾次都是同樣的 404。已經轉出來的
+        // 部分還在瀏覽器這邊，改走純文字分析救回來——與聆聽 session 遺失時
+        // 同一條路（finishLiveSession 的 404 退路）。
+        if (e.status !== 404 || !fileTranscriptText.trim()) throw e;
+        showResultSkeleton();
+        const rescued = await api.analyze({ text: fileTranscriptText, ...options });
+        // 重啟時還沒轉到的部分永遠補不回來了，而原始檔案還在使用者手上——
+        // 寧可講清楚要不要重傳，也不要讓人以為分析的是完整的一場會議
+        showNotice("轉錄工作已遺失（伺服器可能重啟過），已改用瀏覽器保留的逐字稿分析。這份可能不完整，需要完整結果請重新上傳原檔。");
+        renderResult(rescued, fileTranscriptText);
+        $("fileStatus").textContent = "完成（部分逐字稿）";
+        break;
+      }
       const pct = Math.round((job.progress || 0) * 100);
       $("fileProgress").firstElementChild.style.width = pct + "%";
       // 卡在同一個百分比超過兩輪（~3 秒）就切成「處理中」樣式：長段落轉錄時
@@ -75,6 +104,7 @@ $("btnUpload").addEventListener("click", async () => {
         esc(JOB_STATUS_ZH[job.status] + (transcribing ? `（${pct}%）` : "")) +
         (stuck ? '<span class="spinner" aria-hidden="true"></span>' : "");
       if (job.transcript) {
+        fileTranscriptText = job.transcript;
         renderChat($("fileTranscript"), job.transcript);
         $("fileTranscript").scrollTop = $("fileTranscript").scrollHeight;
       }
@@ -84,7 +114,15 @@ $("btnUpload").addEventListener("click", async () => {
       if (job.status === "done") { renderResult(job.result, job.transcript); break; }
       if (job.status === "error") throw new Error(job.error || "轉錄失敗");
     }
-  } catch (e) { hideResultSkeleton(); showError(e.message); $("fileStatus").textContent = "失敗"; }
+  } catch (e) {
+    hideResultSkeleton();
+    // 走到這裡的 404 代表上面的退路也救不了：工作沒了，而且還沒轉出任何逐字稿。
+    // 原始檔案還在使用者手上，講清楚「重傳就好」比丟一句 404 有用得多
+    showError(e.status === 404
+      ? "轉錄工作已遺失（伺服器可能重啟過），而且還沒轉出任何逐字稿可以救。請重新上傳原檔。"
+      : e.message);
+    $("fileStatus").textContent = "失敗";
+  }
   finally { btn.disabled = false; }
 });
 

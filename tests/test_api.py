@@ -126,6 +126,31 @@ def test_media_bad_date_400(client):
     assert resp.status_code == 400
 
 
+def test_media_job_lost_can_fall_back_to_text_analysis(client):
+    """上傳轉錄工作遺失後的救援路徑所依賴的契約。
+
+    工作只存在記憶體（MediaJobManager._jobs），行程一重啟就永遠找不回來，
+    輪詢只會一直拿到 404；而暫時性磁碟上那份上傳檔也一起沒了。使用者等了數
+    分鐘、燒掉的額度都白費。前端因此邊輪詢邊留一份逐字稿副本，看到 404 就改
+    走純文字分析，把已經轉出來的部分救回來。
+
+    釘住它依賴的兩件事：輪詢對死掉的工作回的是 404（不是 400/500，前端靠這個
+    碼分辨「工作不存在」與「暫時性故障」），且純文字分析吃得下那份副本——它
+    帶時間標記與講者欄，與貼上的純文字不同形狀。改動任一個都會讓退路無聲失效。
+    """
+    assert client.get("/api/media/nope").status_code == 404
+
+    resp = client.post(
+        "/api/meetings",
+        json={
+            "text": "[0:05] 講者A：這段是轉到一半的逐字稿\n[0:12] 講者B：志明下週一交 prompt",
+            "meeting_date": "2026-07-12",
+        },
+    )
+    assert resp.status_code == 200
+    assert resp.json()["transcript"]
+
+
 # ---- 即時聆聽 ----
 
 def test_live_full_flow(client):

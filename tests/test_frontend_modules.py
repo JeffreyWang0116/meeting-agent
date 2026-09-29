@@ -105,3 +105,26 @@ def test_every_static_dom_lookup_has_a_matching_id(modules):
         if el not in known
     )
     assert not missing, "JS 引用了不存在的 DOM id：\n" + "\n".join(missing)
+
+
+# ---- 伺服器端工作遺失時的退路 ----
+
+def _upload_poll_block(src: str) -> str:
+    """檔案上傳處理器：從送出檔案到下一個區塊為止。"""
+    return src[src.index("api.uploadMedia(") : src.index("// ---- 拖曳上傳 ----")]
+
+
+def test_upload_poll_falls_back_to_the_browser_copy_when_the_job_is_lost():
+    """上傳轉錄與聆聽 session 都只活在伺服器記憶體裡，行程一重啟就消失。
+
+    聆聽那條路早就備好退路（finishLiveSession 的 404 分支：改用瀏覽器保留的
+    逐字稿走純文字分析）。上傳這條路原本沒有——容器重啟後輪詢拿到 404，只會
+    丟出一句使用者看不懂的錯誤，而暫時性磁碟上的檔案也沒了，等於數分鐘與一
+    整份額度白燒。兩條路的風險完全相同，退路就不該只有一邊有。
+
+    契約見 tests/test_api.py::test_media_job_lost_can_fall_back_to_text_analysis。
+    """
+    src = (JS_DIR / "inputs.js").read_text(encoding="utf-8")
+    block = _upload_poll_block(src)
+    assert "404" in block, "上傳輪詢沒有分辨 404（工作已遺失）與其他暫時性錯誤"
+    assert "api.analyze" in block, "上傳輪詢撞到 404 時沒有改走純文字分析的退路"
