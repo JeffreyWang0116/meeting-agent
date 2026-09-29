@@ -131,10 +131,11 @@ class NotifierAgent:
             json.dumps(events, ensure_ascii=False, indent=2), encoding="utf-8"
         )
 
+        # 這份 dict 會原封不動變成 /api/meetings 的回應。檔案照寫（data/output 下
+        # 仍留一份），但路徑不回傳：前端拿到的是內容本身、用不到路徑，而公開部署
+        # 等於把容器內的目錄結構印給每個看得到回應的人
         return {
             "email_draft": email_draft,
             "email_subject": build_email_subject(analysis),
-            "email_draft_path": str(email_path),
             "calendar_events": events,
-            "calendar_events_path": str(events_path),
         }

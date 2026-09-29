@@ -15,15 +15,25 @@ def analysis():
 
 
 def test_notify_writes_email_and_calendar_files(tmp_path, analysis):
-    notifier = NotifierAgent(tmp_path)
-    result = notifier.notify("m001", analysis)
+    NotifierAgent(tmp_path).notify("m001", analysis)
 
-    email_path = tmp_path / "m001" / "email_draft.txt"
-    events_path = tmp_path / "m001" / "calendar_events.json"
-    assert email_path.exists()
-    assert events_path.exists()
-    assert result["email_draft_path"] == str(email_path)
-    assert result["calendar_events_path"] == str(events_path)
+    assert (tmp_path / "m001" / "email_draft.txt").exists()
+    assert (tmp_path / "m001" / "calendar_events.json").exists()
+
+
+def test_notify_result_carries_no_server_filesystem_paths(tmp_path, analysis):
+    """notify() 的回傳值會原封不動變成 /api/meetings 的回應。
+
+    原本附了 email_draft_path 與 calendar_events_path 兩個絕對路徑。前端根本
+    用不到（它拿到的是 email_draft 內容本身），而公開部署等於把容器內的目錄結構
+    印給每個看得到回應的人。內容留著，路徑拿掉。
+    """
+    result = NotifierAgent(tmp_path).notify("m001", analysis)
+
+    assert result["email_draft"] and result["calendar_events"]
+    leaked = [k for k in result if k.endswith("_path")]
+    assert not leaked, f"回應仍夾帶伺服器路徑：{leaked}"
+    assert str(tmp_path) not in json.dumps(result, ensure_ascii=False)
 
 
 def test_email_draft_contains_key_sections(tmp_path, analysis):
