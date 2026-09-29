@@ -243,6 +243,25 @@ def test_ask_agent_answers_with_retrieved_context_and_sources(tmp_path):
     assert result["sources"][0]["title"] == "專題進度會議"
 
 
+def test_answer_that_found_nothing_lists_no_sources(tmp_path):
+    """答案說「找不到」時還掛一排來源，等於指著兩場會議說答案出自那裡。
+
+    實測問「有沒有提到股價」，回的是「在現有的會議紀錄中找不到相關資訊」，下面
+    卻列了兩場會議。來源欄的意思是「這個答案根據這些會議」，沒有答案就沒有來源。
+    向量檢索一定會回傳最接近的幾筆（再不相干也有分數），所以不能拿「有沒有命中」
+    當判準，要看模型最後有沒有答出東西——而那句話是 _ASK_PROMPT 規定的固定用語。
+    """
+    store = make_store_with_meeting(tmp_path)
+    index = RagIndex(rag_store(tmp_path), embedder=FakeEmbedder())
+
+    agent = AskAgent(
+        index=index,
+        store=store,
+        generate=lambda p: "在現有的會議紀錄中找不到相關資訊。",
+    )
+    assert agent.ask("這次會議的股價是多少？")["sources"] == []
+
+
 def test_ask_agent_empty_store_answers_without_llm(tmp_path):
     store = LocalJsonStore(tmp_path / "db.json")
     index = RagIndex(rag_store(tmp_path), embedder=FakeEmbedder())

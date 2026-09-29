@@ -215,19 +215,23 @@ class RagIndex:
         ]
 
 
-_ASK_PROMPT = """你是「會議助手」的問答模組。根據以下歷史會議紀錄片段回答使用者的問題。
+# 模型答不出來時要說的固定句。提示規定它、回傳前也用它判斷該不該列來源，所以
+# 抽成常數——兩邊各寫一次的話，改了提示的用字，來源判斷會無聲地失效
+NOT_FOUND_ANSWER = "在現有的會議紀錄中找不到相關資訊"
+
+_ASK_PROMPT = f"""你是「會議助手」的問答模組。根據以下歷史會議紀錄片段回答使用者的問題。
 
 規則：
-1. 只根據提供的片段回答；找不到答案就直說「在現有的會議紀錄中找不到相關資訊」，禁止編造。
+1. 只根據提供的片段回答；找不到答案就直說「{NOT_FOUND_ANSWER}」，禁止編造。
 2. 用繁體中文、3 句以內簡潔回答；人名與專有名詞保留原文寫法。
 3. 提到具體事實時，註明出自哪場會議（標題與日期）。
 
 會議紀錄片段：
 ---
-{context}
+{{context}}
 ---
 
-問題：{question}"""
+問題：{{question}}"""
 
 
 class AskAgent:
@@ -275,6 +279,11 @@ class AskAgent:
 
         context = "\n\n".join(f"【{h['title']}｜{h['date']}】\n{h['text']}" for h in hits)
         answer = (self._generate(_ASK_PROMPT.format(context=context, question=question)) or "").strip()
+
+        # 檢索一定會回傳最接近的幾筆（再不相干也有分數），所以「有沒有命中」不能
+        # 當判準。答不出來時列來源，等於指著那幾場會議說答案出自那裡
+        if NOT_FOUND_ANSWER in answer:
+            return {"answer": answer, "sources": []}
 
         sources, seen = [], set()
         for h in hits:
