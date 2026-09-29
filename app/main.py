@@ -575,6 +575,32 @@ def create_app(
                     return JSONResponse({"detail": "未授權：缺少或錯誤的 API token"}, status_code=401)
             return await call_next(request)
 
+    # 刻意加在認證中介層之後：Starlette 把最後加入的那層包在最外面，所以這層
+    # 也蓋得到認證直接回的 401。漏掉錯誤回應等於沒設——攻擊者要的就是那些頁面。
+    @app.middleware("http")
+    async def security_headers(request: Request, call_next):
+        """站是上鎖的，但「誰進得來」跟「別人能不能借用他的登入狀態」是兩件事。
+
+        沒有 framing 限制，任何網站都能把這個站嵌成隱形 iframe 蓋在自己的按鈕
+        底下，讓已經登入的使用者在不知情下點到刪除會議。這只能由標頭擋，前端
+        做什麼都沒用——攻擊發生在別人的頁面上。
+
+        這裡不下完整的 Content-Security-Policy：那要先把 Firebase SDK
+        （gstatic）、Google Fonts 等來源全部列進白名單，漏一個就是登入流程在
+        正式站上壞掉而本機完全正常。只取不需要盤點資源就安全的那幾個。
+        """
+        response = await call_next(request)
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["Content-Security-Policy"] = "frame-ancestors 'none'"
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        # 網址帶會議 id，不該整條送給使用者從確認信點出去的外部網站
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        # HSTS 只給公開站：瀏覽器記住之後改不掉，對 localhost 下等於把每個用
+        # http 跑本機服務的專案一起鎖死，而且沒人會聯想到是這裡造成的
+        if settings.is_public_deploy:
+            response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+        return response
+
     @app.get("/api/auth/config")
     def auth_config():
         """前端登入需要的設定。這幾個值本來就是公開的（Firebase 的安全性靠
