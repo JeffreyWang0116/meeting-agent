@@ -576,16 +576,47 @@ def test_ask_with_fake_agent_returns_answer_and_counts_usage(tmp_path):
     assert c.get("/api/usage").json()["total"]["ask"] == 1
 
 
-def test_ask_backend_failure_returns_502(tmp_path):
+def _ask_app(tmp_path, exc):
     class BrokenAsk:
         def ask(self, question, meeting_ids=None, user=DEFAULT_USER):
-            raise RuntimeError("429 RESOURCE_EXHAUSTED")
+            raise exc
 
     settings = Settings(gemini_api_key=None, data_dir=tmp_path)
     app = create_app(settings, transcriber=FakeTranscriber(), ask_agent=BrokenAsk())
-    resp = TestClient(app).post("/api/ask", json={"question": "嗨"})
+    return TestClient(app)
+
+
+def test_ask_quota_failure_is_explained_not_dumped(tmp_path):
+    """配額爆掉時使用者看到的是一整包英文 JSON——那是 Google 回給程式的，不是給人看的。
+
+    實際回報：按「詢問會議」得到「問答失敗：429 RESOURCE_EXHAUSTED. {'error': {'code':
+    429, 'message': 'You exceeded your current quota...」後面還有兩百多字的 quotaMetric、
+    violations、RetryInfo。使用者無從判斷該等一下、該明天再來，還是程式壞了。
+    轉錄那邊早就把 503 翻成人話（jobs.py 的 _error_message），問答這條漏了。
+    """
+    raw = (
+        "429 RESOURCE_EXHAUSTED. {'error': {'code': 429, 'message': 'You exceeded your "
+        "current quota', 'status': 'RESOURCE_EXHAUSTED', 'details': [{'quotaMetric': "
+        "'generativelanguage.googleapis.com/embed_content_free_tier_requests'}]}}"
+    )
+    resp = _ask_app(tmp_path, RuntimeError(raw)).post("/api/ask", json={"question": "嗨"})
+
     assert resp.status_code == 502
-    assert "RESOURCE_EXHAUSTED" in resp.json()["detail"]
+    detail = resp.json()["detail"]
+    assert "額度" in detail
+    for noise in ("RESOURCE_EXHAUSTED", "quotaMetric", "{", "googleapis"):
+        assert noise not in detail, f"原始錯誤仍然漏出「{noise}」：{detail}"
+
+
+def test_ask_other_failures_still_show_the_reason(tmp_path):
+    """只有配額有現成的說法可以換。其餘（金鑰沒設、網路斷線）原因仍要透明，
+    否則使用者與開發者都失去唯一的線索。"""
+    resp = _ask_app(
+        tmp_path, RuntimeError("未設定 GEMINI_API_KEY：跨會議問答需要 Gemini 金鑰")
+    ).post("/api/ask", json={"question": "嗨"})
+
+    assert resp.status_code == 502
+    assert "GEMINI_API_KEY" in resp.json()["detail"]
 
 
 def test_meeting_events_ics_download(client):

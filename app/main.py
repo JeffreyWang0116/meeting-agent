@@ -38,6 +38,7 @@ from app.agents.reminder_agent import scan as scan_reminders
 from app.auth import CURRENT_USER, AuthError, bearer_token, verify_firebase_id_token
 from app.config import Settings, get_settings
 from app.export import meeting_report_md, tasks_to_csv, tasks_to_ics
+from app.gemini_keys import is_quota_error
 from app.glossary import Glossary, clean_terms
 from app.jobs import MediaJobManager
 from app.orchestrator import Orchestrator
@@ -969,7 +970,18 @@ def create_app(
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc))
-        except Exception as exc:  # 金鑰未設、配額爆掉…原因要透明
+        except Exception as exc:
+            # 配額 429 回的是一整包英文 JSON（quotaMetric、violations、RetryInfo…），
+            # 那是給程式看的。使用者只需要知道「不是壞掉，是額度，等一下再來」。
+            # 其餘錯誤（金鑰沒設、網路斷線）原因仍要透明——那是唯一的線索
+            if is_quota_error(exc):
+                logger.warning("問答撞到配額上限：%s", exc)
+                raise HTTPException(
+                    status_code=502,
+                    detail="問答失敗：Gemini 額度暫時用完了。"
+                    "跨會議問答要先把會議轉成向量，一次問太多場容易撞到每分鐘上限；"
+                    "請等一分鐘再試，或縮小詢問的會議範圍。",
+                )
             raise HTTPException(status_code=502, detail=f"問答失敗：{exc}")
 
     # ---- 翻譯 ----

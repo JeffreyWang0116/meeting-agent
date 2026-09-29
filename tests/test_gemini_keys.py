@@ -127,6 +127,83 @@ def test_non_quota_error_propagates_without_trying_more_keys():
     assert used == ["k1"]  # 非配額錯誤不續試其他 key
 
 
+# ---- 每分鐘配額：等 retryDelay 再試，換 key 沒有用 ----
+
+def _per_minute_quota_exc(delay="35s"):
+    """Google 對「每分鐘」配額回的 429：附一個很短的 retryDelay。
+
+    實例是跨會議問答的向量嵌入：
+    quotaId EmbedContentRequestsPerMinutePerUserPerProjectPerModel-FreeTier。
+    """
+    return RuntimeError(
+        "429 RESOURCE_EXHAUSTED. {'error': {'code': 429, 'status': 'RESOURCE_EXHAUSTED',"
+        " 'details': [{'@type': 'type.googleapis.com/google.rpc.QuotaFailure',"
+        " 'violations': [{'quotaId': 'EmbedContentRequestsPerMinutePerUserPerProject"
+        "PerModel-FreeTier', 'quotaValue': '100'}]},"
+        " {'@type': 'type.googleapis.com/google.rpc.RetryInfo',"
+        f" 'retryDelay': '{delay}'}}]}}}}"
+    )
+
+
+def test_per_minute_quota_waits_the_retry_delay_then_succeeds():
+    """這種配額是綁「專案」的，同專案的多把 key 共用同一份——換 key 一點用都沒有。
+
+    但 Google 明講了要等多久（retryDelay），等完就會過。原本的做法是把所有 key
+    都試一輪然後放棄，使用者看到一整包英文 JSON，而其實只要等 35 秒。
+    """
+    pool = KeyPool(["k1", "k2"])
+    calls, sleeps = [], []
+
+    def fn(key):
+        calls.append(key)
+        if len(calls) <= 2:  # 兩把 key 都撞同一份專案配額
+            raise _per_minute_quota_exc("35s")
+        return "ok"
+
+    assert call_with_rotation(pool, fn, sleep=sleeps.append) == "ok"
+    assert sleeps and 35 <= sleeps[0] < 40, sleeps
+
+
+def test_quota_error_without_a_retry_delay_still_fails_fast():
+    """沒附 retryDelay 就不知道要等多久，維持原本「試完所有 key 就報錯」。"""
+    pool = KeyPool(["k1"])
+    sleeps = []
+
+    with pytest.raises(RuntimeError, match="RESOURCE_EXHAUSTED"):
+        call_with_rotation(pool, lambda key: (_ for _ in ()).throw(_quota_exc()),
+                           sleep=sleeps.append)
+    assert sleeps == []
+
+
+def test_daily_quota_with_a_long_retry_delay_is_not_waited_out():
+    """每日配額的 retryDelay 動輒數小時。使用者的請求還開著，不能真的等下去——
+    而且等完也只是把隔天的額度提早燒掉。只有短到能當場等完的才等。"""
+    pool = KeyPool(["k1"])
+    sleeps = []
+
+    with pytest.raises(RuntimeError, match="RESOURCE_EXHAUSTED"):
+        call_with_rotation(
+            pool,
+            lambda key: (_ for _ in ()).throw(_per_minute_quota_exc("3600s")),
+            sleep=sleeps.append,
+        )
+    assert sleeps == []
+
+
+def test_retry_delay_is_waited_at_most_once():
+    """等一次沒過就是真的沒額度了。等第二次只會把使用者的請求拖到逾時。"""
+    pool = KeyPool(["k1"])
+    sleeps = []
+
+    with pytest.raises(RuntimeError, match="RESOURCE_EXHAUSTED"):
+        call_with_rotation(
+            pool,
+            lambda key: (_ for _ in ()).throw(_per_minute_quota_exc("20s")),
+            sleep=sleeps.append,
+        )
+    assert len(sleeps) == 1, sleeps
+
+
 def test_empty_pool_calls_fn_with_none():
     """沒設定金鑰時 fn(None) 自己丟出「未設定金鑰」的友善錯誤。"""
     def fn(key):

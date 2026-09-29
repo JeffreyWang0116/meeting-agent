@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import logging
 import random
+import re
 import threading
 import time
 from typing import Callable, Iterable, TypeVar
@@ -51,6 +52,26 @@ OVERLOAD_ALTERNATES = {
 def is_quota_error(exc: BaseException) -> bool:
     text = str(exc)
     return "RESOURCE_EXHAUSTED" in text or "429" in text
+
+
+# 配額 429 附的 retryDelay 最多等幾秒。每分鐘配額回的是幾十秒，等完就過；每日配額
+# 回的動輒數小時，不能真的等——使用者的請求還開著（Render 前面的代理約 100 秒就斷），
+# 而且等到跨日也只是把隔天的額度提早燒掉
+_MAX_QUOTA_WAIT_SECONDS = 90
+_RETRY_DELAY_RE = re.compile(r"['\"]?retryDelay['\"]?\s*:\s*['\"]?(\d+(?:\.\d+)?)s")
+
+
+def quota_retry_seconds(exc: BaseException) -> float | None:
+    """429 裡 Google 明講的「等這麼久再試」。沒有或太長就回 None。
+
+    每分鐘配額（例如向量嵌入的 EmbedContentRequestsPerMinutePerUserPerProjectPerModel）
+    是綁專案的：同專案的多把 key 共用同一份，換 key 一點用都沒有，只有等有用。
+    """
+    m = _RETRY_DELAY_RE.search(str(exc))
+    if not m:
+        return None
+    seconds = float(m.group(1))
+    return seconds if 0 < seconds <= _MAX_QUOTA_WAIT_SECONDS else None
 
 
 def is_transient_error(exc: BaseException) -> bool:
@@ -115,6 +136,7 @@ def call_with_rotation(
         return attempt(None)
     exhausted: set[str | None] = set()  # 本次呼叫內已確認配額爆掉的 key
     transient_fails = 0
+    waited_out_quota = False  # 每分鐘配額只等一次，見下方
     while True:
         key = pool.next_key()
         try:
@@ -123,7 +145,17 @@ def call_with_rotation(
             if is_quota_error(exc):
                 exhausted.add(key)
                 if len(exhausted) == len(pool):
-                    raise  # 所有 key 的配額都爆了
+                    # 每分鐘配額是綁專案的（同專案多把 key 共用同一份），所以走到
+                    # 這裡不代表沒額度了，只代表這一分鐘打太快——Google 還明講了
+                    # 要等幾秒。等完重來一輪通常就過；等一次還不過就是真的沒了，
+                    # 再等只會把使用者的請求拖到逾時
+                    delay = None if waited_out_quota else quota_retry_seconds(exc)
+                    if delay is None:
+                        raise
+                    logger.warning("配額暫時額滿，依 Google 指示等 %.0f 秒後重試", delay)
+                    sleep(delay)
+                    waited_out_quota = True
+                    exhausted.clear()
             elif is_transient_error(exc):
                 transient_fails += 1
                 if transient_fails > len(_BACKOFF_SECONDS):
