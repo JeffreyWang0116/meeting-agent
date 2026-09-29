@@ -25,7 +25,7 @@
   <div class="login-card">
     <svg class="i-lg" aria-hidden="true"><use href="/static/icons.svg#mic"/></svg>
     <h2>會議助手</h2>
-    <p class="login-hint">用 Google 帳號登入。你的會議紀錄、任務、詞彙表與講者名冊只有你看得到。</p>
+    <p class="login-hint">用 Google 帳號登入。屬於你的會議紀錄</p>
     <button class="primary" id="loginBtn">
       <svg class="i-sm" aria-hidden="true"><use href="/static/icons.svg#user"/></svg>
       用 Google 登入
@@ -258,7 +258,7 @@
           <div class="field">
             <label class="lbl" for="meetingTerms">
               本次專用詞彙
-              <span class="lbl-aux">這場會議會出現的專案代號、人名、產品名，用頓號或逗號分隔</span>
+              <span class="lbl-aux">本場會議會出現的專案代號、人名、產品名，用頓號或逗號分隔</span>
             </label>
             <input type="text" id="meetingTerms" placeholder="例：TaskHub、王霖翔、Kessel 專案">
             <label class="chk" title="勾選後這些詞會同時存進設定裡的全域詞彙表，之後每場會議都適用">
@@ -334,9 +334,8 @@
               <div class="field">
                 <label class="lbl" for="liveMicDevice">
                   麥克風
-                  <span class="lbl-aux">錄聲音樣本與正式聆聽都用這一支</span>
                 </label>
-                <select class="field-sel" id="liveMicDevice" title="選錄音要用的麥克風。錄樣本和開會請用同一支、距離也盡量一致，聲紋比對才準">
+                <select class="field-sel" id="liveMicDevice" title="選錄音要用的麥克風">
                   <option value="">系統預設麥克風</option>
                 </select>
               </div>
@@ -351,8 +350,8 @@
             <div class="field-row feature-row" id="liveSysSourceRow" style="display:none">
               <div class="field" style="flex:1 1 100%">
                 <label class="lbl" for="liveSysSource">耳機／系統音源來源</label>
-                <select class="field-sel" id="liveSysSource" title="選『立體聲混音』等回放裝置可直接擷取耳機聲音、免跳分享視窗；選『分享畫面擷取』則相容性最高但每次會跳出分享視窗">
-                  <option value="display">分享畫面擷取（每次會跳分享視窗，相容性最高）</option>
+                <select class="field-sel" id="liveSysSource" title="選要收錄的系統音源">
+                  <option value="display">分享畫面擷取</option>
                 </select>
                 <div class="glos-note" id="liveSysHint" style="margin-top:6px"></div>
               </div>
@@ -360,8 +359,8 @@
             <!-- 預錄聲音辨識人（選用）：會前每人錄一小段，結束分析時用聲紋把
                  逐字稿的「講者A/B/C」換成真實姓名。沒勾就完全不啟用，不多打 API -->
             <div class="field-row feature-row" id="liveEnrollRow" style="display:none">
-              <label class="chk" title="會前請每位與會者各錄一小段話，AI 記住每個人的聲音；會議結束分析時，逐字稿的「講者A」「講者B」就會換成真實姓名。沒錄就維持代號。">
-                <input type="checkbox" id="liveEnrollOn"> 預錄聲音辨識人（會前每人錄一小段，或改上傳音檔）
+              <label class="chk" title="會議結束分析時，用預錄的聲音把逐字稿的「講者A」「講者B」換成真實姓名。沒錄就維持代號。">
+                <input type="checkbox" id="liveEnrollOn"> 預錄聲音辨識人
               </label>
             </div>
             <div id="liveEnrollBox" style="display:none">
@@ -369,7 +368,7 @@
                 <div class="field">
                   <label class="lbl" for="liveEnrollCount">
                     與會人數
-                    <span class="lbl-aux">依序請每個人錄一段，錄好才會生效</span>
+                    <span class="lbl-aux">依序錄音</span>
                   </label>
                   <select class="field-sel" id="liveEnrollCount"></select>
                 </div>
@@ -675,10 +674,10 @@
         <svg class="i-sm" aria-hidden="true"><use href="/static/icons.svg#x"/></svg>
       </button>
     </div>
-    <p class="hint">會議中常出現的名稱（人名、產品名、專案代號），加進詞彙表後，轉錄會優先採用這些寫法。講者不會自動換成這裡的姓名——一律標「講者A/B/C」，分析完再點講者改名。</p>
+    <p class="hint">會議中常出現的名稱（人名、產品名、專案代號），加進詞彙表後，轉錄會優先採用這些寫法。</p>
     <div class="glossary-add">
       <input type="text" id="glosTerm" placeholder="名稱">
-      <input type="text" id="glosNote" placeholder="說明（選填，如：人名）">
+      <input type="text" id="glosNote" placeholder="說明">
       <button class="primary" id="btnGlosAdd">新增</button>
     </div>
     <div id="glosList"><p class="empty-note">尚無詞彙</p></div>

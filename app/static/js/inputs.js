@@ -789,13 +789,8 @@ function renderEnrollRows() {
   const ready = enrollPeople.filter(p => p.name.trim() && p.blob).length;
   const bad = enrollPeople.filter(p => p.blob && p.bad).length;
   $("liveEnrollHint").innerHTML =
-    `每人錄約 ${ENROLL_SECONDS} 秒，請每個人唸<b>同一段話</b>`
-    + "（例如「大家好，我是○○○，今天由我負責這個項目」），唸滿整段不要留白"
-    + "——固定句子涵蓋的發音較齊全，比隨口一句好比對。"
-    + "<br>錄樣本請用<b>開會時的同一支麥克風、同樣的距離</b>；用手機貼著嘴錄、"
-    + "開會卻用遠處的桌上型麥克風，聲音差距足以讓比對失效。"
-    + `<br>目前 ${ready} / ${enrollPeople.length} 位已備妥；`
-    + "沒填姓名或沒錄音的人會被略過，那些人在逐字稿中維持講者代號。"
+    `每人錄約 ${ENROLL_SECONDS} 秒，請每人唸<b>同一段話</b>，唸滿整段不要留白`
+    + `<br>目前 ${ready} / ${enrollPeople.length} 位已備妥`
     + (bad ? `　⚠ 有 ${bad} 位的樣本可能不能用，建議按「試聽」確認後重錄。` : "");
 }
 

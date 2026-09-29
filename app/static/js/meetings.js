@@ -104,7 +104,7 @@ function meetingDetailHtml(id) {
             : `<p class="empty-note">本次未提及</p>`}</div>`).join("")}</div>` : ""}
       ${highlights ? `<h4>會議重點</h4><ol class="highlight-list">${highlights}</ol>` : ""}
       ${decisions ? `<h4>決議事項</h4><ol class="detail-decisions">${decisions}</ol>` : ""}
-      ${speakers.length ? `<h4>講者（點擊改名，整份逐字稿跟著更新）</h4>
+      ${speakers.length ? `<h4>講者</h4>
         <div class="speaker-chips">${speakers.map(s =>
           `<span class="speaker-chip" data-id="${esc(id)}" data-speaker="${esc(s)}">✎ ${esc(s)}</span>`).join("")}</div>` : ""}
       <h4>詞彙統一替換</h4>

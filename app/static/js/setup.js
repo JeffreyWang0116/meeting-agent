@@ -136,13 +136,13 @@ async function populateSysSources(interactive) {
     for (const d of loop) {
       sel.appendChild(new Option(`🎧 ${d.label}（直接擷取，免分享視窗）`, d.deviceId));
     }
-    sel.appendChild(new Option("分享畫面擷取（每次會跳分享視窗，相容性最高）", "display"));
+    sel.appendChild(new Option("分享畫面擷取", "display"));
     // 還原上次選擇；找不到（裝置變動）就退回第一個回放裝置、再退回分享畫面
     sel.value = remembered;
     if (sel.value !== remembered) sel.value = loop.length ? loop[0].deviceId : "display";
     hint.textContent = loop.length
       ? "已偵測到可直接擷取的音源裝置，選它就不用每次分享畫面。"
-      : "找不到可直接擷取的裝置。在 Windows 音效設定 → 錄製 → 啟用「立體聲混音」後重新整理，即可直接選用、免分享畫面。";
+      : "";
   } catch (e) {
     hint.textContent = "列舉裝置失敗，將使用分享畫面擷取：" + e.message;
   }
