@@ -2,10 +2,55 @@ import { api } from "./api.js";
 import { $, esc, icon } from "./core.js";
 import { allMeetings, openMeetingDetail } from "./meetings.js";
 import { showView } from "./router.js";
+import { jumpToTranscript } from "./transcript.js";
 
 /* ==================================================================
    8. 跨會議問答：RAG 問答＋關鍵字即時搜尋
    ================================================================== */
+// ---- 回答附帶的東西：AI 理解的條件、相關會議與段落（點了跳到逐字稿那一行） ----
+function conditionsHtml(c) {
+  if (!c) return "";
+  const chips = [];
+  if (c.date_from || c.date_to) {
+    chips.push(`${icon("calendar", "i-sm")}${esc(c.date_from || "…")} ~ ${esc(c.date_to || "…")}`);
+  }
+  (c.kinds || []).forEach(k => chips.push(esc(k)));
+  (c.people || []).forEach(p => chips.push(`${icon("user", "i-sm")}${esc(p)}`));
+  return `<div class="ask-cond" title="AI 從問題裡解析出的條件，只在符合的會議裡找">${
+    chips.map(x => `<span class="meta-chip">${x}</span>`).join("")}</div>`;
+}
+
+// 後端挑好的焦點行（最能回答問題的那一行）。跳轉比對的是泡泡內文，講者是分開顯示的，要去掉
+function passageQuote(p) {
+  const q = p.quote || "";
+  const colon = q.search(/[：:]/);
+  return (colon >= 0 && colon <= 20 ? q.slice(colon + 1) : q).trim().slice(0, 40);
+}
+
+// 逐字稿段落顯示焦點行；摘要卡沒有行可挑，顯示開頭
+const passageSnippet = p => (p.quote || String(p.text || "").replace(/\s+/g, " ")).slice(0, 140);
+
+function passagesHtml(passages) {
+  if (!passages || !passages.length) return "";
+  const groups = new Map();
+  passages.forEach(p => {
+    if (!groups.has(p.meeting_id)) groups.set(p.meeting_id, { title: p.title, date: p.date, items: [] });
+    groups.get(p.meeting_id).items.push(p);
+  });
+  return `<div class="ask-passages"><span class="ask-hits-head">相關會議與段落（點擊跳到逐字稿）</span>${
+    [...groups.entries()].map(([id, g]) => `<div class="ask-group">
+        <div class="ask-group-head"><b>${esc(g.title)}</b><span class="meta">${esc(g.date)}</span></div>
+        ${g.items.map(p => `<div class="ask-passage${p.cited ? " cited" : ""}" data-id="${esc(id)}"
+            data-time="${esc(p.time || "")}" data-quote="${esc(passageQuote(p))}">
+            ${p.time ? `<span class="p-time">${esc(p.time)}</span>` : ""}
+            ${p.source === "summary" ? `<span class="p-tag">摘要</span>` : ""}
+            <span class="snippet" title="${esc(p.text)}">${esc(passageSnippet(p))}</span>
+            ${p.cited ? `<span class="p-tag cited">引用</span>` : ""}
+          </div>`).join("")}
+      </div>`).join("")}</div>`;
+}
+
+
 // ---- 跨會議問答（RAG） ----
 // 範圍複選：勾了哪些會議就只在那些會議裡檢索；都不勾 = 全部
 const askScopeIds = new Set();
@@ -57,11 +102,7 @@ async function sendAsk() {
         meeting_ids: askScopeIds.size ? [...askScopeIds] : null,
       });
     slot.classList.remove("pending");
-    slot.innerHTML = `<span>A</span><div>${esc(r.answer)}${
-      r.sources && r.sources.length
-        ? `<div class="ask-src">${r.sources.map(s => `<span class="src-chip">${esc(s.title)} · ${esc(s.date)}</span>`).join("")}</div>`
-        : ""
-    }</div>`;
+    slot.innerHTML = `<span>A</span><div>${conditionsHtml(r.conditions)}${esc(r.answer)}${passagesHtml(r.passages)}</div>`;
   } catch (err) {
     slot.classList.remove("pending");
     slot.classList.add("err");
@@ -118,7 +159,19 @@ $("askSearchHits").addEventListener("click", e => {
   openMeetingDetail(hit.dataset.id);
 });
 // 每則問答各自刪除；刪到全空就把整個對話框收起來
-$("askLog").addEventListener("click", e => {
+$("askLog").addEventListener("click", async e => {
+  const passage = e.target.closest(".ask-passage");
+  if (passage) {
+    const { id, time, quote } = passage.dataset;
+    showView("meeting");
+    await openMeetingDetail(id);
+    const view = document.getElementById("dTranscriptView");
+    if (view && (time || quote)) {
+      view.scrollIntoView({ behavior: "smooth", block: "start" });
+      jumpToTranscript(view, time, quote);
+    }
+    return;
+  }
   const del = e.target.closest(".del-ask");
   if (!del) return;
   del.closest(".ask-item").remove();
@@ -126,4 +179,4 @@ $("askLog").addEventListener("click", e => {
   if (!log.querySelector(".ask-item")) log.style.display = "none";
 });
 
-export { askScopeIds, hideSearchHits, renderAskScope, searchTimer, sendAsk, snippetHtml };
+export { askScopeIds, conditionsHtml, hideSearchHits, passageQuote, passagesHtml, renderAskScope, searchTimer, sendAsk, snippetHtml };

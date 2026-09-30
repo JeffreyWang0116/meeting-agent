@@ -513,11 +513,27 @@
   .ask-a.err { color: var(--high); }
   .ask-item { position: relative; display: flex; flex-direction: column; gap: 12px; padding-right: 26px; }
   .del-ask { position: absolute; top: 0; right: 0; }
-  .ask-src { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
-  .src-chip {
-    font-family: var(--mono); font-size: .74rem; color: var(--faint);
-    border: 1px solid var(--border); border-radius: 999px; padding: 2px 10px; background: var(--card);
+  .ask-cond { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 6px; }
+  .ask-cond .meta-chip { font-size: .74rem; padding: 2px 10px; }
+  .ask-passages { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
+  .ask-group { display: flex; flex-direction: column; gap: 2px; }
+  .ask-group-head { display: flex; gap: 8px; align-items: baseline; padding: 0 4px; }
+  .ask-group-head b { font-size: .84rem; }
+  .ask-group-head .meta { font-size: .72rem; color: var(--faint); font-family: var(--mono); }
+  .ask-passage {
+    display: flex; gap: 8px; align-items: baseline; cursor: pointer; font-size: .8rem; color: var(--muted);
+    padding: 6px 10px; border-radius: var(--radius-sm); border: 1px solid transparent;
+    transition: background .12s, border-color .12s;
   }
+  .ask-passage:hover { background: var(--card-3); border-color: var(--border); }
+  .ask-passage.cited { color: var(--ink); }
+  .ask-passage .snippet { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+  .ask-passage .p-time { flex: none; font-family: var(--mono); font-size: .72rem; color: var(--accent); }
+  .p-tag {
+    flex: none; font-size: .68rem; color: var(--faint);
+    border: 1px solid var(--border); border-radius: 999px; padding: 0 7px;
+  }
+  .p-tag.cited { color: var(--accent); border-color: var(--accent-border); background: var(--accent-soft); }
   .ask-scope { border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--card-2); }
   .ask-scope > summary { padding: 9px 14px; cursor: pointer; font-size: .84rem; color: var(--muted); user-select: none; }
   .ask-scope > summary:hover { color: var(--ink); }

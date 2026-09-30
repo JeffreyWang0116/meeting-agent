@@ -516,6 +516,7 @@ def create_app(
             api_keys=settings.gemini_api_keys,
             on_call=record_call,
             model=settings.gemini_model,
+            kinds=[k for _, kinds in KIND_GROUPS for k in kinds],
         )
 
     def drop_from_rag(meeting_id: str) -> None:

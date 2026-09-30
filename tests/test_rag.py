@@ -6,7 +6,7 @@
 import pytest
 
 from app.models import MeetingAnalysis
-from app.rag import AskAgent, RagIndex, chunk_text, cosine
+from app.rag import AskAgent, RagIndex, chunk_transcript, cosine, focus_line
 from app.stores.local_store import LocalJsonStore
 from tests.test_models import make_valid_payload
 from tests.test_stores import make_analysis
@@ -33,25 +33,38 @@ class FakeEmbedder:
         ]
 
 
-# ---- chunk_text ----
+# ---- chunk_transcript：依行切塊，記下時間戳才跳得回逐字稿 ----
 
-def test_short_text_single_chunk():
-    assert chunk_text("短文字") == ["短文字"]
-
-
-def test_empty_text_no_chunks():
-    assert chunk_text("   ") == []
+def test_short_transcript_single_chunk_with_time():
+    assert chunk_transcript("[0:05] 講者A：短文字") == [{"text": "[0:05] 講者A：短文字", "time": "0:05"}]
 
 
-def test_long_text_chunks_cover_everything_with_overlap():
-    text = "月".join(str(i) for i in range(500))  # 約 1800 字
-    chunks = chunk_text(text, size=400, overlap=80)
-    assert all(len(c) <= 400 for c in chunks)
-    assert chunks[0] == text[:400]
-    # 相鄰塊有重疊：後一塊的開頭在前一塊裡出現過
-    assert chunks[1][:80] in chunks[0]
-    # 拼回去要涵蓋原文結尾
-    assert text[-100:] in chunks[-1] + chunks[-2]
+def test_empty_transcript_no_chunks():
+    assert chunk_transcript("   \n  ") == []
+
+
+def test_chunks_never_cut_a_line_and_overlap_by_one_line():
+    lines = [f"[{i}:00] 講者A：第{i}句" + "話" * 30 for i in range(40)]
+    chunks = chunk_transcript("\n".join(lines), size=200)
+    assert len(chunks) > 1
+    for c in chunks:
+        assert all(line in lines for line in c["text"].split("\n"))  # 沒有被切斷的行
+        assert c["time"] == c["text"][1:c["text"].index("]")]  # 第一行的時間
+    assert chunks[1]["text"].split("\n")[0] == chunks[0]["text"].split("\n")[-1]
+    assert chunks[-1]["text"].endswith(lines[-1])
+
+
+def test_chunk_time_uses_first_timestamped_line():
+    text = "講者A：沒有時間的開場\n[1:02] 講者B：這行有"
+    assert chunk_transcript(text)[0]["time"] == "1:02"
+    assert chunk_transcript("沒有任何時間戳")[0]["time"] is None
+
+
+def test_overlong_single_line_is_split():
+    chunks = chunk_transcript("[0:01] " + "字" * 900, size=400)
+    assert len(chunks) == 3
+    assert all(len(c["text"]) <= 400 for c in chunks)
+    assert all(c["time"] == "0:01" for c in chunks)
 
 
 # ---- cosine ----
@@ -200,6 +213,37 @@ def test_reset_clears_index(tmp_path):
     assert RagIndex(rag_store(tmp_path), embedder=FakeEmbedder()).search("API", k=5) == []
 
 
+def test_records_carry_source_and_time(tmp_path):
+    store = make_store_with_meeting(tmp_path, transcript="[0:12] Kevin：API 由小明負責。")
+    index = RagIndex(rag_store(tmp_path), embedder=FakeEmbedder())
+    index.sync(store)
+    hits = {h["source"]: h for h in index.search("API", k=5)}
+    assert hits["transcript"]["time"] == "0:12"
+    assert hits["summary"]["time"] is None
+
+
+def test_index_without_source_field_is_rebuilt(tmp_path):
+    """改版前的逐字稿切塊是固定 400 字、沒有時間戳，跳不回原文，整份作廢重建。"""
+    emb = FakeEmbedder()
+    store = rag_store(tmp_path)
+    store.save_rag_records(None, [{"meeting_id": "old1", "user": "default", "title": "舊",
+                                   "date": "", "text": "API", "vector": emb.embed(["API"])[0]}])
+    assert RagIndex(store, embedder=emb).search("API", k=5) == []
+
+
+def test_keyword_search_finds_exact_terms_case_insensitively(tmp_path):
+    store = LocalJsonStore(tmp_path / "db.json")
+    id1 = store.save_meeting(make_analysis(), transcript="[0:01] Kevin：預算要砍 Demo 費用")
+    id2 = store.save_meeting(make_analysis(), transcript="[0:01] Amy：資料庫下週遷移")
+    index = RagIndex(rag_store(tmp_path), embedder=FakeEmbedder())
+    index.sync(store)
+    hits = index.keyword_search(["demo", "預算"], k=10)
+    assert {h["meeting_id"] for h in hits} == {id1}
+    assert hits[0]["time"] == "0:01"
+    assert index.keyword_search(["預算"], k=10, meeting_ids=[id2]) == []
+    assert index.keyword_search([], k=10) == []
+
+
 def test_summary_card_indexed_even_without_transcript(tmp_path):
     """舊會議沒存逐字稿，至少摘要/決議/代辦要可被檢索。"""
     store = LocalJsonStore(tmp_path / "db.json")
@@ -345,6 +389,8 @@ def test_legacy_index_records_belong_to_default_user(tmp_path):
         "title": "舊會議",
         "date": "2026-01-01",
         "text": "API 由小明負責",
+        "source": "transcript",
+        "time": None,
         "vector": emb.embed(["API 由小明負責"])[0],
     }])
     index = RagIndex(store, embedder=emb)
@@ -376,3 +422,153 @@ def test_ask_agent_default_model_is_not_a_drifting_alias(tmp_path):
     store = LocalJsonStore(tmp_path / "db.json")
     agent = AskAgent(index=RagIndex(store, embedder=None), store=store)
     assert not agent.model.endswith("-latest")
+
+
+# ---- 詢問會議 v2：先解析條件，再檢索、回答並標出引用 ----
+
+def dated_analysis(title, day, attendees=()):
+    payload = make_valid_payload()
+    payload["meeting"].update(title=title, date=day, attendees=list(attendees))
+    return MeetingAnalysis.model_validate(payload)
+
+
+class ScriptedLLM:
+    """依 prompt 是哪一步回不同內容，並記下每次呼叫。"""
+
+    def __init__(self, plan, answer):
+        self.plan, self.answer, self.prompts = plan, answer, []
+
+    def __call__(self, prompt):
+        self.prompts.append(prompt)
+        is_plan = "檢索規劃器" in prompt
+        reply = self.plan if is_plan else self.answer
+        if isinstance(reply, Exception):
+            raise reply
+        return reply
+
+
+def two_month_store(tmp_path):
+    store = LocalJsonStore(tmp_path / "db.json")
+    aug = store.save_meeting(dated_analysis("八月客戶會", "2026-08-12"), kind="銷售拜訪",
+                             transcript="[0:10] Kevin：API 報價八月底前給")
+    sep = store.save_meeting(dated_analysis("九月週會", "2026-09-03"),
+                             transcript="[0:20] Amy：API 預算下週定")
+    return store, aug, sep
+
+
+def v2_agent(tmp_path, store, llm):
+    index = RagIndex(rag_store(tmp_path), embedder=FakeEmbedder())
+    return AskAgent(index=index, store=store, generate=llm, kinds=["一般會議", "銷售拜訪"])
+
+
+def test_plan_conditions_narrow_the_meetings_searched(tmp_path):
+    store, aug, sep = two_month_store(tmp_path)
+    llm = ScriptedLLM(
+        plan='{"date_from": "2026-08-01", "date_to": "2026-08-31", "kinds": ["銷售拜訪"], "query": "API 報價"}',
+        answer='{"answer": "八月底前給報價。", "cited": [1]}',
+    )
+    result = v2_agent(tmp_path, store, llm).ask("上個月客戶會議 API 報價什麼時候給？")
+
+    assert len(llm.prompts) == 2
+    assert "API 報價八月底前給" in llm.prompts[1]
+    assert "API 預算下週定" not in llm.prompts[1]  # 九月的會議被條件擋掉
+    assert result["answer"] == "八月底前給報價。"
+    assert result["conditions"] == {"date_from": "2026-08-01", "date_to": "2026-08-31",
+                                    "kinds": ["銷售拜訪"], "people": []}
+    assert {s["meeting_id"] for s in result["sources"]} == {aug}
+
+
+def test_no_meeting_matches_the_conditions_skips_the_second_call(tmp_path):
+    store, _, _ = two_month_store(tmp_path)
+    llm = ScriptedLLM(plan='{"date_from": "2025-01-01", "date_to": "2025-01-31", "query": "API"}',
+                      answer=AssertionError("篩不到會議就不該再問模型"))
+    result = v2_agent(tmp_path, store, llm).ask("去年一月的會議談了什麼 API？")
+    assert "沒有符合條件的會議" in result["answer"]
+    assert result["sources"] == [] and result["passages"] == []
+    assert result["conditions"]["date_from"] == "2025-01-01"
+    assert len(llm.prompts) == 1
+
+
+def test_manual_scope_is_intersected_with_the_plan(tmp_path):
+    store, aug, sep = two_month_store(tmp_path)
+    llm = ScriptedLLM(plan='{"kinds": ["銷售拜訪"], "query": "API"}', answer="x")
+    result = v2_agent(tmp_path, store, llm).ask("客戶會議的 API？", meeting_ids=[sep])
+    assert "沒有符合條件的會議" in result["answer"]
+
+
+def test_plan_failure_falls_back_to_plain_search(tmp_path):
+    store, aug, sep = two_month_store(tmp_path)
+    llm = ScriptedLLM(plan=RuntimeError("429 quota"), answer="API 報價八月底前給。")
+    result = v2_agent(tmp_path, store, llm).ask("API 報價什麼時候給？")
+    assert result["answer"] == "API 報價八月底前給。"
+    assert result["conditions"] is None
+    assert {s["meeting_id"] for s in result["sources"]} == {aug, sep}  # 沒標引用 → 列全部命中
+
+
+def test_cited_passages_come_first_with_time_and_limit_sources(tmp_path):
+    store, aug, sep = two_month_store(tmp_path)
+    llm = ScriptedLLM(plan='{"query": "API"}', answer=None)
+    agent = v2_agent(tmp_path, store, llm)
+    # 先看片段編號再決定要引用哪一個：找出九月那段逐字稿的編號
+    llm.answer = '{"answer": "預算下週定。", "cited": []}'
+    agent.ask("API？")
+    numbered = [line for line in llm.prompts[-1].splitlines() if "API 預算下週定" in line or "【" in line]
+    sep_no = next(int(line[1:line.index("]")]) for line in numbered
+                  if line.startswith("[") and "0:20" in line)
+    llm.answer = f'{{"answer": "預算下週定。", "cited": [{sep_no}]}}'
+
+    result = agent.ask("API？")
+    first = result["passages"][0]
+    assert first["cited"] and first["meeting_id"] == sep and first["time"] == "0:20"
+    assert "API 預算下週定" in first["text"]
+    assert [s["meeting_id"] for s in result["sources"]] == [sep]
+
+
+def test_keyword_hits_reach_the_prompt_even_when_embeddings_miss(tmp_path):
+    """FakeEmbedder 不認得「報價」這個詞，只有關鍵字檢索找得到。"""
+    store = LocalJsonStore(tmp_path / "db.json")
+    store.save_meeting(make_analysis(), transcript="[0:01] Kevin：報價單週五寄出")
+    for i in range(10):  # 塞滿語意檢索的名額
+        store.save_meeting(make_analysis(), transcript=f"[0:0{i}] Amy：API 介面 demo 第{i}版")
+    llm = ScriptedLLM(plan='{"query": "API 介面", "keywords": ["報價單"]}', answer="週五寄出。")
+    v2_agent(tmp_path, store, llm).ask("報價單什麼時候寄？")
+    assert "報價單週五寄出" in llm.prompts[1]
+
+
+def test_not_found_answer_lists_no_passages(tmp_path):
+    store, _, _ = two_month_store(tmp_path)
+    llm = ScriptedLLM(plan='{"query": "股價"}',
+                      answer='{"answer": "在現有的會議紀錄中找不到相關資訊", "cited": [1]}')
+    result = v2_agent(tmp_path, store, llm).ask("股價多少？")
+    assert result["sources"] == [] and result["passages"] == []
+
+
+# ---- 焦點行：一個片段好幾行，跳轉要落在真正回答問題的那一行 ----
+
+PASSAGE = "[0:05] 王小明：今天主要談導入時程\n[1:20] 講者B：預算上限是八十萬\n[2:40] 王小明：報價單我們九月五號前寄出"
+
+
+def test_focus_line_prefers_keyword_hits():
+    assert focus_line(PASSAGE, ["預算"], "") == ("1:20", "講者B：預算上限是八十萬")
+
+
+def test_focus_line_falls_back_to_answer_wording():
+    assert focus_line(PASSAGE, [], "報價單會在九月五號前寄出")[0] == "2:40"
+
+
+def test_focus_line_without_any_signal_is_the_first_line():
+    assert focus_line(PASSAGE, [], "") == ("0:05", "王小明：今天主要談導入時程")
+
+
+def test_focus_line_inherits_the_last_seen_time():
+    assert focus_line("[0:05] 講者A：開場\n接著談預算", ["預算"], "") == ("0:05", "接著談預算")
+
+
+def test_passages_point_at_their_focus_line(tmp_path):
+    store = LocalJsonStore(tmp_path / "db.json")
+    store.save_meeting(make_analysis(), transcript=PASSAGE)
+    llm = ScriptedLLM(plan='{"query": "報價", "keywords": ["報價單"]}',
+                      answer='{"answer": "九月五號前寄出。", "cited": [1]}')
+    result = v2_agent(tmp_path, store, llm).ask("報價單什麼時候寄？")
+    p = next(p for p in result["passages"] if p["source"] == "transcript")
+    assert (p["time"], p["quote"]) == ("2:40", "王小明：報價單我們九月五號前寄出")

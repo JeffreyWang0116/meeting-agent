@@ -2,7 +2,8 @@
 
 每場會議索引兩種內容：
 1. 摘要卡 — 標題/摘要/決議/代辦/未決事項串成一段（舊會議沒逐字稿也可檢索）
-2. 逐字稿切塊 — 固定長度、相鄰重疊，避免答案剛好被切斷
+2. 逐字稿切塊 — 依行切（不把一句話切斷）、相鄰重疊一行，並記下第一個時間戳，
+   問答列出的段落才跳得回逐字稿那一行
 
 向量索引交給 TaskStore（會議量是數十場等級，暴力餘弦相似即可，不需要
 向量資料庫）：本地走 JSON 檔、雲端走 Firestore，與會議／任務同一後端，
@@ -14,11 +15,19 @@ store 那一層已經隔離了，這裡是整條資料流唯一會漏的地方�
 """
 from __future__ import annotations
 
+import json
+import logging
 import math
+import re
 import threading
 
+from app.agents.decision_agent import strip_code_fence
+from app.ask_planner import AskPlan, build_plan_prompt, filter_meetings, parse_plan
 from app.gemini_keys import KeyPool, call_with_model_fallback, call_with_rotation
 from app.stores.base import DEFAULT_USER
+from app.timeutil import today_local
+
+logger = logging.getLogger(__name__)
 
 # 向量維度：gemini-embedding-001 預設 3072 維，每場會議的索引 JSON 會膨脹到
 # 數 MB。降到 768 維品質幾乎不變，索引小 4 倍、cosine 也快 4 倍。改這個值會
@@ -30,14 +39,61 @@ class RagError(Exception):
     pass
 
 
-def chunk_text(text: str, size: int = 400, overlap: int = 80) -> list[str]:
-    text = text.strip()
-    if not text:
-        return []
-    if len(text) <= size:
-        return [text]
-    step = size - overlap
-    return [text[i : i + size] for i in range(0, len(text), step)]
+_TIME_LABEL = re.compile(r"^\s*\[(\d{1,2}(?::\d{1,2}){0,2})\]")
+
+
+def chunk_transcript(text: str, size: int = 400) -> list[dict]:
+    """逐字稿依行切成不超過 size 字的片段，相鄰片段重疊一行；每段帶第一個時間戳。"""
+    pieces: list[tuple[str, str | None]] = []
+    for line in (text or "").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        m = _TIME_LABEL.match(line)
+        time = m.group(1) if m else None
+        # 單行就超過上限（沒換行的長逐字稿）只能硬切，切出來的每段沿用這行的時間
+        pieces += [(line[i : i + size], time) for i in range(0, len(line), size)]
+
+    chunks, current = [], []
+
+    def emit():
+        chunks.append({
+            "text": "\n".join(t for t, _ in current),
+            "time": next((tm for _, tm in current if tm), None),
+        })
+
+    for piece in pieces:
+        if current and len("\n".join(t for t, _ in current + [piece])) > size:
+            emit()
+            last = current[-1]
+            current = [last] if len(last[0]) + 1 + len(piece[0]) <= size else []
+        current.append(piece)
+    if current:
+        emit()
+    return chunks
+
+
+def focus_line(text: str, keywords: list[str], answer: str) -> tuple[str | None, str]:
+    """片段裡最能回答問題的那一行（時間、去掉時間戳的內容）。
+
+    一個片段有好幾行，點了若只跳到片段開頭，使用者還得自己往下找。依序比：命中的
+    關鍵詞數、與回答共用的二字詞數；都沒有就取第一行。沒時間戳的行沿用上一個時間。
+    """
+    words = [w.lower() for w in keywords if w.strip()]
+    grams = {answer[i : i + 2] for i in range(len(answer) - 1)} - {""}
+    best, best_score, last_time = (None, ""), -1, None
+    for line in text.splitlines():
+        m = _TIME_LABEL.match(line)
+        if m:
+            last_time = m.group(1)
+        content = line[m.end():].strip() if m else line.strip()
+        if not content:
+            continue
+        lowered = content.lower()
+        score = 1000 * sum(w in lowered for w in words) + sum(g in content for g in grams)
+        if score > best_score:
+            best, best_score = (last_time, content), score
+    return best
 
 
 def _record_user(record: dict) -> str:
@@ -126,7 +182,11 @@ class RagIndex:
         # 直接作廢整份索引，下次 sync 用新維度重建。
         if expected is not None and data.get("dim") != expected:
             return []
-        return data.get("records", [])
+        records = data.get("records", [])
+        # 改版前的逐字稿切塊固定 400 字、沒有時間戳，列出的段落跳不回原文 → 整份重建
+        if any("source" not in r for r in records):
+            return []
+        return records
 
     def _flush(self) -> None:
         self._store.save_rag_records(
@@ -144,21 +204,24 @@ class RagIndex:
                 full = store.get_meeting(meeting["id"], user=user) or meeting
                 info = meeting.get("meeting", {})
                 tasks = store.list_tasks(meeting_id=meeting["id"], user=user)
-                texts = [_summary_card(full, tasks)]
-                texts += chunk_text(full.get("transcript") or "")
-                vectors = self._embedder.embed(texts)
-                for text, vector in zip(texts, vectors):
+                pieces = [{"text": _summary_card(full, tasks), "time": None, "source": "summary"}]
+                pieces += [
+                    dict(c, source="transcript")
+                    for c in chunk_transcript(full.get("transcript") or "")
+                ]
+                vectors = self._embedder.embed([p["text"] for p in pieces])
+                for piece, vector in zip(pieces, vectors):
                     self._records.append(
                         {
                             "meeting_id": meeting["id"],
                             "user": user,
                             "title": info.get("title", ""),
                             "date": info.get("date", ""),
-                            "text": text,
+                            **piece,
                             "vector": vector,
                         }
                     )
-                added += len(texts)
+                added += len(pieces)
             if added:
                 self._flush()
             return added
@@ -187,6 +250,16 @@ class RagIndex:
                 self._flush()
             return removed
 
+    def _visible(self, meeting_ids: list[str] | None, user: str) -> list[dict]:
+        with self._lock:
+            # 先擋掉別人的記錄，再套 meeting_ids——順序不能反過來，否則指名
+            # 別人的 meeting_id 就能把對方的片段撈出來
+            records = [r for r in self._records if _record_user(r) == user]
+        if meeting_ids is not None:  # 限定檢索範圍（詢問時複選會議、AI 解析的條件）
+            allowed = set(meeting_ids)
+            records = [r for r in records if r["meeting_id"] in allowed]
+        return records
+
     def search(
         self,
         query: str,
@@ -194,13 +267,7 @@ class RagIndex:
         meeting_ids: list[str] | None = None,
         user: str = DEFAULT_USER,
     ) -> list[dict]:
-        with self._lock:
-            # 先擋掉別人的記錄，再套 meeting_ids——順序不能反過來，否則指名
-            # 別人的 meeting_id 就能把對方的片段撈出來
-            records = [r for r in self._records if _record_user(r) == user]
-        if meeting_ids is not None:  # 限定檢索範圍（詢問時複選會議）
-            allowed = set(meeting_ids)
-            records = [r for r in records if r["meeting_id"] in allowed]
+        records = self._visible(meeting_ids, user)
         if not records:
             return []
         [qvec] = self._embedder.embed([query])
@@ -209,10 +276,35 @@ class RagIndex:
             key=lambda r: r["score"],
             reverse=True,
         )
-        return [
-            {k_: r[k_] for k_ in ("meeting_id", "title", "date", "text", "score")}
-            for r in scored[:k]
-        ]
+        return [_hit(r) for r in scored[:k]]
+
+    def keyword_search(
+        self,
+        keywords: list[str],
+        k: int = 4,
+        meeting_ids: list[str] | None = None,
+        user: str = DEFAULT_USER,
+    ) -> list[dict]:
+        """逐字出現的關鍵詞（不分大小寫），命中越多詞的排越前面。不打 API。
+
+        向量檢索對人名、產品代號、數字這類「要一字不差」的詞很弱，這裡補上。
+        """
+        words = [w.lower() for w in keywords if w.strip()]
+        if not words:
+            return []
+        scored = []
+        for r in self._visible(meeting_ids, user):
+            text = r["text"].lower()
+            count = sum(w in text for w in words)
+            if count:
+                scored.append(dict(r, score=float(count)))
+        scored.sort(key=lambda r: r["score"], reverse=True)  # sort 是穩定的：同分維持原順序
+        return [_hit(r) for r in scored[:k]]
+
+
+def _hit(record: dict) -> dict:
+    fields = ("meeting_id", "title", "date", "text", "time", "source", "score")
+    return {f: record.get(f) for f in fields}
 
 
 # 模型答不出來時要說的固定句。提示規定它、回傳前也用它判斷該不該列來源，所以
@@ -223,15 +315,43 @@ _ASK_PROMPT = f"""你是「會議助手」的問答模組。根據以下歷史�
 
 規則：
 1. 只根據提供的片段回答；找不到答案就直說「{NOT_FOUND_ANSWER}」，禁止編造。
-2. 用繁體中文、3 句以內簡潔回答；人名與專有名詞保留原文寫法。
+2. 用繁體中文簡潔回答（一般 3 句以內；問「哪些會議」時逐場列出）；人名與專有名詞保留原文寫法。
 3. 提到具體事實時，註明出自哪場會議（標題與日期）。
+4. 只輸出 JSON：{{{{"answer": "回答", "cited": [回答實際用到的片段編號]}}}}
 
-會議紀錄片段：
+會議紀錄片段（每段開頭的 [數字] 是片段編號）：
 ---
 {{context}}
 ---
 
 問題：{{question}}"""
+
+# 每次提問送進回答提示的片段上限：語意檢索取前 8、關鍵字補前 4，合併去重後最多這麼多
+SEMANTIC_K, KEYWORD_K, MAX_PASSAGES = 8, 4, 10
+
+
+def parse_answer(raw: str | None) -> tuple[str, list[int]]:
+    """回答與引用的片段編號。模型沒照格式回（純文字）時整段當回答、沒有引用。"""
+    text = (raw or "").strip()
+    try:
+        data = json.loads(strip_code_fence(text))
+    except ValueError:
+        return text, []
+    if not isinstance(data, dict) or not isinstance(data.get("answer"), str):
+        return text, []
+    cited = [n for n in data.get("cited") or [] if isinstance(n, int) and not isinstance(n, bool)]
+    return data["answer"].strip(), cited
+
+
+def _conditions(plan: AskPlan) -> dict | None:
+    if not plan.has_filters:
+        return None
+    return {
+        "date_from": plan.date_from.isoformat() if plan.date_from else None,
+        "date_to": plan.date_to.isoformat() if plan.date_to else None,
+        "kinds": plan.kinds,
+        "people": plan.people,
+    }
 
 
 class AskAgent:
@@ -245,7 +365,8 @@ class AskAgent:
         # 與 Settings.gemini_model 的預設同一顆：高額度、不會飄版本（main.py 仍以設定值覆蓋）
         model: str = "gemini-3.5-flash-lite",
         generate=None,
-        top_k: int = 4,
+        kinds: list[str] | None = None,
+        today=today_local,
     ):
         self._index = index
         self._store = store
@@ -253,8 +374,18 @@ class AskAgent:
         # 每打一次 API 就回報一次，用量統計才會算到重試與換金鑰
         self._on_call = on_call
         self.model = model
-        self.top_k = top_k
         self._generate = generate or self._generate_with_gemini
+        self._kinds = list(kinds or [])
+        self._today = today
+
+    def _plan(self, question: str) -> AskPlan:
+        # 解析條件是加分項：額度、網路、格式任何失敗都退回「不套條件」，不讓提問跟著失敗
+        try:
+            raw = self._generate(build_plan_prompt(question, self._today(), self._kinds))
+        except Exception as exc:
+            logger.warning("問答條件解析失敗，改用原問題檢索：%s", exc)
+            return AskPlan(query=question)
+        return parse_plan(raw, question, self._kinds)
 
     def ask(
         self,
@@ -266,32 +397,73 @@ class AskAgent:
         if not question:
             raise ValueError("問題不可為空")
         self._index.sync(self._store, user=user)
-        hits = self._index.search(
-            question, k=self.top_k, meeting_ids=meeting_ids, user=user
-        )
-        if not hits:
+        meetings = self._store.list_meetings(user=user, include_transcript=True)
+        if meeting_ids is not None:
+            allowed = set(meeting_ids)
+            meetings = [m for m in meetings if m["id"] in allowed]
+        if not meetings:
             message = (
                 "所選會議中沒有可檢索的內容，換個範圍或先分析一場會議吧。"
                 if meeting_ids is not None
                 else "目前還沒有任何會議紀錄可供查詢，先分析一場會議吧。"
             )
-            return {"answer": message, "sources": []}
+            return {"answer": message, "sources": [], "passages": [], "conditions": None}
 
-        context = "\n\n".join(f"【{h['title']}｜{h['date']}】\n{h['text']}" for h in hits)
-        answer = (self._generate(_ASK_PROMPT.format(context=context, question=question)) or "").strip()
+        plan = self._plan(question)
+        conditions = _conditions(plan)
+        ids = [m["id"] for m in meetings]
+        if plan.has_filters:
+            ids = filter_meetings(meetings, self._store.list_tasks(user=user), plan)
+            if not ids:
+                # 不放寬條件去別的會議硬找：答案會來自使用者沒問的會議
+                return {"answer": "沒有符合條件的會議，換個說法或放寬時間、種類、人名再問一次。",
+                        "sources": [], "passages": [], "conditions": conditions}
+
+        hits, seen = [], set()
+        for h in (self._index.search(plan.query, k=SEMANTIC_K, meeting_ids=ids, user=user)
+                  + self._index.keyword_search(plan.keywords, k=KEYWORD_K, meeting_ids=ids, user=user)):
+            key = (h["meeting_id"], h["text"])
+            if key not in seen:
+                seen.add(key)
+                hits.append(h)
+        hits = hits[:MAX_PASSAGES]
+        if not hits:
+            return {"answer": "這些會議中沒有可檢索的內容。", "sources": [], "passages": [],
+                    "conditions": conditions}
+
+        context = "\n\n".join(
+            f"[{i}]【{h['title']}｜{h['date']}{'｜' + h['time'] if h['time'] else ''}】\n{h['text']}"
+            for i, h in enumerate(hits, 1)
+        )
+        answer, cited_nos = parse_answer(
+            self._generate(_ASK_PROMPT.format(context=context, question=question))
+        )
 
         # 檢索一定會回傳最接近的幾筆（再不相干也有分數），所以「有沒有命中」不能
-        # 當判準。答不出來時列來源，等於指著那幾場會議說答案出自那裡
+        # 當判準。答不出來時列來源與段落，等於指著那幾場會議說答案出自那裡
         if NOT_FOUND_ANSWER in answer:
-            return {"answer": answer, "sources": []}
+            return {"answer": answer, "sources": [], "passages": [], "conditions": conditions}
 
-        sources, seen = [], set()
-        for h in hits:
-            if h["meeting_id"] in seen:
+        cited = {n - 1 for n in cited_nos if 1 <= n <= len(hits)}
+        passages = []
+        for i, h in enumerate(hits):
+            time, quote = (
+                focus_line(h["text"], plan.keywords, answer) if h["source"] == "transcript" else (None, "")
+            )
+            passages.append({
+                **{k: h[k] for k in ("meeting_id", "title", "date", "source", "text")},
+                "time": time, "quote": quote, "cited": i in cited,
+            })
+        passages.sort(key=lambda p: not p["cited"])  # 穩定排序：引用的排前面，其餘維持檢索順序
+
+        # 來源＝回答實際引用的會議；模型沒標引用時退回列出所有命中的會議
+        sources, seen_ids = [], set()
+        for p in passages:
+            if (cited and not p["cited"]) or p["meeting_id"] in seen_ids:
                 continue
-            seen.add(h["meeting_id"])
-            sources.append({"meeting_id": h["meeting_id"], "title": h["title"], "date": h["date"]})
-        return {"answer": answer, "sources": sources}
+            seen_ids.add(p["meeting_id"])
+            sources.append({"meeting_id": p["meeting_id"], "title": p["title"], "date": p["date"]})
+        return {"answer": answer, "sources": sources, "passages": passages, "conditions": conditions}
 
     def _generate_with_gemini(self, prompt: str) -> str:
         if not self._pool:
