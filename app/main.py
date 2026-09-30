@@ -43,6 +43,7 @@ from app.glossary import Glossary, clean_terms
 from app.jobs import MediaJobManager
 from app.orchestrator import Orchestrator
 from app.rag import AskAgent, GeminiEmbedder, RagIndex
+from app.speaker_rename import name_problem, rename_meeting_fields, rename_task_fields
 from app.stores import make_store
 from app.transcription import media
 from app.transcription.segments import parse_time_label, replace_term_in_range
@@ -295,6 +296,11 @@ class ReplaceTermRequest(BaseModel):
     add_to_glossary: bool = False
     start: Optional[str] = None  # 時間段下限，如 "12:30"；None/空＝不限
     end: Optional[str] = None    # 時間段上限；只換時間戳落在 [start, end] 的行
+
+
+class RenameSpeakerRequest(BaseModel):
+    old: str
+    new: str
 
 
 class AskRequest(BaseModel):
@@ -836,6 +842,27 @@ def create_app(
                 except ValueError:
                     pass
         return {"meeting": updated, "replaced": count, "glossary_added": added}
+
+    @app.post("/api/meetings/{meeting_id}/rename-speaker")
+    def rename_speaker(meeting_id: str, req: RenameSpeakerRequest):
+        """講者改名：逐字稿講者欄、出席者、摘要與其他 AI 文字、這場會議的任務，一次改完。"""
+        old, new = req.old.strip(), req.new.strip()
+        if not old:
+            raise HTTPException(status_code=400, detail="原名稱不可為空")
+        problem = name_problem(new)
+        if problem:
+            raise HTTPException(status_code=400, detail=problem)
+        user = current_user()
+        record = store.get_meeting(meeting_id, user=user)
+        if record is None:
+            raise HTTPException(status_code=404, detail=f"找不到會議：{meeting_id}")
+        updated = store.update_meeting(meeting_id, rename_meeting_fields(record, old, new), user=user)
+        for task in store.list_tasks(meeting_id, user=user):
+            changed = rename_task_fields(task, old, new)
+            if changed:
+                store.update_task(task["id"], user=user, **changed)
+        drop_from_rag(meeting_id)
+        return {"meeting": updated, "tasks": store.list_tasks(meeting_id, user=user)}
 
     @app.delete("/api/meetings/{meeting_id}")
     def delete_meeting(meeting_id: str):

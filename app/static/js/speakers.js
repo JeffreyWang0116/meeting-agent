@@ -51,55 +51,12 @@ function matchSpeaker(line, labels) {
 
 /* ------------------------------------------------------------------
    講者改名：系統一律標「講者A/B/C」，不從對話內容猜姓名——講者口中的
-   「主席」「王委員」指的是別人，AI 會標錯。由使用者結束後自己替換。
+   「主席」「王委員」指的是別人，AI 會標錯。由使用者結束後自己替換；
+   實際改寫在後端（app/speaker_rename.py），這裡只做輸入當下的檢查。
    ------------------------------------------------------------------ */
-// 行首時間標記。各段放寬成 1~2 位數：模型會吐出 [00] 與 [0:1]（後端 segments.py 同一套規則）
-const TIME_RE = /^\[(\d{1,2}(?::\d{1,2}){0,2})\]\s*/;
-const TIME_SRC = TIME_RE.source.slice(1);  // 去掉 ^，嵌進改名用的 regex
 const MAX_NAME_LEN = 20;
 
-const escapeRe = s => String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-
-// 只換講者欄：內文裡提到的「講者A」是說話內容，「講者AB」是另一個人
-function renameSpeakerInTranscript(text, oldName, newName) {
-  // 具名群組：TIME_SRC 自己帶一個捕捉群組，用位置取會錯位
-  const re = new RegExp(`^(?<head>\\s*(?:${TIME_SRC})?)${escapeRe(oldName)}(?<colon>\\s*[：:])`);
-  return String(text || "").split("\n")
-    .map(line => line.replace(re, (...args) => {
-      const { head, colon } = args[args.length - 1];
-      return head + newName + colon;
-    }))
-    .join("\n");
-}
-
-// 出席者名單：換掉舊名，已經有同名的（兩個代號其實是同一人）就併成一筆
-function renameInList(list, oldName, newName) {
-  return [...new Set((list || []).map(x => (x === oldName ? newName : x)))];
-}
-
-// 摘要等自由文字裡的講者名稱。沒有講者欄可以對，所以要防三種誤換：
-// - 「講者A」撞上「講者AB」、「Speaker 2」撞上「Speaker 20」：英數字頭尾要落在英數字邊界
-// - 新名字包含舊名字（翁曉→翁曉玲）：已經寫對的地方不能再換一次變成「翁曉玲玲」
-// - 單字名（王、林）在中文裡到處都是，不換
-const ASCII_WORD = /[A-Za-z0-9]/;
-function renameInText(text, oldName, newName) {
-  const src = String(text || "");
-  if (!oldName || oldName.length < 2) return src;
-  const within = newName.indexOf(oldName);  // 舊名在新名裡的位置（-1＝不包含）
-  let out = "", from = 0, at;
-  while ((at = src.indexOf(oldName, from)) !== -1) {
-    const end = at + oldName.length;
-    const cutsWord =
-      (ASCII_WORD.test(oldName[0]) && at > 0 && ASCII_WORD.test(src[at - 1])) ||
-      (ASCII_WORD.test(oldName[oldName.length - 1]) && end < src.length && ASCII_WORD.test(src[end]));
-    const alreadyNew = within >= 0 && src.startsWith(newName, at - within);
-    out += src.slice(from, at) + (cutsWord || alreadyNew ? oldName : newName);
-    from = end;
-  }
-  return out + src.slice(from);
-}
-
-// 新名字不合格的原因；合格回空字串。與後端 speaker_names.is_safe_name 同一套
+// 新名字不合格的原因；合格回空字串。與後端 speaker_rename.name_problem 同一套
 function speakerNameProblem(name) {
   const n = String(name || "").trim();
   if (!n) return "名字不可為空";
@@ -108,4 +65,4 @@ function speakerNameProblem(name) {
   return "";
 }
 
-export { LABEL_RE, TIME_RE, matchSpeaker, renameInList, renameInText, renameSpeakerInTranscript, speakerLabels, speakerNameProblem };
+export { LABEL_RE, matchSpeaker, speakerLabels, speakerNameProblem };

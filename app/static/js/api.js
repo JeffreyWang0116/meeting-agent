@@ -43,6 +43,8 @@ const api = {
   deleteMeeting: id => remove(`/api/meetings/${q(id)}`),
   reanalyze: (id, options) => post(`/api/meetings/${q(id)}/reanalyze`, options),
   replaceTerm: (id, payload) => post(`/api/meetings/${q(id)}/replace-term`, payload),
+  renameSpeaker: (id, oldName, newName) =>
+    post(`/api/meetings/${q(id)}/rename-speaker`, { old: oldName, new: newName }),
   meetingKinds: () => get("/api/meeting-kinds"),
 
   // ---- 任務 ----

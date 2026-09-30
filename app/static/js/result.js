@@ -91,7 +91,7 @@ function renderSections(sections) {
     </div>`).join("");
 }
 
-// 改名後只重畫受影響的幾塊（出席者、逐字稿、負責人、講者清單），不重跑整份 renderResult——
+// 改名後只重畫受影響的區塊（出席者、逐字稿、摘要、重點、決議、代辦、待確認、講者清單），不重跑整份 renderResult——
 // 那會重新整理任務庫與會議清單、清掉耗時統計
 let currentResult = null;
 let metaKind = "", metaStats = "";
@@ -136,6 +136,34 @@ function renderTodos(todos) {
     : `<p class="empty-note">未偵測到代辦事項</p>`;
 }
 
+function renderHighlights(highlights) {
+  const show = highlights.length > 0;
+  $("hHighlights").style.display = show ? "flex" : "none";
+  $("rHighlights").style.display = show ? "flex" : "none";
+  $("rHighlights").innerHTML = show
+    ? highlights.map(h => `
+      <li class="hl-item" data-time="${esc(h.time || "")}" data-quote="${esc(h.source_quote || "")}" title="點擊跳到逐字稿出處">
+        <span class="hl-text">${esc(h.text)}</span>
+        ${h.time ? `<span class="hl-time">${esc(h.time)}</span>` : ""}
+      </li>`).join("")
+    : `<p class="empty-note">未擷取到會議重點</p>`;
+}
+
+function renderDecisions(decisions) {
+  const show = decisions.length > 0;
+  $("hDecisions").style.display = show ? "flex" : "none";
+  $("rDecisions").style.display = show ? "flex" : "none";
+  $("rDecisions").innerHTML = show
+    ? decisions.map(d => `<li>${esc(d.description)}${d.context ? ` <span class="ctx">（${esc(d.context)}）</span>` : ""}</li>`).join("")
+    : `<p class="empty-note">本次會議無正式決議</p>`;
+}
+
+function renderPending(items) {
+  $("rPending").innerHTML = items.length
+    ? items.map(p => `<div class="pending-item">${icon("circle-help")}<span>${esc(p.topic)}${p.reason ? `<span class="reason">${esc(p.reason)}</span>` : ""}</span></div>`).join("")
+    : `<p class="empty-note">無</p>`;
+}
+
 function renderResult(result, transcript) {
   $("result").classList.remove("is-loading");
   maybePromoteTerms();
@@ -171,30 +199,10 @@ function renderResult(result, transcript) {
   $("sectionsTitle").textContent = `${$("meetingKind").value}重點`;
   renderSections(a.sections);
 
-  const highlights = a.highlights || [];
-  const showHighlights = highlights.length > 0;
-  $("hHighlights").style.display = showHighlights ? "flex" : "none";
-  $("rHighlights").style.display = showHighlights ? "flex" : "none";
-  $("rHighlights").innerHTML = highlights.length
-    ? highlights.map(h => `
-      <li class="hl-item" data-time="${esc(h.time || "")}" data-quote="${esc(h.source_quote || "")}" title="點擊跳到逐字稿出處">
-        <span class="hl-text">${esc(h.text)}</span>
-        ${h.time ? `<span class="hl-time">${esc(h.time)}</span>` : ""}
-      </li>`).join("")
-    : `<p class="empty-note">未擷取到會議重點</p>`;
-
-  const showDecisions = a.decisions.length > 0;
-  $("hDecisions").style.display = showDecisions ? "flex" : "none";
-  $("rDecisions").style.display = showDecisions ? "flex" : "none";
-  $("rDecisions").innerHTML = a.decisions.length
-    ? a.decisions.map(d => `<li>${esc(d.description)}${d.context ? ` <span class="ctx">（${esc(d.context)}）</span>` : ""}</li>`).join("")
-    : `<p class="empty-note">本次會議無正式決議</p>`;
-
+  renderHighlights(a.highlights || []);
+  renderDecisions(a.decisions);
   renderTodos(a.todos);
-
-  $("rPending").innerHTML = a.pending_items.length
-    ? a.pending_items.map(p => `<div class="pending-item">${icon("circle-help")}<span>${esc(p.topic)}${p.reason ? `<span class="reason">${esc(p.reason)}</span>` : ""}</span></div>`).join("")
-    : `<p class="empty-note">無</p>`;
+  renderPending(a.pending_items);
 
   $("icsLink").href = `/api/meetings/${encodeURIComponent(result.meeting_id)}/events.ics`;
   const events = result.notifications.calendar_events || [];
@@ -306,21 +314,28 @@ $("rSpeakerChips").addEventListener("click", async e => {
   if (!newName) return;
   const a = currentResult.analysis;
   try {
-    const updated = await renameSpeaker(
-      currentResult.meeting_id, { ...a.meeting, transcript: currentTranscript }, oldName, newName);
-    currentTranscript = (updated.transcript || "").trim();
-    currentResult.transcript = updated.transcript;
-    a.meeting.attendees = updated.meeting.attendees || [];
+    const { meeting, tasks } = await renameSpeaker(currentResult.meeting_id, oldName, newName);
+    currentTranscript = (meeting.transcript || "").trim();
+    currentResult.transcript = meeting.transcript;
+    a.meeting.attendees = meeting.meeting.attendees || [];
     if (a.meeting.summary) {
-      a.meeting.summary = updated.meeting.summary;
+      a.meeting.summary = meeting.meeting.summary;
       $("rSummary").textContent = a.meeting.summary || "";
       // 摘要換過了，之前翻好的譯文已經過期
       $("rSummaryTrans").textContent = "";
       $("rSummaryTrans").style.display = "none";
     }
-    a.todos.forEach(t => { if (t.owner === oldName) t.owner = newName; });
+    a.highlights = meeting.highlights || [];
+    a.decisions = meeting.decisions || [];
+    a.pending_items = meeting.pending_items || [];
+    a.sections = meeting.sections || [];
+    a.todos = tasks;  // 任務庫是改名後的最新版本（剛分析完就在任務庫改過的也一併反映）
     renderMeta();
+    renderSections(a.sections);
+    renderHighlights(a.highlights);
+    renderDecisions(a.decisions);
     renderTodos(a.todos);
+    renderPending(a.pending_items);
     renderSpeakers();
     refreshMeetings();
   } catch (err) { showError("講者改名失敗：" + err.message); }

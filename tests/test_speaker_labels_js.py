@@ -93,54 +93,8 @@ process.stdout.write(JSON.stringify({fn}(...{json.dumps(list(args), ensure_ascii
     return json.loads(proc.stdout)
 
 
-def test_rename_only_touches_the_speaker_field():
-    text = "[0:21] 講者A：王委員您好\n講者A：續行\n[2:08] 講者B：謝謝，剛剛講者A問的\n[2:30]講者AB：不是同一人"
-    out = call("renameSpeakerInTranscript", text, "講者A", "翁曉玲")
-    assert out == (
-        "[0:21] 翁曉玲：王委員您好\n翁曉玲：續行\n[2:08] 講者B：謝謝，剛剛講者A問的\n[2:30]講者AB：不是同一人"
-    )
-
-
-def test_rename_accepts_halfwidth_colon_and_leading_spaces():
-    out = call("renameSpeakerInTranscript", "  [1:02:03] Speaker 2: hi", "Speaker 2", "Kevin Lin")
-    assert out == "  [1:02:03] Kevin Lin: hi"
-
-
-def test_rename_treats_regex_characters_literally():
-    out = call("renameSpeakerInTranscript", "A.B：x\nAxB：y", "A.B", "王")
-    assert out == "王：x\nAxB：y"
-
-
-def test_attendees_are_renamed_without_duplicates():
-    assert call("renameInList", ["講者A", "講者B", "翁曉玲"], "講者A", "翁曉玲") == ["翁曉玲", "講者B"]
-
-
 def test_speaker_name_validation_blocks_names_that_break_the_transcript():
-    """冒號會在行首造出假講者、換行會拆行、方括號會被當成時間標記——與後端 is_safe_name 同一套。"""
+    """冒號會在行首造出假講者、換行會拆行、方括號會被當成時間標記——與後端 speaker_rename.name_problem 同一套。"""
     for bad in ["", "  ", "王委員：他說", "a:b", "兩\n行", "[1:00]", "王" * 21]:
         assert call("speakerNameProblem", bad), bad
     assert call("speakerNameProblem", " 翁曉玲 ") == ""
-
-
-# ---- 摘要跟著改名：摘要是自由文字，沒有講者欄可以對，要防誤換 ----
-
-def test_summary_code_is_replaced_but_not_a_longer_code():
-    text = "講者A質疑調查案件偏少，講者B回應；講者AB未發言。Speaker 2 agreed, Speaker 20 left."
-    assert call("renameInText", text, "講者A", "翁曉玲") == (
-        "翁曉玲質疑調查案件偏少，講者B回應；講者AB未發言。Speaker 2 agreed, Speaker 20 left."
-    )
-    assert "Kevin agreed, Speaker 20 left" in call("renameInText", text, "Speaker 2", "Kevin")
-
-
-def test_summary_rename_does_not_double_up_when_new_name_contains_old():
-    """把「翁曉」改成「翁曉玲」時，摘要裡已經寫對的「翁曉玲」不能變成「翁曉玲玲」。"""
-    assert call("renameInText", "翁曉提問，翁曉玲追問", "翁曉", "翁曉玲") == "翁曉玲提問，翁曉玲追問"
-
-
-def test_summary_rename_skips_single_character_names():
-    """單字名在中文裡到處都是（「王」「林」），整段取代會誤傷。"""
-    assert call("renameInText", "王委員說明，王先生補充", "王", "王榮璋") == "王委員說明，王先生補充"
-
-
-def test_summary_rename_handles_empty_text():
-    assert call("renameInText", None, "講者A", "翁曉玲") == ""

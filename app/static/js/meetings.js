@@ -6,7 +6,7 @@ import { refreshReminders, remindersLoaded, renderReminders } from "./reminders.
 import { copyWithFeedback } from "./result.js";
 import { correctTypos } from "./setup.js";
 import { refreshTasks, renderTasks, tasksLoaded } from "./tasks.js";
-import { renameInList, renameInText, renameSpeakerInTranscript, speakerLabels, speakerNameProblem } from "./speakers.js";
+import { speakerLabels, speakerNameProblem } from "./speakers.js";
 import { TIME_RE, jumpToTranscript, renderChat } from "./transcript.js";
 
 let meetingsLoaded = false;
@@ -47,22 +47,13 @@ function askSpeakerName(oldName) {
   return newName;
 }
 
-// 改名：逐字稿講者欄＋出席者＋摘要＋負責人剛好是舊代號的任務。回傳更新後的會議紀錄。
-// 重點、決議等其他 AI 文字不動（使用者選定的範圍）；負責人在會議中有講出姓名時本來就不是代號
-async function renameSpeaker(id, { transcript, attendees, summary }, oldName, newName) {
-  const fields = {
-    transcript: renameSpeakerInTranscript(transcript, oldName, newName),
-    attendees: renameInList(attendees, oldName, newName),
-  };
-  // 沒產出摘要的種類（或關掉摘要）不送這個欄位，免得把 null 寫成空字串
-  if (summary) fields.summary = renameInText(summary, oldName, newName);
-  const updated = await api.updateMeeting(id, fields);
-  meetingDetailCache[id] = updated;
-  // 直接查一次任務：剛分析完就改名時，任務庫的清單可能還沒載進來
-  const { tasks } = await api.listTasks();
-  const owned = tasks.filter(t => t.meeting_id === id && t.owner === oldName);
-  for (const t of owned) await api.updateTask(t.id, { owner: newName });
-  if (owned.length) { refreshTasks(); refreshReminders(); }
+// 改名：逐字稿講者欄、出席者、摘要、重點、決議、待確認、種類欄位，以及這場會議的任務
+// （負責人、任務名稱、優先原因）。引用原句不動，否則跳不回逐字稿出處。回傳 { meeting, tasks }
+async function renameSpeaker(id, oldName, newName) {
+  const updated = await api.renameSpeaker(id, oldName, newName);
+  meetingDetailCache[id] = updated.meeting;
+  refreshTasks();
+  refreshReminders();
   return updated;
 }
 
@@ -410,7 +401,7 @@ $("meetingRows").addEventListener("click", async e => {
     const newName = askSpeakerName(oldName);
     if (!newName) return;
     try {
-      await renameSpeaker(id, { ...d.meeting, transcript: d.transcript }, oldName, newName);
+      await renameSpeaker(id, oldName, newName);
       // 摘要換過了，之前翻好的譯文已經過期
       const trans = document.getElementById("dSummaryTrans");
       if (trans) { trans.textContent = ""; trans.style.display = "none"; }
