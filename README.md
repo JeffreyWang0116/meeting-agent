@@ -135,30 +135,71 @@
 
 ## 快速開始
 
-### 1. 前置需求（開發機已完成安裝）
+Windows、macOS、Linux 都能跑。CI 每次 push 都在 Ubuntu 上跑完整測試；Windows 是主要開發機；macOS 依同一套步驟，但沒有 NVIDIA GPU，建議直接用 Gemini 轉錄（見下方「轉錄引擎怎麼選」）。
 
-- Python 3.13（Windows Store 版），虛擬環境在 `.venv/`
-- ffmpeg（已用 `winget install Gyan.FFmpeg` 裝好；新開的終端機才抓得到 PATH）
-- NVIDIA GPU 可加速轉錄；偵測不到 CUDA 會自動退回 CPU（功能不變，速度較慢）
+### 1. 前置需求
 
-### 2. 設定 Gemini API 金鑰
+| | Windows | macOS | Linux（Debian／Ubuntu） |
+|---|---|---|---|
+| Python 3.12 以上 | [python.org](https://www.python.org/downloads/) 或 Microsoft Store | `brew install python@3.12` | `sudo apt install python3 python3-venv` |
+| ffmpeg（音檔／影片轉錄必備） | `winget install Gyan.FFmpeg`（裝完要**新開**終端機才抓得到 PATH） | `brew install ffmpeg` | `sudo apt install ffmpeg` |
+| Node.js（選用，只有前端講者判斷的測試用得到，沒裝會自動跳過） | `winget install OpenJS.NodeJS.LTS` | `brew install node` | `sudo apt install nodejs` |
+
+### 2. 建立虛擬環境、安裝套件
+
+Windows（PowerShell）：
+
+```powershell
+python -m venv .venv
+.venv\Scripts\python -m pip install -r requirements.txt
+```
+
+macOS／Linux：
+
+```bash
+python3 -m venv .venv
+.venv/bin/python -m pip install -r requirements.txt
+```
+
+`requirements.txt` 含本地 Whisper 轉錄（faster-whisper）。只打算用 Gemini 轉錄的話，改裝精簡版 `requirements-cloud.lock` 再補 `pip install pytest httpx ruff`——雲端部署與 CI 用的就是這份，安裝快很多。
+
+### 3. 設定 Gemini API 金鑰
 
 1. 到 <https://aistudio.google.com/apikey> 建立金鑰（免費）
 2. 複製 `.env.example` 為 `.env`，填入 `GEMINI_API_KEY=你的金鑰`
    （有多把想輪替，改填 `GEMINI_API_KEYS=key1,key2,...`，逗號分隔）
 
-### 3. 啟動
+**轉錄引擎怎麼選**（`.env` 的 `TRANSCRIBE_ENGINE`）：
+
+- 有 NVIDIA GPU（Windows／Linux）：`local`，本地 faster-whisper，離線、不耗 API 額度。Windows 上 pip 裝的 CUDA DLL 會自動註冊；偵測不到 CUDA 會退回 CPU（功能不變，速度較慢）
+- 沒有 NVIDIA GPU（包含所有 Mac）：`gemini`。CPU 跑 Whisper 可行但很慢，一小時的會議可能要轉很久
+
+### 4. 啟動
 
 ```powershell
+# Windows
 .venv\Scripts\python -m uvicorn app.main:app --port 8000
+```
+
+```bash
+# macOS／Linux
+.venv/bin/python -m uvicorn app.main:app --port 8000
 ```
 
 打開 <http://localhost:8000> ，頁面上方會顯示環境狀態（金鑰、ffmpeg、Whisper 裝置）。
 
-### 4. 測試
+不想在本機裝 Python：repo 附的 `Dockerfile` 就是雲端部署用的映像（已含 ffmpeg、預設 Gemini 轉錄），`docker build -t meeting-agent . && docker run -p 8000:8000 --env-file .env meeting-agent` 在任何作業系統都一樣。
+
+### 5. 測試
 
 ```powershell
+# Windows
 .venv\Scripts\python -m pytest tests -q
+```
+
+```bash
+# macOS／Linux
+.venv/bin/python -m pytest tests -q
 ```
 
 所有測試都不需要網路、不需要 API 金鑰、不會載入 Whisper 模型（Gemini 與 Whisper 皆以注入的假物件測試）。
@@ -281,6 +322,30 @@ repo 已附 `Dockerfile`（含 ffmpeg）、`requirements-cloud.txt`（精簡依�
 - `db.json` — 任務庫（會議 + 攤平的任務）
 - `notifications/<meeting_id>/email_draft.txt` — 確認信草稿全文
 - `notifications/<meeting_id>/calendar_events.json` — Google Calendar `events.insert` 可直接使用的事件格式
+
+## 量化評估：代辦事項抽取
+
+`eval/dataset.jsonl` 是 10 段人工標注的模擬會議（專題、行銷、工程站會、社團、客戶訪談等，中英夾雜），`eval/run.py` 用真實 Gemini 抽代辦，再跟標注比對。每題 1 次請求，結果寫進 `eval/report.md`。
+
+```powershell
+.venv\Scripts\python -m eval.run            # macOS／Linux 用 .venv/bin/python
+```
+
+2026-09-30，`gemini-3.5-flash-lite`，比對門檻 0.5：
+
+| 指標 | 數值 | 意思 |
+|---|---|---|
+| Precision | **0.857** | AI 列出的代辦，85.7% 是真的代辦（抓錯約 1.5 成） |
+| Recall | **0.818** | 該抓的代辦，抓到 81.8%（漏掉約 2 成） |
+| F1 | **0.837** | 兩者的調和平均 |
+| 負責人正確率 | **0.944** | 抓對的代辦中，負責人寫對的比例 |
+| 期限正確率 | **1.000** | 抓對的代辦中，期限（含「下週一」這類相對日期換算）寫對的比例 |
+
+解讀時要知道的三件事：
+
+- **比對規則偏嚴，數字是保守值**：任務名稱用字元順序的相似度比對，同一件事換個語序就對不上。例如 AI 寫「完成海報設計」、標注是「設計活動海報」，相似度只有 0.33，被算成「漏掉一個＋抓錯一個」。10 題裡被扣分的 3 題，逐題核對後至少 1 題屬於這種情況
+- **沒人認領的事項是灰色地帶**：「便當誰訂？先放著」標注成代辦（負責人空白），AI 把它當成未決事項沒列進代辦；「2FA 要導入，但先確認用哪家」AI 抽成「確認要用哪家 2FA 方案」。這兩種寫法都說得通
+- **同一題每次跑結果會有差**：`product-planning` 第一次抓對 2/3、重跑抓對 3/3。10 題的樣本很小，要引用請一併說明題數；要更穩的數字，多跑幾次取平均
 
 ## 設計決策備忘
 
