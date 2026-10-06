@@ -314,7 +314,9 @@ $("rSpeakerChips").addEventListener("click", async e => {
   if (!newName) return;
   const a = currentResult.analysis;
   try {
-    const { meeting, tasks } = await renameSpeaker(currentResult.meeting_id, oldName, newName);
+    const { meeting, tasks, email_draft } = await renameSpeaker(currentResult.meeting_id, oldName, newName);
+    // 主旨只有標題與日期，改名不影響；內文的出席者、負責人等要換成改名後的版本
+    if (email_draft) $("rDraft").textContent = email_draft;
     currentTranscript = (meeting.transcript || "").trim();
     currentResult.transcript = meeting.transcript;
     a.meeting.attendees = meeting.meeting.attendees || [];

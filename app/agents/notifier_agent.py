@@ -87,6 +87,30 @@ def build_email_draft(analysis: MeetingAnalysis) -> str:
     return "\n".join(lines)
 
 
+def email_draft_from_record(record: dict, tasks: list[dict]) -> str:
+    """用已存的會議紀錄與任務庫現況重產確認信草稿（講者改名後用）。
+
+    代辦取任務庫而非分析當下的版本：使用者在任務庫改過期限、刪過任務，信裡要是現況。
+    任務庫把清空的期限存成空字串，日期欄位不收，要先轉成 None。
+    """
+    todos = [
+        {
+            "task": t.get("task") or "",
+            "owner": t.get("owner"),
+            "due_date": t.get("due_date") or None,
+            "priority": t.get("priority") or "medium",
+        }
+        for t in tasks
+    ]
+    analysis = MeetingAnalysis.model_validate({
+        "meeting": record.get("meeting") or {},
+        "decisions": record.get("decisions") or [],
+        "todos": todos,
+        "pending_items": record.get("pending_items") or [],
+    })
+    return build_email_draft(analysis)
+
+
 def build_calendar_events(analysis: MeetingAnalysis, meeting_id: str = "") -> list[dict]:
     """產生 Google Calendar API events.insert 可直接使用的全天事件。"""
     events = []

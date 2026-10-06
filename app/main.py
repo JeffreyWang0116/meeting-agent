@@ -16,7 +16,7 @@ from typing import Optional
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from app.agents.corrector_agent import CorrectorAgent
 from app.agents.decision_agent import (
@@ -32,7 +32,7 @@ from app.agents.decision_agent import (
     default_features_for_kind,
 )
 from app.agents.executor_agent import ExecutorAgent
-from app.agents.notifier_agent import NotifierAgent
+from app.agents.notifier_agent import NotifierAgent, email_draft_from_record
 from app.agents.parser_agent import ParserAgent
 from app.agents.reminder_agent import scan as scan_reminders
 from app.auth import CURRENT_USER, AuthError, bearer_token, verify_firebase_id_token
@@ -863,7 +863,15 @@ def create_app(
             if changed:
                 store.update_task(task["id"], user=user, **changed)
         drop_from_rag(meeting_id)
-        return {"meeting": updated, "tasks": store.list_tasks(meeting_id, user=user)}
+        tasks = store.list_tasks(meeting_id, user=user)
+        # 確認信草稿是分析當下產的，不重產的話出席者、負責人還是舊代號。
+        # 草稿是附帶的：舊資料湊不出合法的分析結構就不重產，改名本身已經成功
+        try:
+            email_draft = email_draft_from_record(updated, tasks)
+        except ValidationError as exc:
+            logger.warning("改名後重產確認信失敗（會議 %s）：%s", meeting_id, exc)
+            email_draft = None
+        return {"meeting": updated, "tasks": tasks, "email_draft": email_draft}
 
     @app.delete("/api/meetings/{meeting_id}")
     def delete_meeting(meeting_id: str):

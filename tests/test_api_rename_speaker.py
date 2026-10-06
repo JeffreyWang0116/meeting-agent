@@ -97,3 +97,25 @@ def test_rename_rejects_bad_names_and_unknown_meeting(client):
     assert rename(client, "nope", "講者A", "翁曉玲").status_code == 404
     # 被擋下的請求不能留下半套改動
     assert client.get(f"/api/meetings/{mid}").json()["meeting"]["attendees"] == ["講者A", "講者B"]
+
+
+def test_rename_returns_a_rebuilt_email_draft(client):
+    """確認信草稿是分析當下產的，不重產的話出席者、負責人還是「講者A」。"""
+    mid = make_meeting(client)
+    draft = rename(client, mid, "講者A", "翁曉玲").json()["email_draft"]
+    attendees = draft.split("■ 出席者\n")[1].split("\n")[0]
+    assert attendees == "翁曉玲、講者B"
+    assert "翁曉玲 提供報價單｜負責人：翁曉玲" in draft
+    assert "翁曉玲質疑預算" in draft
+    assert "講者A" not in draft
+
+
+def test_rebuilt_draft_reflects_task_library_edits(client):
+    """改名前在任務庫改過期限、刪過任務，草稿要跟著現況，而不是分析當下的版本。"""
+    mid = make_meeting(client)
+    t1, t2 = client.get("/api/tasks").json()["tasks"]
+    client.patch(f"/api/tasks/{t1['id']}", json={"due_date": ""})  # 期限清空存的是空字串
+    client.delete(f"/api/tasks/{t2['id']}")
+    draft = rename(client, mid, "講者A", "翁曉玲").json()["email_draft"]
+    assert "翁曉玲 提供報價單｜負責人：翁曉玲｜期限：未定" in draft
+    assert "整理紀錄" not in draft
