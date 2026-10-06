@@ -39,6 +39,7 @@ function markAnalysisStart() { analysisStartTime = Date.now(); }
 function showResultSkeleton() {
   if ($("result").classList.contains("is-loading")) return;  // 輪詢會重複呼叫，別一直把畫面捲回頂端
   const lines = n => Array.from({ length: n }, (_, i) => skelLine(`${94 - i * 12}%`)).join("");
+  $("btnBackHistory").hidden = true;  // 新分析開始了，畫面不再是那場歷史會議
   $("rTitle").innerHTML = skelLine("46%");
   $("rMeta").innerHTML = `${skelLine("92px")}${skelLine("64px")}${skelLine("120px")}`;
   $("rSummary").innerHTML = lines(3);
@@ -100,7 +101,7 @@ function renderMeta() {
   const a = currentResult.analysis, m = a.meeting;
   $("rMeta").innerHTML =
     `<span class="meta-chip">${icon("calendar", "i-sm")}${esc(m.date)}</span>` +
-    `<span class="meta-chip">${esc(metaKind)}</span>` +
+    (metaKind ? `<span class="meta-chip">${esc(metaKind)}</span>` : "") +
     (m.attendees || []).map(p => `<span class="meta-chip">${icon("user", "i-sm")}${esc(p)}</span>`).join("") +
     (a.tags || []).map(t => `<span class="meta-chip"><span class="mtag">${esc(t)}</span></span>`).join("") +
     metaStats;
@@ -164,9 +165,13 @@ function renderPending(items) {
     : `<p class="empty-note">無</p>`;
 }
 
-function renderResult(result, transcript) {
+// fromHistory：從歷史會議點「完整檢視」進來。那不是一次新分析，所以不把這次的專用詞彙
+// 升級進詞彙表、不重整各清單，種類用會議自己存的（不是新會議表單上目前選的）
+function renderResult(result, transcript, { kind = null, fromHistory = false } = {}) {
   $("result").classList.remove("is-loading");
-  maybePromoteTerms();
+  if (!fromHistory) maybePromoteTerms();
+  historyMeetingId = fromHistory ? result.meeting_id : null;
+  $("btnBackHistory").hidden = !fromHistory;
   currentResult = result;
   // 後端校正過的話，result.transcript 才是最終版本（傳進來的可能是校正前的）
   currentTranscript = (result.transcript || transcript || "").trim();
@@ -182,7 +187,7 @@ function renderResult(result, transcript) {
   metaStats =
     `<span class="meta-chip stats-chip">${currentTranscript ? `${currentTranscript.length} 字 → ` : ""}` +
     `${a.todos.length} 任務・${a.decisions.length} 決議${elapsed ? `・${elapsed}s` : ""}</span>`;
-  metaKind = $("meetingKind").value;
+  metaKind = fromHistory ? kind || "" : $("meetingKind").value;
   $("rTitle").textContent = m.title;
   renderMeta();
   // 摘要／重點／決議／代辦：這場會議的種類沒產出這個區塊時整節隱藏。
@@ -196,7 +201,7 @@ function renderResult(result, transcript) {
   $("rSummaryTrans").textContent = "";
   $("transSummaryLabel").textContent = /[一-鿿]/.test(m.summary || "") ? "譯成英文" : "譯成中文";
 
-  $("sectionsTitle").textContent = `${$("meetingKind").value}重點`;
+  $("sectionsTitle").textContent = metaKind ? `${metaKind}重點` : "重點欄位";
   renderSections(a.sections);
 
   renderHighlights(a.highlights || []);
@@ -216,10 +221,19 @@ function renderResult(result, transcript) {
   $("result").style.display = "flex";
   $("navResult").hidden = false;
   showView("result");
+  if (fromHistory) return;
   refreshTasks();
   refreshMeetings();
   refreshReminders();
 }
+
+// 返回歷史會議：回到原本那一頁，並把剛剛看的那場捲到眼前
+let historyMeetingId = null;
+$("btnBackHistory").addEventListener("click", () => {
+  showView("meeting");
+  const row = historyMeetingId && document.querySelector(`.view-full[data-id="${CSS.escape(historyMeetingId)}"]`);
+  if (row) row.closest(".meeting-item").scrollIntoView({ block: "center" });
+});
 
 // 複製按鈕通用行為：複製後短暫顯示「已複製」
 async function copyWithFeedback(btn, text) {

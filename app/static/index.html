@@ -411,6 +411,11 @@
       <section class="view" id="view-result">
         <div class="panel" id="result">
           <div class="report-head">
+            <!-- 從歷史會議點「完整檢視」進來才顯示 -->
+            <button class="ghost back-btn" id="btnBackHistory" hidden>
+              <svg class="i i-sm" aria-hidden="true"><use href="/static/icons.svg#chevron-left"/></svg>
+              返回歷史會議
+            </button>
             <h2 id="rTitle"></h2>
             <div class="meta-chips" id="rMeta"></div>
             <!-- 講者一律標代號（系統不猜姓名），由使用者在這裡自己換成真名 -->

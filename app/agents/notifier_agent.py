@@ -87,8 +87,8 @@ def build_email_draft(analysis: MeetingAnalysis) -> str:
     return "\n".join(lines)
 
 
-def email_draft_from_record(record: dict, tasks: list[dict]) -> str:
-    """用已存的會議紀錄與任務庫現況重產確認信草稿（講者改名後用）。
+def analysis_from_record(record: dict, tasks: list[dict]) -> MeetingAnalysis:
+    """用已存的會議紀錄與任務庫現況組回分析結果（講者改名、歷史會議完整檢視用）。
 
     代辦取任務庫而非分析當下的版本：使用者在任務庫改過期限、刪過任務，信裡要是現況。
     任務庫把清空的期限存成空字串，日期欄位不收，要先轉成 None。
@@ -99,16 +99,31 @@ def email_draft_from_record(record: dict, tasks: list[dict]) -> str:
             "owner": t.get("owner"),
             "due_date": t.get("due_date") or None,
             "priority": t.get("priority") or "medium",
+            "source_quote": t.get("source_quote"),
         }
         for t in tasks
     ]
-    analysis = MeetingAnalysis.model_validate({
+    return MeetingAnalysis.model_validate({
         "meeting": record.get("meeting") or {},
         "decisions": record.get("decisions") or [],
         "todos": todos,
         "pending_items": record.get("pending_items") or [],
     })
-    return build_email_draft(analysis)
+
+
+def email_draft_from_record(record: dict, tasks: list[dict]) -> str:
+    return build_email_draft(analysis_from_record(record, tasks))
+
+
+def notifications_from_record(record: dict, tasks: list[dict]) -> dict:
+    """與 NotifierAgent.notify 回傳同一個形狀，但不寫檔。事件 id 只看會議與任務名稱，
+    任務沒改名就與分析當下相同，「先前已加過」的判斷照樣有效。"""
+    analysis = analysis_from_record(record, tasks)
+    return {
+        "email_draft": build_email_draft(analysis),
+        "email_subject": build_email_subject(analysis),
+        "calendar_events": build_calendar_events(analysis, record["id"]),
+    }
 
 
 def build_calendar_events(analysis: MeetingAnalysis, meeting_id: str = "") -> list[dict]:

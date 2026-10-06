@@ -32,7 +32,7 @@ from app.agents.decision_agent import (
     default_features_for_kind,
 )
 from app.agents.executor_agent import ExecutorAgent
-from app.agents.notifier_agent import NotifierAgent, email_draft_from_record
+from app.agents.notifier_agent import NotifierAgent, email_draft_from_record, notifications_from_record
 from app.agents.parser_agent import ParserAgent
 from app.agents.reminder_agent import scan as scan_reminders
 from app.auth import CURRENT_USER, AuthError, bearer_token, verify_firebase_id_token
@@ -1144,6 +1144,19 @@ def create_app(
             media_type="text/markdown; charset=utf-8",
             headers={"Content-Disposition": f'attachment; filename="meeting-{meeting_id}.md"'},
         )
+
+    @app.get("/api/meetings/{meeting_id}/notifications")
+    def meeting_notifications(meeting_id: str):
+        """歷史會議用分析結果視窗完整檢視時，重產確認信與行事曆事件（不打 API）。"""
+        user = current_user()
+        record = store.get_meeting(meeting_id, user=user)
+        if record is None:
+            raise HTTPException(status_code=404, detail=f"找不到會議：{meeting_id}")
+        try:
+            return notifications_from_record(record, store.list_tasks(meeting_id, user=user))
+        except ValidationError as exc:
+            logger.warning("重產確認信失敗（會議 %s）：%s", meeting_id, exc)
+            raise HTTPException(status_code=422, detail="這場會議的資料不完整，無法產生確認信與行事曆事件")
 
     @app.get("/api/meetings/{meeting_id}/events.ics")
     def meeting_events_ics(meeting_id: str):

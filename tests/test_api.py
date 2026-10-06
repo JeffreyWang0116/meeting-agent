@@ -391,6 +391,31 @@ def test_delete_meeting_removes_meeting_and_tasks(client):
     assert client.delete(f"/api/meetings/{meeting_id}").status_code == 404
 
 
+def test_meeting_notifications_rebuild_draft_and_events_from_stored_meeting(client):
+    """歷史會議用分析結果視窗完整檢視時，確認信與行事曆事件要從已存的資料重產。"""
+    first = client.post("/api/meetings", json={"text": "志明下週一交 prompt"}).json()
+    meeting_id = first["meeting_id"]
+    body = client.get(f"/api/meetings/{meeting_id}/notifications").json()
+
+    assert body["email_subject"] == first["notifications"]["email_subject"]
+    assert "■ 出席者\n陳志明、Kevin" in body["email_draft"]
+    # 事件 id 要跟分析當下一樣，否則加過行事曆的那幾筆認不出來、再按會重複
+    assert [e["id"] for e in body["calendar_events"]] == [
+        e["id"] for e in first["notifications"]["calendar_events"]
+    ]
+    assert body["calendar_events"]
+
+
+def test_meeting_notifications_follow_task_library_and_404(client):
+    meeting_id = make_meeting(client)
+    task = client.get("/api/tasks").json()["tasks"][0]
+    client.patch(f"/api/tasks/{task['id']}", json={"due_date": ""})
+    body = client.get(f"/api/meetings/{meeting_id}/notifications").json()
+    assert body["calendar_events"] == []  # 期限清空就沒有事件
+    assert "期限：未定" in body["email_draft"]
+    assert client.get("/api/meetings/nope/notifications").status_code == 404
+
+
 def test_reanalyze_meeting_updates_analysis_and_replaces_tasks(client):
     meeting_id = make_meeting(client)
     old_task_ids = {t["id"] for t in client.get("/api/tasks").json()["tasks"]}

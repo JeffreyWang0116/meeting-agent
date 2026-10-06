@@ -897,6 +897,7 @@
     .report-side .transcript-full { max-height: 320px; }
   }
   .report-head { display: flex; flex-direction: column; gap: 12px; }
+  .report-head .back-btn { align-self: flex-start; }
   .report-head h2 { margin: 0; font-size: 1.7rem; font-weight: 300; letter-spacing: -.025em; text-wrap: balance; }
   .meta-chips { display: flex; gap: 8px; flex-wrap: wrap; }
   .meta-chip {

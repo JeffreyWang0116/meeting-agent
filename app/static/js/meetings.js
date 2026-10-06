@@ -3,7 +3,7 @@ import { renderAskScope } from "./ask.js";
 import { $, PAGE_SIZE, esc, icon, loadFail, pageNo, paginate, registerPager, registerRefresher, renderPager, showError, showNotice } from "./core.js";
 import { renderHome } from "./home.js";
 import { refreshReminders, remindersLoaded, renderReminders } from "./reminders.js";
-import { copyWithFeedback } from "./result.js";
+import { copyWithFeedback, renderResult } from "./result.js";
 import { correctTypos } from "./setup.js";
 import { refreshTasks, renderTasks, tasksLoaded } from "./tasks.js";
 import { speakerLabels, speakerNameProblem } from "./speakers.js";
@@ -189,6 +189,7 @@ function renderMeetings() {
           </span>
           <span class="meeting-ops">
             <button class="ghost view-meeting" data-id="${esc(m.id)}">${m.id === expandedMeetingId ? "收合" : "查閱"}</button>
+            <button class="ghost view-full" data-id="${esc(m.id)}" title="用分析結果的版面開啟：代辦卡片、行事曆、確認信、雙欄逐字稿">完整檢視</button>
             <a class="ghost btn-link" href="/api/meetings/${esc(m.id)}/report.md" download>下載</a>
             <button class="del-btn del-meeting" data-id="${esc(m.id)}" title="刪除此會議與其任務" aria-label="刪除">${icon("x", "i-sm")}</button>
           </span>
@@ -223,6 +224,32 @@ async function refreshMeetings() {
   }
 }
 
+// 完整檢視：用分析結果的視窗開歷史會議。代辦取任務庫現況，確認信與行事曆事件由後端依現況重產
+async function openMeetingFull(id) {
+  try {
+    const [d, { tasks }, notifications] = await Promise.all([
+      meetingDetailCache[id] ? Promise.resolve(meetingDetailCache[id]) : api.getMeeting(id),
+      api.listTasks(),
+      api.meetingNotifications(id),
+    ]);
+    meetingDetailCache[id] = d;
+    renderResult({
+      meeting_id: id,
+      transcript: d.transcript,
+      analysis: {
+        meeting: d.meeting,
+        decisions: d.decisions || [],
+        todos: tasks.filter(t => t.meeting_id === id),
+        pending_items: d.pending_items || [],
+        highlights: d.highlights || [],
+        sections: d.sections || [],
+        tags: d.tags || [],
+      },
+      notifications,
+    }, d.transcript, { kind: d.kind, fromHistory: true });
+  } catch (err) { showError("開啟會議失敗：" + err.message); }
+}
+
 async function openMeetingDetail(id) {
   focusMeetingPage(id);
   expandedMeetingId = id;
@@ -251,6 +278,8 @@ function meetingShareText(d) {
 }
 
 $("meetingRows").addEventListener("click", async e => {
+  const full = e.target.closest(".view-full");
+  if (full) { openMeetingFull(full.dataset.id); return; }
   const view = e.target.closest(".view-meeting");
   if (view) {
     if (expandedMeetingId === view.dataset.id) { expandedMeetingId = null; renderMeetings(); }

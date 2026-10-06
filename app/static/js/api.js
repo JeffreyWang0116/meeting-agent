@@ -41,6 +41,7 @@ const api = {
   getMeeting: id => get(`/api/meetings/${q(id)}`),
   updateMeeting: (id, fields) => patch(`/api/meetings/${q(id)}`, fields),
   deleteMeeting: id => remove(`/api/meetings/${q(id)}`),
+  meetingNotifications: id => get(`/api/meetings/${q(id)}/notifications`),
   reanalyze: (id, options) => post(`/api/meetings/${q(id)}/reanalyze`, options),
   replaceTerm: (id, payload) => post(`/api/meetings/${q(id)}/replace-term`, payload),
   renameSpeaker: (id, oldName, newName) =>
