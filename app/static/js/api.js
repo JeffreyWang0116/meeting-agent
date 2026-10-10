@@ -48,6 +48,18 @@ const api = {
     post(`/api/meetings/${q(id)}/rename-speaker`, { old: oldName, new: newName }),
   meetingKinds: () => get("/api/meeting-kinds"),
 
+  // ---- 群組工作區 ----
+  groups: () => get("/api/groups"),
+  createGroup: name => post("/api/groups", { name }),
+  renameGroup: (id, name) => patch(`/api/groups/${q(id)}`, { name }),
+  disbandGroup: id => remove(`/api/groups/${q(id)}`),
+  inviteToGroup: (id, email, role) => post(`/api/groups/${q(id)}/invites`, { email, role }),
+  revokeInvite: (id, email) => remove(`/api/groups/${q(id)}/invites/${q(email)}`),
+  acceptInvite: id => post(`/api/groups/${q(id)}/accept`),
+  declineInvite: id => post(`/api/groups/${q(id)}/decline`),
+  setMemberRole: (id, uid, role) => patch(`/api/groups/${q(id)}/members/${q(uid)}`, { role }),
+  removeMember: (id, uid) => remove(`/api/groups/${q(id)}/members/${q(uid)}`),
+
   // ---- 任務 ----
   listTasks: () => get("/api/tasks"),
   createTask: task => post("/api/tasks", task),

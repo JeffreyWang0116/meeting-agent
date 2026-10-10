@@ -41,12 +41,14 @@ class FirestoreStore(TaskStore):
         tasks: str = "tasks",
         meta: str = "meta",
         rag: str = "rag_records",
+        groups: str = "groups",
     ):
         self._db = db
         self._meetings = meetings
         self._tasks = tasks
         self._meta = meta
         self._rag = rag
+        self._groups = groups
         self._lock = threading.Lock()
         self._backfill_lock = threading.Lock()  # 與 _lock 分開，才能在鎖內安全呼叫
         self._backfilled = False
@@ -312,6 +314,28 @@ class FirestoreStore(TaskStore):
     # 為什麼不塞進單一 meta 文件：Firestore 單一文件上限 1MB，而一筆記錄光
     # 768 維向量就好幾 KB，幾十場會議就會撞上。文件 id 用「會議 id + 該場的
     # 序號」，刪掉一場會議時才找得到要刪哪些。
+
+    # ---- 群組：member_uids／invite_emails 是給單欄位 array_contains 查詢用的，不必建複合索引 ----
+
+    def save_group(self, group: dict) -> None:
+        self._db.collection(self._groups).document(group["id"]).set(dict(group))
+
+    def get_group(self, group_id: str) -> dict | None:
+        snap = self._db.collection(self._groups).document(group_id).get()
+        return snap.to_dict() if snap.exists else None
+
+    def delete_group(self, group_id: str) -> None:
+        self._db.collection(self._groups).document(group_id).delete()
+
+    def groups_for(self, uid: str, email: str | None) -> list[dict]:
+        from google.cloud.firestore_v1.base_query import FieldFilter
+
+        col = self._db.collection(self._groups)
+        found = {s.id: s.to_dict() for s in col.where(filter=FieldFilter("member_uids", "array_contains", uid)).stream()}
+        if email:
+            for s in col.where(filter=FieldFilter("invite_emails", "array_contains", email)).stream():
+                found.setdefault(s.id, s.to_dict())
+        return list(found.values())
 
     def get_rag_records(self) -> dict:
         records = []

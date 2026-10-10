@@ -49,20 +49,19 @@ class _FakeDocRef:
 
 
 class _FakeQuery:
-    """where() 的結果。只支援等值過濾——store 刻意不用 order_by 或第二個
-    條件欄位，才不必為了部署去建 Firestore 複合索引。"""
+    """where() 的結果。只支援等值與 array_contains 這種單欄位過濾——store 刻意不用
+    order_by 或第二個條件欄位，才不必為了部署去建 Firestore 複合索引。"""
 
     def __init__(self, col, field_filter):
         self._col = col
         self._filter = field_filter
 
     def stream(self):
-        assert self._filter.op_string == "==", "假件只實作等值過濾"
-        return [
-            _FakeSnapshot(k, v)
-            for k, v in self._col._docs.items()
-            if v.get(self._filter.field_path) == self._filter.value
-        ]
+        op, field, value = self._filter.op_string, self._filter.field_path, self._filter.value
+        assert op in ("==", "array_contains"), "假件只實作等值與 array_contains"
+        if op == "array_contains":
+            return [_FakeSnapshot(k, v) for k, v in self._col._docs.items() if value in (v.get(field) or [])]
+        return [_FakeSnapshot(k, v) for k, v in self._col._docs.items() if v.get(field) == value]
 
 
 class _FakeCollection:

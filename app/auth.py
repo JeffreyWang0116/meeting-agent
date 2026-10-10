@@ -24,8 +24,13 @@ from app.stores.base import DEFAULT_USER
 
 logger = logging.getLogger(__name__)
 
-# 目前這個請求屬於誰。沒有中介層設定時（單人模式、背景執行緒）就是預設值
+# 目前這個請求的「資料範圍」：個人工作區是自己的 uid，群組工作區是 group:<id>。
+# 沒有中介層設定時（單人模式、背景執行緒）就是預設值
 CURRENT_USER: ContextVar[str] = ContextVar("current_user", default=DEFAULT_USER)
+# 實際登入的人與他已驗證的信箱。跟 CURRENT_USER 分開：在群組工作區裡資料範圍是群組，
+# 但速率限制、群組管理（誰能邀請、誰接受邀請）看的都是「人」
+CURRENT_ACCOUNT: ContextVar[str] = ContextVar("current_account", default=DEFAULT_USER)
+CURRENT_EMAIL: ContextVar[str | None] = ContextVar("current_email", default=None)
 
 
 class AuthError(Exception):
@@ -42,16 +47,17 @@ def bearer_token(authorization: str | None) -> str | None:
     return token.strip() or None
 
 
-def verify_firebase_id_token(id_token: str) -> str:
-    """驗證 Google 登入簽發的 ID token，回傳 Firebase uid。
+def verify_firebase_id_token(id_token: str) -> dict:
+    """驗證 Google 登入簽發的 ID token，回傳 {"uid", "email"}。
 
     verify_id_token 會檢查簽章、發行者與過期時間，所以前端偽造不了；uid 由
-    Firebase 指派且不會重複使用，拿來當資料的主人剛好。
+    Firebase 指派且不會重複使用，拿來當資料的主人剛好。信箱只在 Google 標記
+    已驗證時才給（小寫）：群組邀請靠信箱比對，沒驗證過的信箱等於誰都能冒領。
     """
     from firebase_admin import auth as firebase_auth
 
     try:
-        return firebase_auth.verify_id_token(id_token)["uid"]
+        claims = firebase_auth.verify_id_token(id_token)
     except Exception as exc:  # SDK 會丟各種子類別
         # firebase 的例外「訊息」才是關鍵：aud 專案不符（Render 的 service account
         # 跟前端 web 設定不是同一個專案）、時鐘偏移（Token used too early）、還是
@@ -60,3 +66,12 @@ def verify_firebase_id_token(id_token: str) -> str:
         reason = str(exc).strip() or type(exc).__name__
         logger.warning("ID token 驗證失敗：%s", reason)
         raise AuthError(f"登入憑證無效：{reason}") from exc
+    email = claims.get("email") if claims.get("email_verified") else None
+    return {"uid": claims["uid"], "email": email.strip().lower() if email else None}
+
+
+def identity_of(verified) -> tuple[str, str | None]:
+    """驗簽結果 → (uid, 信箱)。也收舊介面只回 uid 字串的驗簽函式（沒有信箱）。"""
+    if isinstance(verified, str):
+        return verified, None
+    return verified["uid"], verified.get("email")

@@ -35,7 +35,16 @@ from app.agents.executor_agent import ExecutorAgent
 from app.agents.notifier_agent import NotifierAgent, email_draft_from_record, notifications_from_record
 from app.agents.parser_agent import ParserAgent
 from app.agents.reminder_agent import scan as scan_reminders
-from app.auth import CURRENT_USER, AuthError, bearer_token, verify_firebase_id_token
+from app import groups as group_svc
+from app.auth import (
+    CURRENT_ACCOUNT,
+    CURRENT_EMAIL,
+    CURRENT_USER,
+    AuthError,
+    bearer_token,
+    identity_of,
+    verify_firebase_id_token,
+)
 from app.config import Settings, get_settings
 from app.export import meeting_report_md, tasks_to_csv, tasks_to_ics
 from app.gemini_keys import is_quota_error
@@ -96,18 +105,28 @@ class NoCacheStatic(StaticFiles):
 # （還沒登入的人正是要靠它才知道怎麼登入）
 PUBLIC_API_PATHS = {"/api/health", "/api/auth/config"}
 
+# 群組裡「只能看」的成員還是可以用的 POST：問答、翻譯只讀資料、不改資料
+VIEWER_ALLOWED_POSTS = {"/api/ask", "/api/translate"}
+SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
+
 
 class RequireFirebaseLogin:
-    """驗 ID token，並把 uid 放進 CURRENT_USER 供 current_user() 讀取。
+    """驗 ID token，並把這個請求的資料範圍放進 CURRENT_USER 供 current_user() 讀取。
+
+    個人工作區的範圍就是自己的 uid；帶了 X-Workspace 標頭就是群組工作區——先確認
+    這個人是成員，範圍切成 group:<id>，「只能看」的成員擋掉寫入。既有端點只認
+    current_user()，不必知道群組存在。實際登入的人另外放 CURRENT_ACCOUNT／CURRENT_EMAIL，
+    給群組管理與速率限制用。
 
     刻意寫成純 ASGI 中介層而不是 @app.middleware("http")：後者會把下游應用丟到
     另一個 task 執行，contextvar 傳不傳得過去得看 Starlette 版本臉色。純 ASGI
     中介層與端點在同一個 task 內，設進去的值必定讀得到。
     """
 
-    def __init__(self, app, verify):
+    def __init__(self, app, verify, store):
         self.app = app
         self._verify = verify
+        self._store = store
 
     async def __call__(self, scope, receive, send):
         if scope["type"] != "http":
@@ -123,19 +142,40 @@ class RequireFirebaseLogin:
         if token is None:
             return await self._deny(scope, receive, send, "未登入：請先用 Google 登入")
         try:
-            uid = self._verify(token)
+            uid, email = identity_of(self._verify(token))
         except AuthError as exc:
             return await self._deny(scope, receive, send, str(exc))
 
-        reset = CURRENT_USER.set(uid)
+        data_scope = uid
+        workspace = (raw.get(b"x-workspace") or b"").decode("latin-1").strip()
+        # 群組管理本身不進工作區：被移出群組的人也要能回到側欄、看到自己剩下的群組
+        if workspace and not path.startswith("/api/groups"):
+            role = group_svc.role_of(self._store.get_group(workspace), uid)
+            if role is None:
+                return await self._deny(
+                    scope, receive, send, "你不是這個群組的成員（可能已被移出或群組已解散）",
+                    status=403, workspace_denied=True,
+                )
+            if role == "viewer" and scope.get("method") not in SAFE_METHODS and path not in VIEWER_ALLOWED_POSTS:
+                return await self._deny(
+                    scope, receive, send, "你在這個群組的角色是「只能看」，無法新增或修改資料", status=403,
+                )
+            data_scope = group_svc.scope_of(workspace)
+
+        resets = [
+            (CURRENT_USER, CURRENT_USER.set(data_scope)),
+            (CURRENT_ACCOUNT, CURRENT_ACCOUNT.set(uid)),
+            (CURRENT_EMAIL, CURRENT_EMAIL.set(email)),
+        ]
         try:
             await self.app(scope, receive, send)
         finally:
-            CURRENT_USER.reset(reset)
+            for var, token_ in resets:
+                var.reset(token_)
 
     @staticmethod
-    async def _deny(scope, receive, send, detail: str):
-        await JSONResponse({"detail": detail}, status_code=401)(scope, receive, send)
+    async def _deny(scope, receive, send, detail: str, status: int = 401, **extra):
+        await JSONResponse({"detail": detail, **extra}, status_code=status)(scope, receive, send)
 
 
 # 會議種類與各自的預設區塊都定義在 decision_agent（單一來源），這裡只負責驗證與對外暴露
@@ -303,6 +343,19 @@ class RenameSpeakerRequest(BaseModel):
     new: str
 
 
+class GroupNameRequest(BaseModel):
+    name: str
+
+
+class GroupInviteRequest(BaseModel):
+    email: str
+    role: str = "editor"
+
+
+class GroupRoleRequest(BaseModel):
+    role: str
+
+
 class AskRequest(BaseModel):
     question: str
     meeting_ids: Optional[list[str]] = None  # 限定檢索範圍（複選會議）；None = 全部
@@ -340,6 +393,15 @@ def current_user(request: Request | None = None) -> str:
     會議在啟用登入後不會消失，只是歸在單人模式那一格。
     """
     return CURRENT_USER.get()
+
+
+def current_account() -> str:
+    """實際登入的人（uid）。在群組工作區裡 current_user() 是群組，這個仍然是人。"""
+    return CURRENT_ACCOUNT.get()
+
+
+def in_group_workspace() -> bool:
+    return current_user().startswith("group:")
 
 
 def _configure_logging() -> None:
@@ -393,7 +455,8 @@ def create_app(
     def limit(bucket: str) -> None:
         """耗額度的端點一進來先檢查；超過上限回 429 並附 Retry-After。"""
         try:
-            rate_limiter.check(bucket, current_user())
+            # 照「人」算：照工作區算的話，同群組的人共用一份，換個工作區又多一份
+            rate_limiter.check(bucket, current_account())
         except RateLimited as exc:
             raise HTTPException(
                 status_code=429, detail=str(exc),
@@ -569,7 +632,7 @@ def create_app(
                 cred_file=settings.firebase_credentials_file,
             )
 
-        app.add_middleware(RequireFirebaseLogin, verify=verify)
+        app.add_middleware(RequireFirebaseLogin, verify=verify, store=store)
     elif settings.api_token:
         # 沒接登入時的退路：一把共用鑰匙。部署到公開網址至少要設這個，
         # 否則 /api/backup、/api/restore 等端點任何人都能直接讀寫全部資料
@@ -1103,9 +1166,78 @@ def create_app(
             raise HTTPException(status_code=404, detail=f"找不到任務：{task_id}")
         return {"deleted": task_id}
 
+    # ---- 群組工作區（需要 Google 登入：沒有帳號就沒有「誰」可以邀請） ----
+
+    def group_call(fn, *args):
+        if not settings.auth_enabled:
+            raise HTTPException(status_code=404, detail="群組功能需要啟用 Google 登入")
+        try:
+            fn(*args)
+        except group_svc.GroupError as exc:
+            raise HTTPException(status_code=exc.status, detail=exc.detail)
+        # 每個操作都回傳側欄要的最新狀態，前端不必再多打一次
+        return group_svc.summary_for(store, current_account(), CURRENT_EMAIL.get())
+
+    @app.get("/api/groups")
+    def list_groups():
+        return group_call(lambda: None)
+
+    @app.post("/api/groups")
+    def create_group(req: GroupNameRequest):
+        created = {}
+
+        def make():
+            created.update(group_svc.create(store, req.name, current_account(), CURRENT_EMAIL.get()))
+
+        summary = group_call(make)
+        return {"id": created["id"], **summary}
+
+    @app.patch("/api/groups/{group_id}")
+    def rename_group(group_id: str, req: GroupNameRequest):
+        return group_call(group_svc.rename, store, group_id, current_account(), req.name)
+
+    @app.delete("/api/groups/{group_id}")
+    def disband_group(group_id: str):
+        def drop_rag(scope: str) -> None:
+            if rag_index is not None:
+                rag_index.reset(user=scope)
+
+        return group_call(group_svc.disband, store, group_id, current_account(), drop_rag)
+
+    @app.post("/api/groups/{group_id}/invites")
+    def invite_to_group(group_id: str, req: GroupInviteRequest):
+        return group_call(group_svc.invite, store, group_id, current_account(),
+                          CURRENT_EMAIL.get(), req.email, req.role)
+
+    @app.delete("/api/groups/{group_id}/invites/{email}")
+    def revoke_group_invite(group_id: str, email: str):
+        return group_call(group_svc.revoke, store, group_id, current_account(), email)
+
+    @app.post("/api/groups/{group_id}/accept")
+    def accept_group_invite(group_id: str):
+        return group_call(group_svc.accept, store, group_id, current_account(), CURRENT_EMAIL.get())
+
+    @app.post("/api/groups/{group_id}/decline")
+    def decline_group_invite(group_id: str):
+        return group_call(group_svc.decline, store, group_id, CURRENT_EMAIL.get())
+
+    @app.patch("/api/groups/{group_id}/members/{member_uid}")
+    def set_group_role(group_id: str, member_uid: str, req: GroupRoleRequest):
+        return group_call(group_svc.set_role, store, group_id, current_account(), member_uid, req.role)
+
+    @app.delete("/api/groups/{group_id}/members/{member_uid}")
+    def remove_group_member(group_id: str, member_uid: str):
+        return group_call(group_svc.remove_member, store, group_id, current_account(), member_uid)
+
+    def personal_only(action: str) -> None:
+        # 還原會整份覆蓋這個工作區的資料；在群組裡等於一個人就能把大家的會議換掉
+        if in_group_workspace():
+            raise HTTPException(status_code=400, detail=f"{action}只在個人工作區可用，請先切回「個人」")
+
     @app.get("/api/backup")
     def download_backup():
         """整份資料（會議＋任務＋詞彙）打包成 JSON 下載，供離線保存或搬移。"""
+        personal_only("備份")
         return Response(
             content=json.dumps(store.export_all(user=current_user()), ensure_ascii=False, indent=2),
             media_type="application/json; charset=utf-8",
@@ -1115,6 +1247,7 @@ def create_app(
     @app.post("/api/restore")
     def restore_backup(data: dict):
         """以備份 JSON 整份覆蓋現有資料。"""
+        personal_only("還原")
         if not isinstance(data.get("meetings"), list) or not isinstance(data.get("tasks"), list):
             raise HTTPException(
                 status_code=400, detail="備份格式不正確：需要 meetings 與 tasks 陣列"

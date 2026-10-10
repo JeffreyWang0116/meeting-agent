@@ -121,6 +121,23 @@ class TaskStore(ABC):
     def save_rag_records(self, dim: int | None, records: list[dict]) -> None:
         """整份取代索引內容。dim 一起存：向量維度改過時舊向量要整份作廢。"""
 
+    # ---- 群組（工作區）：成員與邀請。會議與任務本身照舊用 user 欄位，群組的蓋 group:<id> ----
+
+    @abstractmethod
+    def save_group(self, group: dict) -> None:
+        """新增或整份覆蓋一個群組文件。"""
+
+    @abstractmethod
+    def get_group(self, group_id: str) -> dict | None: ...
+
+    @abstractmethod
+    def delete_group(self, group_id: str) -> None:
+        """只刪群組文件；群組裡的會議與任務由呼叫端（app/groups.py）先清掉。"""
+
+    @abstractmethod
+    def groups_for(self, uid: str, email: str | None) -> list[dict]:
+        """uid 是成員、或 email 有待接受邀請的群組。"""
+
     @abstractmethod
     def export_all(self, *, user: str = DEFAULT_USER) -> dict:
         """匯出整份資料（meetings + tasks + glossary + speaker_roster）供備份下載。"""

@@ -291,6 +291,21 @@ def test_verify_surfaces_the_real_firebase_reason(monkeypatch):
         verify_firebase_id_token("some-token")
 
 
+@pytest.mark.parametrize("claims, email", [
+    ({"uid": "u1", "email": "Bob@Gmail.com", "email_verified": True}, "bob@gmail.com"),
+    ({"uid": "u1", "email": "bob@gmail.com", "email_verified": False}, None),
+    ({"uid": "u1"}, None),
+])
+def test_verify_returns_uid_and_only_a_verified_email(monkeypatch, claims, email):
+    """群組邀請靠信箱比對：沒驗證過的信箱不能拿來領別人的邀請。"""
+    import firebase_admin.auth as fa
+
+    from app.auth import verify_firebase_id_token
+
+    monkeypatch.setattr(fa, "verify_id_token", lambda _token: claims)
+    assert verify_firebase_id_token("tok") == {"uid": "u1", "email": email}
+
+
 def test_mismatched_firebase_projects_refuse_to_start(tmp_path):
     """四個值混到兩個專案時，啟動就該失敗並指名是哪兩個對不上。
 

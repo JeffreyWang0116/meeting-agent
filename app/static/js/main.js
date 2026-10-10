@@ -12,6 +12,8 @@
     setup       全域初始化：日期、會議種類、功能勾選、本次專用詞彙
     speakers    行首「XXX：」算不算講者（純函式，node 可直接測）
     audioguide  收音防護：依平台給說明、新裝置偵測、系統音源靜音（純函式）
+    groupinvite 群組角色名稱、邀請信 Gmail 草稿網址（純函式）
+    groups      工作區切換（個人／群組）、群組管理與邀請
     transcript  逐字稿渲染與時間/引用句跳轉
     result      分析結果頁
     tasks       任務庫
@@ -29,6 +31,7 @@ import "./router.js";
 import "./setup.js";
 import "./speakers.js";
 import "./audioguide.js";
+import "./groupinvite.js";
 import "./transcript.js";
 import "./calendar.js";
 import "./result.js";
@@ -39,3 +42,4 @@ import "./home.js";
 import "./ask.js";
 import "./inputs.js";
 import "./settings.js";
+import "./groups.js";

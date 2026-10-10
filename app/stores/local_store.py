@@ -242,6 +242,41 @@ class LocalJsonStore(TaskStore):
 
     # ---- 自訂詞彙（沿用同目錄的 glossary.json，與 db.json 並存） ----
 
+    # ---- 群組（同目錄的 groups.json）。不放進 db.json：還原備份會整份重建 db.json 的內容 ----
+
+    def _groups_path(self):
+        return self._path.with_name("groups.json")
+
+    def _groups(self) -> dict:
+        return self._read_doc(self._groups_path()).get("groups", {})
+
+    def _write_groups(self, groups: dict) -> None:
+        atomic_write_text(
+            self._groups_path(), json.dumps({"groups": groups}, ensure_ascii=False, indent=2)
+        )
+
+    def save_group(self, group: dict) -> None:
+        with self._lock:
+            groups = self._groups()
+            groups[group["id"]] = dict(group)
+            self._write_groups(groups)
+
+    def get_group(self, group_id: str) -> dict | None:
+        group = self._groups().get(group_id)
+        return dict(group) if group else None
+
+    def delete_group(self, group_id: str) -> None:
+        with self._lock:
+            groups = self._groups()
+            if groups.pop(group_id, None) is not None:
+                self._write_groups(groups)
+
+    def groups_for(self, uid: str, email: str | None) -> list[dict]:
+        return [
+            dict(g) for g in self._groups().values()
+            if uid in g.get("member_uids", []) or (email and email in g.get("invite_emails", []))
+        ]
+
     def _glossary_path(self):
         return self._path.with_name("glossary.json")
 

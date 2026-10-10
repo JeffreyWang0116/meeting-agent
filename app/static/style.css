@@ -158,6 +158,50 @@
   .nav-badge[hidden] { display: none; }
 
   .main { min-width: 0; display: flex; flex-direction: column; }
+
+  /* ---- 工作區切換（個人／群組） ---- */
+  .ws-switch { padding: 0 2px; }
+  .ws-btn {
+    display: flex; align-items: center; gap: 9px; width: 100%; text-align: left;
+    padding: 9px 12px; border-radius: var(--radius-md); border: 1px solid var(--border);
+    background: var(--card-2); color: var(--ink); font-family: var(--sans); font-size: .86rem; font-weight: 500;
+  }
+  .ws-btn:hover { background: var(--card-3); }
+  .ws-btn .i-sm { color: var(--accent); flex: none; }
+  .ws-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ws-chip { display: none; }
+  .ws-menu {
+    position: fixed; z-index: 120; width: min(300px, calc(100vw - 24px)); max-height: 70vh; overflow-y: auto;
+    padding: 6px; border-radius: var(--radius-md); border: 1px solid var(--border-strong);
+    background: var(--card-2); box-shadow: 0 12px 32px rgba(0, 0, 0, .35);
+    display: flex; flex-direction: column; gap: 2px;
+  }
+  .ws-menu[hidden] { display: none; }
+  .ws-head { font-size: .72rem; color: var(--faint); padding: 6px 10px 2px; }
+  .ws-sep { height: 1px; background: var(--border); margin: 4px 6px; }
+  .ws-item {
+    display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; border: none; background: none;
+    padding: 8px 10px; border-radius: var(--radius-sm); color: var(--ink); font-family: var(--sans); font-size: .86rem;
+  }
+  .ws-item:hover { background: var(--card-3); }
+  .ws-item .i-sm { color: var(--accent); flex: none; }
+  .ws-check-gap { width: 14px; flex: none; }
+  .ws-item-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ws-role {
+    flex: none; font-size: .7rem; color: var(--faint);
+    border: 1px solid var(--border); border-radius: 999px; padding: 0 7px; margin-left: 6px;
+  }
+  .ws-invite { display: flex; flex-direction: column; gap: 6px; padding: 8px 10px; font-size: .84rem; }
+  .ws-by { font-size: .74rem; color: var(--faint); margin-top: 2px; }
+  .ws-invite-ops { display: flex; gap: 6px; }
+  .grp-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 6px 0; border-bottom: 1px solid var(--border); }
+  .grp-who { flex: 1; min-width: 160px; font-size: .86rem; overflow-wrap: anywhere; }
+  .grp-rename, .grp-invite { display: flex; gap: 8px; flex-wrap: wrap; }
+  .grp-rename input, .grp-invite input { flex: 1; min-width: 180px; }
+  .grp-danger { margin-top: 8px; padding-top: 12px; border-top: 1px solid var(--border); }
+  button.ghost.danger { color: var(--high); }
+  #groupModalBody { display: flex; flex-direction: column; gap: 10px; }
+  #groupModalBody h4 { margin: 6px 0 0; font-size: .86rem; }
   .topbar {
     position: sticky; top: 0; z-index: 50;
     display: flex; align-items: center; justify-content: space-between; gap: 16px;
@@ -644,6 +688,8 @@
       border-right: none; border-top: 1px solid var(--border);
     }
     .side-brand { display: none; }
+    .ws-switch { display: none; }
+    .ws-chip:not([hidden]) { display: inline-flex; align-items: center; gap: 6px; max-width: 46vw; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
     .side-nav { flex: 1; flex-direction: row; justify-content: space-around; gap: 0; }
     .nav-item {
       position: relative; flex-direction: column; gap: 3px; align-items: center;

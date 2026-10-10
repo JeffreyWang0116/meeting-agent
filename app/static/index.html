@@ -40,6 +40,14 @@
       <svg class="i" aria-hidden="true"><use href="/static/icons.svg#mic"/></svg>
       會議助手
     </div>
+    <!-- 工作區切換：個人／各群組。只在開了 Google 登入時出現（js/groups.js） -->
+    <div class="ws-switch" id="wsSwitch" hidden>
+      <button class="ws-btn" id="wsBtn" aria-haspopup="true" aria-expanded="false">
+        <svg class="i-sm" aria-hidden="true"><use href="/static/icons.svg#users"/></svg>
+        <span class="ws-name" id="wsName">個人</span>
+        <span class="nav-badge" id="wsInviteBadge" hidden></span>
+      </button>
+    </div>
     <nav class="side-nav" aria-label="主導覽">
       <button class="nav-item" data-view="home">
         <svg class="i" aria-hidden="true"><use href="/static/icons.svg#house"/></svg>
@@ -77,6 +85,8 @@
   <main class="main">
     <header class="topbar">
       <h1 id="viewTitle">首頁</h1>
+      <!-- 手機版側欄變成底部分頁列、看不到工作區切換，改由這顆打開同一個選單 -->
+      <button class="ghost ws-chip" id="wsChip" hidden aria-haspopup="true"></button>
       <div class="head-tools">
         <div class="settings-wrap">
           <button class="ghost" id="btnSettings" title="設定" aria-label="設定" aria-expanded="false">
@@ -669,6 +679,22 @@
       </footer>
     </div>
   </main>
+</div>
+
+<!-- 工作區選單（側欄與手機頂列共用，位置由 js/groups.js 對齊按下的那顆按鈕） -->
+<div class="ws-menu" id="wsMenu" hidden></div>
+
+<!-- 群組管理視窗：成員、角色、邀請 -->
+<div class="modal-overlay" id="groupModal">
+  <div class="modal">
+    <div class="panel-head">
+      <h2 id="groupModalTitle">群組</h2>
+      <button class="panel-x" id="btnGroupClose" aria-label="關閉">
+        <svg class="i-sm" aria-hidden="true"><use href="/static/icons.svg#x"/></svg>
+      </button>
+    </div>
+    <div id="groupModalBody"></div>
+  </div>
 </div>
 
 <!-- 自訂詞彙管理視窗 -->

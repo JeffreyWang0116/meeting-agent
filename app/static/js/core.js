@@ -19,6 +19,22 @@ const nativeFetch = window.fetch.bind(window);
 let credentialSource = null;
 function setCredentialSource(fn) { credentialSource = fn; }
 
+// ---- 目前的工作區：空字串＝個人，否則是群組 id ----
+// 每個 /api/* 請求帶 X-Workspace，後端驗過成員身分就把資料範圍切成那個群組。
+// 切換工作區一律整頁重新載入：會議詳情、問答紀錄、分析結果頁都有各自的快取，
+// 逐一清掉很容易漏一處，留下另一個工作區的資料在畫面上
+const WORKSPACE_KEY = "workspace";
+function currentWorkspace() {
+  try { return localStorage.getItem(WORKSPACE_KEY) || ""; } catch { return ""; }
+}
+function switchWorkspace(id, notice) {
+  try {
+    localStorage.setItem(WORKSPACE_KEY, id || "");
+    if (notice) sessionStorage.setItem("workspaceNotice", notice);
+  } catch { /* 存不了就只是下次還在原本的工作區 */ }
+  location.reload();
+}
+
 window.fetch = async (input, init = {}) => {
   const url = typeof input === "string" ? input : input.url;
   let cred = null;
@@ -27,8 +43,17 @@ window.fetch = async (input, init = {}) => {
       ? await credentialSource()
       : { token: localStorage.getItem(API_TOKEN_KEY) };
     if (cred?.token) init = { ...init, headers: { ...(init.headers || {}), Authorization: `Bearer ${cred.token}` } };
+    // 群組只在 Google 登入模式存在；共用 API Token 模式不帶，免得殘留的設定讓請求看起來怪怪的
+    if (cred?.firebase && currentWorkspace()) {
+      init = { ...init, headers: { ...(init.headers || {}), "X-Workspace": currentWorkspace() } };
+    }
   }
   const resp = await nativeFetch(input, init);
+  // 被移出群組、群組被解散：之後每個請求都會 403，留在原地只會看到一整頁錯誤
+  if (resp.status === 403 && init.headers?.["X-Workspace"]) {
+    const body = await resp.clone().json().catch(() => ({}));
+    if (body.workspace_denied) switchWorkspace("", `${body.detail}，已切回個人工作區。`);
+  }
   if (resp.status === 401 && url.startsWith("/api/") && !cred?.firebase) {
     const entered = window.prompt("此伺服器需要 API Token 才能使用，請輸入：");
     if (entered) {
@@ -171,4 +196,4 @@ async function jsonOrThrow(resp) {
   return body;
 }
 
-export { $, API_TOKEN_KEY, PAGERS, PAGE_SIZE, PRIORITY_ZH, REFRESHERS, clearError, esc, icon, jsonOrThrow, loadFail, nativeFetch, pageNo, paginate, registerPager, registerRefresher, renderPager, setCredentialSource, showError, showNotice, skelBlocks, skelLine, skelRows };
+export { $, API_TOKEN_KEY, currentWorkspace, switchWorkspace, PAGERS, PAGE_SIZE, PRIORITY_ZH, REFRESHERS, clearError, esc, icon, jsonOrThrow, loadFail, nativeFetch, pageNo, paginate, registerPager, registerRefresher, renderPager, setCredentialSource, showError, showNotice, skelBlocks, skelLine, skelRows };
