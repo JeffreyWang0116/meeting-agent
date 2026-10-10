@@ -1,7 +1,8 @@
 import { api } from "./api.js";
+import { createSilenceWatch, shouldFallbackToDefaultMic, silenceWarning, systemAudioGuide } from "./audioguide.js";
 import { $, clearError, esc, showError, showNotice } from "./core.js";
 import { hideResultSkeleton, markAnalysisStart, renderResult, showResultSkeleton } from "./result.js";
-import { chunkSeconds, correctTypos, meetingTerms, micConstraints, populateMicDevices, selectedFeatures, sysSourceValue, wantSystemAudio } from "./setup.js";
+import { PLATFORM, chunkSeconds, correctTypos, meetingTerms, micConstraints, micDeviceId, populateMicDevices, selectedFeatures, sysSourceValue, wantSystemAudio } from "./setup.js";
 import { chatHtml, renderChat } from "./transcript.js";
 
 /* ==================================================================
@@ -200,16 +201,63 @@ function micPermissionMessage(e) {
       + "iPhone 到「設定 → Safari → 麥克風」或點網址列左側的「ㄗA」圖示改成允許；"
       + "Android Chrome 點網址列的鎖頭 → 權限 → 麥克風，改成允許後重新整理，再按一次「開始聆聽」。";
   if (name === "NotFoundError" || name === "OverconstrainedError")
-    return "找不到可用的麥克風。請確認手機麥克風沒有被停用或被系統佔用。";
+    return "找不到可用的麥克風。請確認麥克風已接好，而且沒有被系統停用"
+      + "（Windows：設定 → 系統 → 音效 → 輸入；手機：確認沒有其他 App 正在使用麥克風）。";
   if (name === "NotReadableError")
-    return "麥克風正被其他 App 佔用（通話、錄音、相機等）。關掉那個 App 再回來重試。";
+    return "麥克風正被其他程式獨佔（Discord、Teams、錄音軟體、通話等）。"
+      + "Windows 可到「控制台 → 聲音 → 錄製 → 該麥克風 → 內容 → 進階」取消勾選「允許應用程式取得此裝置的獨佔控制權」，"
+      + "或先關掉那個程式再重試。";
   return "無法取得麥克風：" + ((e && e.message) || e) + "（請在瀏覽器／系統設定允許此網站使用麥克風）";
+}
+
+// 開麥克風。記住的那支被拔掉或 id 變了（清過網站資料就會變）就改用系統預設並告知，
+// 不然 deviceId: exact 會直接失敗，整個聆聽卡在一支不存在的麥克風上
+async function openMic() {
+  try {
+    return await navigator.mediaDevices.getUserMedia(micConstraints());
+  } catch (e) {
+    if (!shouldFallbackToDefaultMic(e && e.name, micDeviceId())) throw e;
+    const sel = $("liveMicDevice");
+    const label = (sel.selectedOptions[0] && sel.selectedOptions[0].textContent) || "先前選的麥克風";
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    sel.value = "";
+    localStorage.setItem("liveMicDevice", "");
+    showNotice(`先前選的麥克風「${label}」找不到了（可能已拔除），這次改用系統預設麥克風。`);
+    return stream;
+  }
+}
+
+// 系統音源接上了卻一直沒聲音：分享成功、音軌也在，錄到的卻是空白，不會有任何錯誤。
+// 最常見是 Discord 輸出到別的裝置，而 Chrome 只錄 Windows 預設播放裝置
+let sysWatchTimer = 0;
+function watchSystemAudio(ctx, stream) {
+  stopSystemAudioWatch();
+  const track = stream.getAudioTracks()[0];
+  if (!ctx || !track) return;
+  const analyserNode = ctx.createAnalyser();
+  analyserNode.fftSize = 2048;
+  ctx.createMediaStreamSource(stream).connect(analyserNode);  // 只接分析器，不接喇叭
+  const buf = new Float32Array(analyserNode.fftSize);
+  const watch = createSilenceWatch({ seconds: 20 });
+  const start = performance.now();
+  sysWatchTimer = setInterval(() => {
+    analyserNode.getFloatTimeDomainData(buf);
+    let sum = 0;
+    for (let i = 0; i < buf.length; i++) sum += buf[i] * buf[i];
+    const quietTooLong = watch.push(Math.sqrt(sum / buf.length), (performance.now() - start) / 1000);
+    if (quietTooLong && liveRecording) showError(silenceWarning(PLATFORM));
+  }, 500);
+  track.addEventListener("ended", stopSystemAudioWatch);  // 使用者停止分享就不必再盯
+}
+function stopSystemAudioWatch() {
+  clearInterval(sysWatchTimer);
+  sysWatchTimer = 0;
 }
 
 async function buildLiveStream(withSystemAudio) {
   try {
     // 與錄樣本同一支麥克風：換裝置錄的樣本，音色差距足以讓聲紋比對失效
-    liveMicStream = await navigator.mediaDevices.getUserMedia(micConstraints());
+    liveMicStream = await openMic();
   } catch (e) {
     throw new Error(micPermissionMessage(e));
   }
@@ -224,6 +272,7 @@ async function buildLiveStream(withSystemAudio) {
   const dest = liveMixCtx.createMediaStreamDestination();
   liveMixCtx.createMediaStreamSource(liveMicStream).connect(dest);
   liveMixCtx.createMediaStreamSource(liveSysStream).connect(dest);
+  watchSystemAudio(liveMixCtx, liveSysStream);
   return dest.stream;
 }
 
@@ -251,14 +300,21 @@ async function acquireSystemAudio(source) {
   }
   let sys;
   try {  // 分享對話框一定要挑一個畫面來源才會給音訊，所以連 video 一起要。
-    sys = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
+    sys = await navigator.mediaDevices.getDisplayMedia({
+      video: true,
+      // 對方的聲音要原音：回音消除／降噪是為麥克風設計的，套在會議音訊上會把人聲當雜訊吃掉
+      audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
+      systemAudio: "include",          // 分享整個螢幕時提供「同時分享系統音訊」選項
+      selfBrowserSurface: "exclude",   // 選到會議助手自己的分頁什麼都錄不到
+      monitorTypeSurfaces: "include",
+    });
   } catch (e) {
     throw new Error("未取得系統音源分享（已取消或被拒）：" + e.message);
   }
   const sysAudio = sys.getAudioTracks()[0];
   if (!sysAudio) {
     sys.getTracks().forEach(t => t.stop());
-    throw new Error("這次分享沒有帶到聲音。桌面 App 開會請選「整個螢幕」、會議在瀏覽器分頁請選該「分頁」，並務必勾選「分享系統音訊／分頁音訊」再試一次");
+    throw new Error("這次分享沒有帶到聲音（選「視窗」不會有聲音）。" + systemAudioGuide(PLATFORM));
   }
   // 關鍵：不要 stop 掉畫面軌！系統音源的擷取綁在這個螢幕分享 session 上，
   // 一旦停掉畫面，聲音會跟著斷（症狀就是「只錄到麥克風」）。改成把畫面「停用」
@@ -274,6 +330,7 @@ async function acquireSystemAudio(source) {
 
 // 關掉聆聽用到的所有音訊來源與混音器（麥克風、系統音源、混音 AudioContext）
 function releaseLiveStreams() {
+  stopSystemAudioWatch();
   for (const s of [liveMicStream, liveSysStream, liveStream]) {
     if (s) s.getTracks().forEach(t => t.stop());
   }
@@ -718,7 +775,7 @@ $("btnEnrollMicTest").addEventListener("click", async () => {
   const hint = $("liveEnrollMeterHint");
   let stream;
   try {
-    stream = await navigator.mediaDevices.getUserMedia(micConstraints());
+    stream = await openMic();
   } catch (e) {
     showError("無法使用麥克風：" + micPermissionMessage(e));
     return;
@@ -811,7 +868,7 @@ async function recordEnrollment(index) {
   if (availErr) { showError(availErr); release(); return; }
   let stream;
   try {
-    stream = await navigator.mediaDevices.getUserMedia(micConstraints());
+    stream = await openMic();
   } catch (e) {
     showError("無法使用麥克風錄製聲音樣本：" + micPermissionMessage(e));
     release();

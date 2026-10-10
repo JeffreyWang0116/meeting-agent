@@ -1,5 +1,9 @@
 import { api } from "./api.js";
-import { $, esc } from "./core.js";
+import { addedDevices, detectPlatform, loopbackSetupHint, systemAudioGuide } from "./audioguide.js";
+import { $, esc, showNotice } from "./core.js";
+
+// 收音說明依平台不同（Windows 與 macOS 擷取系統聲音的方式完全不一樣）
+const PLATFORM = detectPlatform(navigator.userAgent);
 
 let chunkSeconds = 45;
 
@@ -97,6 +101,7 @@ function correctTypos() { return $("featCorrect").checked; }
   const sync = (interactive) => {
     localStorage.setItem("liveSystemAudio", $("liveSystemAudio").checked ? "1" : "0");
     $("liveSysSourceRow").style.display = $("liveSystemAudio").checked ? "" : "none";
+    $("liveSysGuide").textContent = systemAudioGuide(PLATFORM);
     // interactive＝使用者剛手動勾選，才可為了取得裝置名稱去要一次麥克風權限；
     // 頁面載入時的還原不帶 interactive，避免一開頁就跳權限。
     if ($("liveSystemAudio").checked) populateSysSources(interactive);
@@ -142,7 +147,7 @@ async function populateSysSources(interactive) {
     if (sel.value !== remembered) sel.value = loop.length ? loop[0].deviceId : "display";
     hint.textContent = loop.length
       ? "已偵測到可直接擷取的音源裝置，選它就不用每次分享畫面。"
-      : "";
+      : loopbackSetupHint(PLATFORM);
   } catch (e) {
     hint.textContent = "列舉裝置失敗，將使用分享畫面擷取：" + e.message;
   }
@@ -185,6 +190,26 @@ $("liveMicDevice").addEventListener("change", () =>
   localStorage.setItem("liveMicDevice", $("liveMicDevice").value));
 populateMicDevices(false);
 
+// 裝置插拔：先開網頁再插 USB 麥克風、無線麥接收器時，清單原本不會更新，
+// 錄到的其實是筆電內建麥。插拔當下重列兩個選單，並說出新插上的是哪一支
+const listAudioInputs = async () =>
+  (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === "audioinput");
+let knownAudioInputs = [];
+if (navigator.mediaDevices && navigator.mediaDevices.addEventListener && navigator.mediaDevices.enumerateDevices) {
+  listAudioInputs().then(list => { knownAudioInputs = list; }).catch(() => {});
+  navigator.mediaDevices.addEventListener("devicechange", async () => {
+    let now;
+    try { now = await listAudioInputs(); } catch (e) { return; }
+    const added = addedDevices(knownAudioInputs, now);
+    knownAudioInputs = now;
+    await populateMicDevices(false);
+    if ($("liveSystemAudio").checked) await populateSysSources(false);
+    if (added.length) {
+      showNotice(`偵測到新的音訊裝置：${added.join("、")}。要用它收音，請在「麥克風」選單選它。`);
+    }
+  });
+}
+
 // 即時翻譯目標：記住上次的選擇
 (function () {
   const saved = localStorage.getItem("liveTranslate");
@@ -225,4 +250,4 @@ async function loadHealth() {
 }
 loadHealth();
 
-export { FEATURE_BOX, LOOPBACK_RE, applyKindDefaults, chunkSeconds, correctTypos, enrollMaxSpeakers, featuresTouched, kindDefaults, kindHints, loadHealth, maybePromoteTerms, meetingTerms, micConstraints, populateMicDevices, populateSysSources, selectedFeatures, sysSourceValue, wantSystemAudio };
+export { FEATURE_BOX, LOOPBACK_RE, PLATFORM, applyKindDefaults, chunkSeconds, correctTypos, enrollMaxSpeakers, featuresTouched, kindDefaults, kindHints, loadHealth, maybePromoteTerms, meetingTerms, micConstraints, micDeviceId, populateMicDevices, populateSysSources, selectedFeatures, sysSourceValue, wantSystemAudio };

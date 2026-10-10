@@ -898,6 +898,7 @@
   }
   .report-head { display: flex; flex-direction: column; gap: 12px; }
   .report-head .back-btn { align-self: flex-start; }
+  .sys-guide { margin-bottom: 10px; line-height: 1.6; }
   .report-head h2 { margin: 0; font-size: 1.7rem; font-weight: 300; letter-spacing: -.025em; text-wrap: balance; }
   .meta-chips { display: flex; gap: 8px; flex-wrap: wrap; }
   .meta-chip {

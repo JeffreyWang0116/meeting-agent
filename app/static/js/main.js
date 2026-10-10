@@ -11,6 +11,7 @@
     router      版面路由：側欄一次只顯示一個 view
     setup       全域初始化：日期、會議種類、功能勾選、本次專用詞彙
     speakers    行首「XXX：」算不算講者（純函式，node 可直接測）
+    audioguide  收音防護：依平台給說明、新裝置偵測、系統音源靜音（純函式）
     transcript  逐字稿渲染與時間/引用句跳轉
     result      分析結果頁
     tasks       任務庫
@@ -27,6 +28,7 @@ import "./api.js";
 import "./router.js";
 import "./setup.js";
 import "./speakers.js";
+import "./audioguide.js";
 import "./transcript.js";
 import "./calendar.js";
 import "./result.js";
