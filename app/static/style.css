@@ -169,7 +169,7 @@
   .ws-btn:hover { background: var(--card-3); }
   .ws-btn .i-sm { color: var(--accent); flex: none; }
   .ws-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .ws-chip { display: none; }
+  button.ghost.ws-chip { display: none; }  /* 要壓過 button.ghost 的 display，否則沒開登入時會顯示一個空框 */
   .ws-menu {
     position: fixed; z-index: 120; width: min(300px, calc(100vw - 24px)); max-height: 70vh; overflow-y: auto;
     padding: 6px; border-radius: var(--radius-md); border: 1px solid var(--border-strong);
@@ -689,7 +689,7 @@
     }
     .side-brand { display: none; }
     .ws-switch { display: none; }
-    .ws-chip:not([hidden]) { display: inline-flex; align-items: center; gap: 6px; max-width: 46vw; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+    button.ghost.ws-chip:not([hidden]) { display: inline-flex; align-items: center; gap: 6px; max-width: 46vw; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
     .side-nav { flex: 1; flex-direction: row; justify-content: space-around; gap: 0; }
     .nav-item {
       position: relative; flex-direction: column; gap: 3px; align-items: center;
@@ -1101,6 +1101,24 @@
   .mtg-table td:nth-child(5) { width: 15%; }
   .mtg-table td:nth-child(6) { width: 78px; }
   .mtg-table td.mono { white-space: nowrap; }  /* 期限 ISO 日期不要斷成兩行 */
+  /* 手機：固定欄寬（116px＋78px＋41%）一加起來就超過整張表，任務名稱欄被擠到 0 寬、
+     一個字一行往下排。改成卡片：任務名稱獨佔第一行，其餘欄位在第二行依序排、放不下就換行 */
+  @media (max-width: 640px) {
+    .mtg-table, .mtg-table tbody { display: block; }
+    .mtg-table tr {
+      display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px;
+      padding: 10px 12px; border-bottom: 1px solid var(--border);
+    }
+    .mtg-table tr:last-child { border-bottom: none; }
+    .mtg-table td { display: block; width: auto !important; padding: 0; border: none; font-size: .82rem; }
+    /* 第一行：任務名稱＋右側的編輯／刪除；第二行：負責人、期限、優先級、狀態 */
+    .mtg-table td:first-child { flex: 1 1 0; min-width: 0; font-size: .9rem; overflow-wrap: anywhere; }
+    .mtg-table td:last-child { order: 1; flex: none; }
+    .mtg-table td:not(:first-child):not(:last-child) { order: 2; }
+    .mtg-table tr::after { content: ""; order: 1; flex-basis: 100%; height: 0; }  /* 強制在操作鈕之後換行 */
+    /* 編輯中：負責人、期限的輸入框要有手指點得到的寬度 */
+    .mtg-table td:not(:first-child):has(.cell-input) { flex: 1 1 40%; }
+  }
   .tasks-empty { padding: 20px 4px; }
 
   .panel-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
