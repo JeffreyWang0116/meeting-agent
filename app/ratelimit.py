@@ -34,6 +34,17 @@ DEFAULT_LIMITS: dict[str, tuple[int, int]] = {
     "translate": (20, 300),  # 摘要翻譯
 }
 
+# 訪客（匿名登入）的上限，照連線 IP 計算：清掉瀏覽器資料就能換一個新的匿名帳號，
+# 照帳號算等於沒有上限。約登入使用者的三分之一，可用 GUEST_RATE_LIMITS 覆寫
+GUEST_DEFAULT_LIMITS: dict[str, tuple[int, int]] = {
+    "analyze": (5, 20),
+    "media": (2, 5),
+    "live_start": (2, 5),
+    "live_chunk": (20, 200),
+    "ask": (5, 30),
+    "translate": (10, 100),
+}
+
 LABELS = {
     "analyze": "會議分析",
     "media": "檔案上傳",
@@ -99,9 +110,11 @@ class RateLimiter:
             del self._daily[key]
 
 
-def parse_limits(raw: str | None) -> dict[str, tuple[int, int]]:
-    """RATE_LIMITS="media=3/20,ask=10/100" → 覆寫對應項目，其餘沿用預設。"""
-    limits = dict(DEFAULT_LIMITS)
+def parse_limits(
+    raw: str | None, base: dict[str, tuple[int, int]] = DEFAULT_LIMITS, name_of: str = "RATE_LIMITS",
+) -> dict[str, tuple[int, int]]:
+    """RATE_LIMITS="media=3/20,ask=10/100" → 覆寫對應項目，其餘沿用 base。"""
+    limits = dict(base)
     for item in (raw or "").split(","):
         item = item.strip()
         if not item:
@@ -109,9 +122,9 @@ def parse_limits(raw: str | None) -> dict[str, tuple[int, int]]:
         name, _, value = item.partition("=")
         name = name.strip()
         if name not in DEFAULT_LIMITS:
-            raise ValueError(f"RATE_LIMITS 裡有不認得的項目：{name}（可用：{', '.join(DEFAULT_LIMITS)}）")
+            raise ValueError(f"{name_of} 裡有不認得的項目：{name}（可用：{', '.join(DEFAULT_LIMITS)}）")
         per_minute, sep, per_day = value.partition("/")
         if not sep or not per_minute.strip().isdigit() or not per_day.strip().isdigit():
-            raise ValueError(f"RATE_LIMITS 格式錯誤：{item}（應為 名稱=每分鐘/每天，例如 media=3/20）")
+            raise ValueError(f"{name_of} 格式錯誤：{item}（應為 名稱=每分鐘/每天，例如 media=3/20）")
         limits[name] = (int(per_minute), int(per_day))
     return limits

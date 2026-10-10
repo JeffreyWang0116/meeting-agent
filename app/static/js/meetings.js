@@ -455,4 +455,16 @@ $("tagFilter").addEventListener("click", e => {
 registerRefresher("meetings", refreshMeetings);
 registerPager("meetings", renderMeetings);  // 讓 core 的翻頁按鈕知道要重繪誰
 
+// 切換工作區（個人／群組）：上一個工作區的快取不能留在畫面上，清掉重抓
+window.addEventListener("workspacechange", () => {
+  for (const id of Object.keys(meetingDetailCache)) delete meetingDetailCache[id];
+  allMeetings = [];
+  expandedMeetingId = null;
+  detailEditing = false;
+  activeTag = "";
+  tagsExpanded = false;
+  pageNo.meetings = 1;
+  refreshMeetings();
+});
+
 export { TAG_FILTER_LIMIT, activeTag, allMeetings, askSpeakerName, detailEditing, detectSpeakers, expandedMeetingId, filteredMeetings, focusMeetingPage, meetingDetailCache, meetingDetailHtml, meetingLabel, meetingShareText, meetingsLoaded, openMeetingDetail, refreshMeetings, renameSpeaker, renderMeetings, renderTagFilter, tagsExpanded };

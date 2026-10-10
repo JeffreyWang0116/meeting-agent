@@ -25,11 +25,18 @@
   <div class="login-card">
     <svg class="i-lg" aria-hidden="true"><use href="/static/icons.svg#mic"/></svg>
     <h2>會議助手</h2>
-    <p class="login-hint">用 Google 帳號登入。屬於你的會議紀錄</p>
-    <button class="primary" id="loginBtn">
-      <svg class="i-sm" aria-hidden="true"><use href="/static/icons.svg#user"/></svg>
-      用 Google 登入
-    </button>
+    <!-- 確定是誰之前先顯示「載入中」：登入元件從 CDN 下載、恢復登入狀態要一點時間，
+         直接亮出登入按鈕會讓已經登入的人以為被登出了 -->
+    <p class="login-hint" id="loginLoading">載入中…</p>
+    <div class="login-options" id="loginOptions" hidden>
+      <p class="login-hint">用 Google 帳號登入，會議紀錄跟著帳號走；或先以訪客身分試用。</p>
+      <button class="primary" id="loginBtn">
+        <svg class="i-sm" aria-hidden="true"><use href="/static/icons.svg#user"/></svg>
+        用 Google 登入
+      </button>
+      <button class="ghost" id="guestBtn" hidden>以訪客身分使用</button>
+      <p class="login-note" id="guestNote" hidden>訪客的會議與任務會在你選「離開訪客」時刪除，也不能使用群組。</p>
+    </div>
     <p class="login-error" id="loginError" role="alert"></p>
   </div>
 </div>
@@ -88,20 +95,20 @@
       <!-- 手機版側欄變成底部分頁列、看不到工作區切換，改由這顆打開同一個選單 -->
       <button class="ghost ws-chip" id="wsChip" hidden aria-haspopup="true"></button>
       <div class="head-tools">
+        <!-- 帳號頭像：切換帳號、登出（訪客：改用 Google 登入、離開訪客）。只在開了登入時出現 -->
+        <div class="avatar-wrap" id="avatarWrap" hidden>
+          <button class="avatar" id="avatarBtn" aria-haspopup="true" aria-expanded="false" aria-label="帳號">
+            <img id="avatarImg" alt="" referrerpolicy="no-referrer" hidden>
+            <span id="avatarInitial"></span>
+          </button>
+          <div class="avatar-menu" id="avatarMenu" hidden></div>
+        </div>
         <div class="settings-wrap">
           <button class="ghost" id="btnSettings" title="設定" aria-label="設定" aria-expanded="false">
             <svg class="i-sm" aria-hidden="true"><use href="/static/icons.svg#settings"/></svg>
             設定
           </button>
           <div class="settings-menu" id="settingsMenu">
-            <div class="set-row" id="accountRow" hidden>
-              <span class="set-label">
-                <svg class="i-sm" aria-hidden="true"><use href="/static/icons.svg#user"/></svg>
-                <span id="accountName">—</span>
-              </span>
-              <button class="ghost" id="signOutBtn">登出</button>
-            </div>
-            <hr class="set-sep" id="accountSep" hidden>
             <div class="set-row">
               <span class="set-label">
                 <svg class="i-sm" aria-hidden="true"><use href="/static/icons.svg#moon"/></svg>

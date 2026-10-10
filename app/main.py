@@ -39,6 +39,8 @@ from app import groups as group_svc
 from app.auth import (
     CURRENT_ACCOUNT,
     CURRENT_EMAIL,
+    CURRENT_GUEST,
+    CURRENT_IP,
     CURRENT_USER,
     AuthError,
     bearer_token,
@@ -63,7 +65,7 @@ from app.transcription.gemini_transcriber import GeminiTranscriber
 from app.transcription.live_session import LiveSessionManager, SessionNotFound
 from app.transcription.voice_match import VoiceMatcher
 from app.transcription.transcriber import Transcriber
-from app.ratelimit import RateLimited, RateLimiter, parse_limits
+from app.ratelimit import GUEST_DEFAULT_LIMITS, RateLimited, RateLimiter, parse_limits
 from app.usage import UsageTracker
 
 logger = logging.getLogger(__name__)
@@ -123,10 +125,11 @@ class RequireFirebaseLogin:
     中介層與端點在同一個 task 內，設進去的值必定讀得到。
     """
 
-    def __init__(self, app, verify, store):
+    def __init__(self, app, verify, store, allow_guest=True):
         self.app = app
         self._verify = verify
         self._store = store
+        self._allow_guest = allow_guest
 
     async def __call__(self, scope, receive, send):
         if scope["type"] != "http":
@@ -142,9 +145,11 @@ class RequireFirebaseLogin:
         if token is None:
             return await self._deny(scope, receive, send, "未登入：請先用 Google 登入")
         try:
-            uid, email = identity_of(self._verify(token))
+            uid, email, guest = identity_of(self._verify(token))
         except AuthError as exc:
             return await self._deny(scope, receive, send, str(exc))
+        if guest and not self._allow_guest:
+            return await self._deny(scope, receive, send, "這個網站沒有開放訪客使用，請用 Google 登入", status=403)
 
         data_scope = uid
         workspace = (raw.get(b"x-workspace") or b"").decode("latin-1").strip()
@@ -166,6 +171,8 @@ class RequireFirebaseLogin:
             (CURRENT_USER, CURRENT_USER.set(data_scope)),
             (CURRENT_ACCOUNT, CURRENT_ACCOUNT.set(uid)),
             (CURRENT_EMAIL, CURRENT_EMAIL.set(email)),
+            (CURRENT_GUEST, CURRENT_GUEST.set(guest)),
+            (CURRENT_IP, CURRENT_IP.set(client_ip(scope, raw))),
         ]
         try:
             await self.app(scope, receive, send)
@@ -395,6 +402,17 @@ def current_user(request: Request | None = None) -> str:
     return CURRENT_USER.get()
 
 
+def client_ip(scope, raw_headers: dict) -> str:
+    """連線來源 IP。X-Forwarded-For 取最後一段：前段是用戶端自己填的、可以偽造，
+    最後一段才是我們前面那層反向代理（Render）實際看到的來源。"""
+    forwarded = (raw_headers.get(b"x-forwarded-for") or b"").decode("latin-1")
+    hops = [h.strip() for h in forwarded.split(",") if h.strip()]
+    if hops:
+        return hops[-1]
+    client = scope.get("client")
+    return client[0] if client else ""
+
+
 def current_account() -> str:
     """實際登入的人（uid）。在群組工作區裡 current_user() 是群組，這個仍然是人。"""
     return CURRENT_ACCOUNT.get()
@@ -451,12 +469,20 @@ def create_app(
     rate_limiter = RateLimiter(
         parse_limits(settings.rate_limits), enabled=settings.rate_limit_enabled
     )
+    guest_limiter = RateLimiter(
+        parse_limits(settings.guest_rate_limits, GUEST_DEFAULT_LIMITS, "GUEST_RATE_LIMITS"),
+        enabled=settings.rate_limit_enabled,
+    )
 
     def limit(bucket: str) -> None:
         """耗額度的端點一進來先檢查；超過上限回 429 並附 Retry-After。"""
         try:
-            # 照「人」算：照工作區算的話，同群組的人共用一份，換個工作區又多一份
-            rate_limiter.check(bucket, current_account())
+            if CURRENT_GUEST.get():
+                # 訪客照 IP 算：清掉瀏覽器資料就是新的匿名帳號，照帳號算等於沒上限
+                guest_limiter.check(bucket, f"ip:{CURRENT_IP.get()}")
+            else:
+                # 照「人」算：照工作區算的話，同群組的人共用一份，換個工作區又多一份
+                rate_limiter.check(bucket, current_account())
         except RateLimited as exc:
             raise HTTPException(
                 status_code=429, detail=str(exc),
@@ -632,7 +658,9 @@ def create_app(
                 cred_file=settings.firebase_credentials_file,
             )
 
-        app.add_middleware(RequireFirebaseLogin, verify=verify, store=store)
+        app.add_middleware(
+            RequireFirebaseLogin, verify=verify, store=store, allow_guest=settings.guest_login_enabled,
+        )
     elif settings.api_token:
         # 沒接登入時的退路：一把共用鑰匙。部署到公開網址至少要設這個，
         # 否則 /api/backup、/api/restore 等端點任何人都能直接讀寫全部資料
@@ -682,6 +710,7 @@ def create_app(
             "apiKey": settings.firebase_web_api_key,
             "authDomain": settings.firebase_auth_domain,
             "projectId": settings.firebase_project_id,
+            "guestEnabled": settings.auth_enabled and settings.guest_login_enabled,
         }
 
     def validate_kind(kind: str | None) -> str | None:
@@ -1171,6 +1200,8 @@ def create_app(
     def group_call(fn, *args):
         if not settings.auth_enabled:
             raise HTTPException(status_code=404, detail="群組功能需要啟用 Google 登入")
+        if CURRENT_GUEST.get():
+            raise HTTPException(status_code=403, detail="訪客不能使用群組，請改用 Google 登入")
         try:
             fn(*args)
         except group_svc.GroupError as exc:
@@ -1228,6 +1259,18 @@ def create_app(
     @app.delete("/api/groups/{group_id}/members/{member_uid}")
     def remove_group_member(group_id: str, member_uid: str):
         return group_call(group_svc.remove_member, store, group_id, current_account(), member_uid)
+
+    @app.delete("/api/guest/data")
+    def wipe_guest_data():
+        """訪客離開：刪掉這個匿名帳號的所有資料。只限訪客——誤打這支端點不能清掉正式帳號。"""
+        if not CURRENT_GUEST.get():
+            raise HTTPException(status_code=403, detail="只有訪客能使用這個功能")
+
+        def drop_rag(scope: str) -> None:
+            if rag_index is not None:
+                rag_index.reset(user=scope)
+
+        return {"deleted_meetings": group_svc.purge_scope(store, current_account(), drop_rag)}
 
     def personal_only(action: str) -> None:
         # 還原會整份覆蓋這個工作區的資料；在群組裡等於一個人就能把大家的會議換掉

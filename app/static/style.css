@@ -228,6 +228,31 @@
 
   /* ---- 設定選單（齒輪） ---- */
   .settings-wrap { position: relative; }
+  /* ---- 帳號頭像 ---- */
+  .avatar-wrap { position: relative; }
+  .avatar-wrap[hidden] { display: none; }
+  .avatar {
+    width: 34px; height: 34px; padding: 0; border-radius: 50%; overflow: hidden; flex: none;
+    display: inline-flex; align-items: center; justify-content: center;
+    border: 1px solid var(--border-strong); background: var(--accent-soft); color: var(--accent);
+    font-family: var(--sans); font-size: .86rem; font-weight: 600; cursor: pointer;
+  }
+  .avatar:hover { border-color: var(--ink); }
+  .avatar img { width: 100%; height: 100%; object-fit: cover; }
+  .avatar img[hidden], .avatar span[hidden] { display: none; }
+  .avatar-menu {
+    position: absolute; right: 0; top: calc(100% + 8px); z-index: 60;
+    display: flex; flex-direction: column; gap: 2px; width: min(280px, calc(100vw - 24px)); padding: 6px;
+    background: var(--card-2); border: 1px solid var(--border-strong); border-radius: var(--radius-md);
+    box-shadow: 0 12px 32px rgba(0, 0, 0, .35);
+  }
+  .avatar-menu[hidden] { display: none; }
+  /* 手機：頭像在頂列偏右，從它往左展開會超出畫面，改成貼齊畫面兩側 */
+  @media (max-width: 640px) { .avatar-menu { position: fixed; top: 58px; left: 12px; right: 12px; width: auto; } }
+  .avatar-who { display: flex; flex-direction: column; gap: 2px; padding: 8px 10px 10px; border-bottom: 1px solid var(--border); margin-bottom: 4px; }
+  .avatar-who b { font-size: .88rem; color: var(--ink); }
+  .avatar-who span { font-size: .76rem; color: var(--faint); overflow-wrap: anywhere; }
+  .ws-item.danger { color: var(--high); }
   #btnSettings { padding: 8px 10px; }
   .settings-menu {
     display: none; position: absolute; right: 0; top: calc(100% + 8px); z-index: 60;
@@ -1226,3 +1251,8 @@
   }
   .login-hint { margin: 0; font-size: .86rem; line-height: 1.7; color: var(--muted); }
   .login-error { margin: 0; font-size: .82rem; color: var(--high); min-height: 1.2em; }
+  .login-options { display: flex; flex-direction: column; align-items: stretch; gap: 10px; width: 100%; }
+  .login-options[hidden], .login-hint[hidden] { display: none; }
+  .login-options button { justify-content: center; }
+  .login-note { margin: 0; font-size: .76rem; line-height: 1.6; color: var(--faint); }
+  .login-note[hidden] { display: none; }

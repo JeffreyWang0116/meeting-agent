@@ -48,6 +48,9 @@ const api = {
     post(`/api/meetings/${q(id)}/rename-speaker`, { old: oldName, new: newName }),
   meetingKinds: () => get("/api/meeting-kinds"),
 
+  // ---- 訪客 ----
+  wipeGuestData: () => remove("/api/guest/data"),
+
   // ---- 群組工作區 ----
   groups: () => get("/api/groups"),
   createGroup: name => post("/api/groups", { name }),

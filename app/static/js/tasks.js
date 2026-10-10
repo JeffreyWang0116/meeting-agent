@@ -233,4 +233,13 @@ $("newTaskOwner").addEventListener("keydown", e => { if (e.key === "Enter") subm
 registerRefresher("tasks", refreshTasks);
 registerPager("tasks", renderTasks);  // 讓 core 的翻頁按鈕知道要重繪誰
 
+// 切換工作區（個人／群組）：上一個工作區的快取不能留在畫面上，清掉重抓
+window.addEventListener("workspacechange", () => {
+  allTasks = [];
+  editingTaskId = null;
+  openTaskGroups.clear();
+  pageNo.tasks = 1;
+  refreshTasks();
+});
+
 export { STATUS_ZH, allTasks, backToFirstTaskPage, editingTaskId, refreshTasks, renderTasks, submitNewTask, taskRowHtml, tasksLoaded };

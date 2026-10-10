@@ -1,7 +1,8 @@
 import { api } from "./api.js";
 import { $, currentWorkspace, esc, icon, nativeFetch, showError, showNotice, switchWorkspace } from "./core.js";
 import { inviteMailUrl, roleLabel } from "./groupinvite.js";
-import { liveRecording } from "./inputs.js";
+import { signedInUser } from "./auth.js";
+import { inputBusy } from "./inputs.js";
 
 /* ==================================================================
    11. 工作區：個人／群組切換、群組管理與邀請
@@ -19,6 +20,8 @@ async function loadGroups() {
   try {
     const cfg = await (await nativeFetch("/api/auth/config")).json();
     if (!cfg.enabled) return;
+    const me = await signedInUser();
+    if (!me || me.guest) return;  // 訪客不能用群組，入口不顯示
     state = await api.groups();
   } catch (err) {
     console.warn("讀取群組失敗：", err.message);
@@ -99,9 +102,12 @@ document.addEventListener("click", e => {
   if (!$("wsMenu").hidden && !e.target.closest("#wsMenu")) closeMenu();
 });
 
-// 切換會整頁重新載入：聆聽中切換等於把錄音中斷，先問一聲
+// 聆聽、上傳轉錄、分析進行中不給切：後續請求會帶新的工作區，進行中的工作就找不到了
 function goTo(id, notice) {
-  if (liveRecording && !confirm("正在即時聆聽，切換工作區會中斷錄音。確定要切換嗎？")) return;
+  if (inputBusy()) {
+    showError("正在即時聆聽、上傳轉錄或分析中，完成後再切換工作區。");
+    return;
+  }
   switchWorkspace(id, notice);
 }
 
@@ -118,6 +124,7 @@ $("wsMenu").addEventListener("click", async e => {
     if (!name) return;
     try {
       const r = await api.createGroup(name);
+      state = r;
       goTo(r.id, `已建立群組「${name}」。從工作區選單的「管理」邀請成員。`);
     } catch (err) { showError("建立群組失敗：" + err.message); }
     return;
@@ -127,7 +134,7 @@ $("wsMenu").addEventListener("click", async e => {
   if (accept) {
     const inv = state.invites.find(i => i.id === accept.dataset.accept);
     try {
-      await api.acceptInvite(accept.dataset.accept);
+      state = await api.acceptInvite(accept.dataset.accept);
       goTo(accept.dataset.accept, `已加入群組「${inv ? inv.name : ""}」。`);
     } catch (err) { showError("接受邀請失敗：" + err.message); }
     return;
@@ -224,15 +231,17 @@ $("groupModalBody").addEventListener("click", async e => {
       refreshManage(await api.removeMember(g.id, uid));
     } else if (e.target.closest("#btnGrpLeave")) {
       if (!confirm(`要退出「${g.name}」嗎？退出後就看不到群組的會議與任務。`)) return;
-      await api.removeMember(g.id, state.me.uid);
-      goTo("", `已退出群組「${g.name}」。`);
+      state = await api.removeMember(g.id, state.me.uid);
+      $("groupModal").classList.remove("open");
+      switchWorkspace("", `已退出群組「${g.name}」。`);
     } else if (e.target.closest("#btnGrpDisband")) {
       // 刪掉的是所有成員的資料，要多打一次群組名稱，不是按一下確定就好
       const typed = prompt(`解散後群組裡的所有會議、任務、詞彙都會刪除，無法復原。\n請輸入群組名稱「${g.name}」確認：`);
       if (typed === null) return;
       if (typed.trim() !== g.name) { showError("群組名稱不符，沒有解散。"); return; }
-      await api.disbandGroup(g.id);
-      goTo("", `已解散群組「${g.name}」。`);
+      state = await api.disbandGroup(g.id);
+      $("groupModal").classList.remove("open");
+      switchWorkspace("", `已解散群組「${g.name}」。`);
     }
   } catch (err) { showError("群組操作失敗：" + err.message); }
 });
@@ -245,15 +254,15 @@ $("groupModalBody").addEventListener("change", async e => {
   catch (err) { showError("更改角色失敗：" + err.message); }
 });
 
-// 切換工作區前留下的訊息（建立、加入、退出、被移出），重新載入後顯示一次
-(function () {
-  let notice = null;
-  try {
-    notice = sessionStorage.getItem("workspaceNotice");
-    sessionStorage.removeItem("workspaceNotice");
-  } catch { /* 讀不到就不顯示 */ }
-  if (notice) showNotice(notice);
-})();
+window.addEventListener("workspacechange", renderSwitch);
+// 換了帳號：上一個人的群組不能留在選單裡
+window.addEventListener("accountchange", () => {
+  state = { me: null, groups: [], invites: [] };
+  $("wsSwitch").hidden = true;
+  $("wsChip").hidden = true;
+  closeMenu();
+  loadGroups();
+});
 
 loadGroups();
 

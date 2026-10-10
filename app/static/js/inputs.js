@@ -352,6 +352,12 @@ document.addEventListener("visibilitychange", () => {
   if (!liveRecorders.length) recordSegment();  // 錄音若被系統中斷則自動接續
 });
 
+// 正在聆聽、上傳轉錄或分析中：這時切換工作區，後續請求會帶新的工作區，
+// 輪詢中的工作找不到、分析結果也會存進另一個地方
+function inputBusy() {
+  return liveRecording || liveStarting || $("btnUpload").disabled || $("btnAnalyzeText").disabled;
+}
+
 function pickMime() {
   for (const m of ["audio/webm;codecs=opus", "audio/webm", "audio/mp4"]) {
     if (MediaRecorder.isTypeSupported(m)) return m;
@@ -1128,4 +1134,4 @@ async function finishLiveSession() {
 }
 $("btnLiveRetry").addEventListener("click", finishLiveSession);
 
-export { JOB_STATUS_ZH, acquireSystemAudio, acquireWakeLock, appendCaption, buildLiveStream, closeStage, finishLiveSession, initStageAudio, liveMicStream, liveRecording, liveSegIndex, liveSpeakers, liveStream, liveTick, liveTranscriptText, openStage, orb, pickMime, pumpLevel, recordSegment, releaseLiveStreams, releaseStageAudio, releaseWakeLock, transcriptHome, uploadLiveChunk };
+export { JOB_STATUS_ZH, inputBusy, acquireSystemAudio, acquireWakeLock, appendCaption, buildLiveStream, closeStage, finishLiveSession, initStageAudio, liveMicStream, liveRecording, liveSegIndex, liveSpeakers, liveStream, liveTick, liveTranscriptText, openStage, orb, pickMime, pumpLevel, recordSegment, releaseLiveStreams, releaseStageAudio, releaseWakeLock, transcriptHome, uploadLiveChunk };

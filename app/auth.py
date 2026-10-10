@@ -31,6 +31,9 @@ CURRENT_USER: ContextVar[str] = ContextVar("current_user", default=DEFAULT_USER)
 # 但速率限制、群組管理（誰能邀請、誰接受邀請）看的都是「人」
 CURRENT_ACCOUNT: ContextVar[str] = ContextVar("current_account", default=DEFAULT_USER)
 CURRENT_EMAIL: ContextVar[str | None] = ContextVar("current_email", default=None)
+# 訪客（Firebase 匿名登入）與連線來源 IP：訪客沒有帳號，速率限制只能照 IP 算
+CURRENT_GUEST: ContextVar[bool] = ContextVar("current_guest", default=False)
+CURRENT_IP: ContextVar[str] = ContextVar("current_ip", default="")
 
 
 class AuthError(Exception):
@@ -48,11 +51,12 @@ def bearer_token(authorization: str | None) -> str | None:
 
 
 def verify_firebase_id_token(id_token: str) -> dict:
-    """驗證 Google 登入簽發的 ID token，回傳 {"uid", "email"}。
+    """驗證 Google 登入簽發的 ID token，回傳 {"uid", "email", "guest"}。
 
     verify_id_token 會檢查簽章、發行者與過期時間，所以前端偽造不了；uid 由
     Firebase 指派且不會重複使用，拿來當資料的主人剛好。信箱只在 Google 標記
     已驗證時才給（小寫）：群組邀請靠信箱比對，沒驗證過的信箱等於誰都能冒領。
+    guest 是 Firebase 匿名登入（登入畫面的「以訪客身分使用」）。
     """
     from firebase_admin import auth as firebase_auth
 
@@ -67,11 +71,12 @@ def verify_firebase_id_token(id_token: str) -> dict:
         logger.warning("ID token 驗證失敗：%s", reason)
         raise AuthError(f"登入憑證無效：{reason}") from exc
     email = claims.get("email") if claims.get("email_verified") else None
-    return {"uid": claims["uid"], "email": email.strip().lower() if email else None}
+    guest = (claims.get("firebase") or {}).get("sign_in_provider") == "anonymous"
+    return {"uid": claims["uid"], "email": email.strip().lower() if email else None, "guest": guest}
 
 
-def identity_of(verified) -> tuple[str, str | None]:
-    """驗簽結果 → (uid, 信箱)。也收舊介面只回 uid 字串的驗簽函式（沒有信箱）。"""
+def identity_of(verified) -> tuple[str, str | None, bool]:
+    """驗簽結果 → (uid, 信箱, 是否訪客)。也收舊介面只回 uid 字串的驗簽函式。"""
     if isinstance(verified, str):
-        return verified, None
-    return verified["uid"], verified.get("email")
+        return verified, None, False
+    return verified["uid"], verified.get("email"), bool(verified.get("guest"))

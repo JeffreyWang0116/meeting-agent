@@ -381,4 +381,12 @@ $("rHighlights").addEventListener("click", e => {
   }
 });
 
+// 切換工作區（個人／群組）：上一個工作區的快取不能留在畫面上，清掉重抓
+window.addEventListener("workspacechange", () => {
+  currentResult = null;
+  historyMeetingId = null;
+  $("navResult").hidden = true;
+  if (location.hash === "#result") showView("home");
+});
+
 export { GMAIL_URL_LIMIT, MAILTO_URL_LIMIT, analysisStartTime, copyWithFeedback, currentTranscript, draftSubject, draftSubjectAndBody, hideResultSkeleton, markAnalysisStart, openCompose, renderCorrections, renderResult, renderSections, showResultSkeleton };

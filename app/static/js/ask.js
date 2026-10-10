@@ -179,4 +179,14 @@ $("askLog").addEventListener("click", async e => {
   if (!log.querySelector(".ask-item")) log.style.display = "none";
 });
 
+// 切換工作區（個人／群組）：上一個工作區的快取不能留在畫面上，清掉重抓
+window.addEventListener("workspacechange", () => {
+  askScopeIds.clear();
+  $("askLog").innerHTML = "";
+  $("askLog").style.display = "none";
+  $("askInput").value = "";
+  hideSearchHits();
+  renderAskScope();
+});
+
 export { askScopeIds, conditionsHtml, hideSearchHits, passageQuote, passagesHtml, renderAskScope, searchTimer, sendAsk, snippetHtml };

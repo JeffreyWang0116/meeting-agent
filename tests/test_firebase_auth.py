@@ -75,6 +75,7 @@ def test_auth_config_gives_the_frontend_what_it_needs_to_sign_in(tmp_path):
         "apiKey": "web-key-123",
         "authDomain": "demo.firebaseapp.com",
         "projectId": "demo",
+        "guestEnabled": True,
     }
 
 
@@ -291,19 +292,23 @@ def test_verify_surfaces_the_real_firebase_reason(monkeypatch):
         verify_firebase_id_token("some-token")
 
 
-@pytest.mark.parametrize("claims, email", [
-    ({"uid": "u1", "email": "Bob@Gmail.com", "email_verified": True}, "bob@gmail.com"),
-    ({"uid": "u1", "email": "bob@gmail.com", "email_verified": False}, None),
-    ({"uid": "u1"}, None),
+GOOGLE = {"sign_in_provider": "google.com"}
+
+
+@pytest.mark.parametrize("claims, email, guest", [
+    ({"uid": "u1", "email": "Bob@Gmail.com", "email_verified": True, "firebase": GOOGLE}, "bob@gmail.com", False),
+    ({"uid": "u1", "email": "bob@gmail.com", "email_verified": False, "firebase": GOOGLE}, None, False),
+    ({"uid": "u1"}, None, False),
+    ({"uid": "u1", "firebase": {"sign_in_provider": "anonymous"}}, None, True),  # 訪客＝Firebase 匿名登入
 ])
-def test_verify_returns_uid_and_only_a_verified_email(monkeypatch, claims, email):
+def test_verify_returns_uid_verified_email_and_guest_flag(monkeypatch, claims, email, guest):
     """群組邀請靠信箱比對：沒驗證過的信箱不能拿來領別人的邀請。"""
     import firebase_admin.auth as fa
 
     from app.auth import verify_firebase_id_token
 
     monkeypatch.setattr(fa, "verify_id_token", lambda _token: claims)
-    assert verify_firebase_id_token("tok") == {"uid": "u1", "email": email}
+    assert verify_firebase_id_token("tok") == {"uid": "u1", "email": email, "guest": guest}
 
 
 def test_mismatched_firebase_projects_refuse_to_start(tmp_path):

@@ -160,15 +160,10 @@ def remove_member(store, group_id: str, uid: str, target_uid: str) -> dict:
     return _save(store, group)
 
 
-def disband(store, group_id: str, uid: str, on_scope_deleted=None) -> None:
-    """解散：群組裡的會議、任務、詞彙表、講者名冊全部刪掉，再刪群組文件。
-
-    資料先刪、文件後刪：中途失敗時群組還在，建立者可以再按一次；反過來的話會留下
-    一批沒有群組能進得去、也沒人刪得掉的資料。
-    """
-    _load_as_owner(store, group_id, uid)
-    scope = scope_of(group_id)
-    for meeting in store.list_meetings(user=scope):
+def purge_scope(store, scope: str, on_scope_deleted=None) -> int:
+    """刪掉一個資料範圍（群組、訪客）的會議、任務、詞彙表、講者名冊，回傳刪掉的會議數。"""
+    meetings = store.list_meetings(user=scope)
+    for meeting in meetings:
         store.delete_meeting(meeting["id"], user=scope)
     for task in store.list_tasks(user=scope):  # 手動新增、不屬於任何會議的任務
         store.delete_task(task["id"], user=scope)
@@ -176,6 +171,17 @@ def disband(store, group_id: str, uid: str, on_scope_deleted=None) -> None:
     store.save_speaker_roster([], user=scope)
     if on_scope_deleted:
         on_scope_deleted(scope)
+    return len(meetings)
+
+
+def disband(store, group_id: str, uid: str, on_scope_deleted=None) -> None:
+    """解散：群組裡的資料全部刪掉，再刪群組文件。
+
+    資料先刪、文件後刪：中途失敗時群組還在，建立者可以再按一次；反過來的話會留下
+    一批沒有群組能進得去、也沒人刪得掉的資料。
+    """
+    _load_as_owner(store, group_id, uid)
+    purge_scope(store, scope_of(group_id), on_scope_deleted)
     store.delete_group(group_id)
 
 

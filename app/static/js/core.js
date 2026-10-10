@@ -21,18 +21,19 @@ function setCredentialSource(fn) { credentialSource = fn; }
 
 // ---- 目前的工作區：空字串＝個人，否則是群組 id ----
 // 每個 /api/* 請求帶 X-Workspace，後端驗過成員身分就把資料範圍切成那個群組。
-// 切換工作區一律整頁重新載入：會議詳情、問答紀錄、分析結果頁都有各自的快取，
-// 逐一清掉很容易漏一處，留下另一個工作區的資料在畫面上
+// 切換是就地切：發 workspacechange，各模組清掉自己的快取再重抓。不整頁重新載入——
+// 重新載入要等 Google 登入元件從 CDN 下載、恢復登入狀態，手機上常要好幾秒，
+// 不保存登入狀態的瀏覽器（LINE 內建、Safari 無痕）更是每切一次就要重登一次
 const WORKSPACE_KEY = "workspace";
+let workspaceFallback = "";  // localStorage 不能用（無痕）時，至少這一頁記得住
 function currentWorkspace() {
-  try { return localStorage.getItem(WORKSPACE_KEY) || ""; } catch { return ""; }
+  try { return localStorage.getItem(WORKSPACE_KEY) || ""; } catch { return workspaceFallback; }
 }
 function switchWorkspace(id, notice) {
-  try {
-    localStorage.setItem(WORKSPACE_KEY, id || "");
-    if (notice) sessionStorage.setItem("workspaceNotice", notice);
-  } catch { /* 存不了就只是下次還在原本的工作區 */ }
-  location.reload();
+  workspaceFallback = id || "";
+  try { localStorage.setItem(WORKSPACE_KEY, id || ""); } catch { /* 用 workspaceFallback */ }
+  window.dispatchEvent(new CustomEvent("workspacechange", { detail: { id: id || "" } }));
+  if (notice) showNotice(notice);
 }
 
 window.fetch = async (input, init = {}) => {

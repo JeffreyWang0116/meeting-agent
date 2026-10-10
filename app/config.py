@@ -118,6 +118,10 @@ class Settings:
     rate_limit_enabled: bool = False
     # 覆寫個別上限，如 "media=3/20,ask=10/100"（每分鐘/每天，0＝不限）；空＝全用預設
     rate_limits: str | None = None
+    # 登入畫面的「以訪客身分使用」（Firebase 匿名登入，要先在 Firebase 開啟匿名登入）。
+    # 訪客的上限照 IP 算、比登入使用者緊（GUEST_RATE_LIMITS 覆寫，格式同 RATE_LIMITS）
+    guest_login_enabled: bool = True
+    guest_rate_limits: str | None = None
     data_dir: Path = field(default_factory=lambda: BASE_DIR / "data")
     # Firebase 金鑰：任一有值就用 Firestore 雲端儲存，否則用本地 JSON
     firebase_credentials_json: str | None = None  # service account JSON 字串（Render 用）
@@ -232,4 +236,6 @@ def get_settings() -> Settings:
             else bool(os.environ.get("RENDER"))
         ),
         rate_limits=os.environ.get("RATE_LIMITS") or None,
+        guest_login_enabled=os.environ.get("GUEST_LOGIN_ENABLED", "1").strip().lower() not in {"0", "false", "no"},
+        guest_rate_limits=os.environ.get("GUEST_RATE_LIMITS") or None,
     )

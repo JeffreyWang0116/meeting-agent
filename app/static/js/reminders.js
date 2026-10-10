@@ -1,5 +1,5 @@
 import { api } from "./api.js";
-import { $, esc, icon, loadFail, paginate, registerPager, registerRefresher, renderPager, showError } from "./core.js";
+import { $, esc, icon, loadFail, pageNo, paginate, registerPager, registerRefresher, renderPager, showError } from "./core.js";
 import { renderHome } from "./home.js";
 import { allMeetings, meetingLabel } from "./meetings.js";
 
@@ -185,5 +185,12 @@ refreshReminders();
 
 registerRefresher("reminders", refreshReminders);
 registerPager("reminders", renderReminders);  // 讓 core 的翻頁按鈕知道要重繪誰
+
+// 切換工作區（個人／群組）：上一個工作區的快取不能留在畫面上，清掉重抓
+window.addEventListener("workspacechange", () => {
+  dismissedAlerts.clear();
+  pageNo.reminders = 1;
+  refreshReminders();
+});
 
 export { ALERT_LABEL, NOTIFY_KEY, activeAlerts, dismissedAlerts, lastReminders, maybeNotifyReminders, notifyEnabled, refreshReminders, remindersLoaded, renderReminders, updateAlertCount, updateNotifyBtn };

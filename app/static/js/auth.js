@@ -20,7 +20,7 @@
    Firebase SDK 用動態 import 從官方 CDN 取，維持本專案「沒有建置步驟」的
    做法；沒啟用登入的部署根本不會下載它。
    ================================================================== */
-import { $, API_TOKEN_KEY, nativeFetch, setCredentialSource } from "./core.js";
+import { $, API_TOKEN_KEY, esc, nativeFetch, setCredentialSource, showError, switchWorkspace } from "./core.js";
 
 const SDK = "https://www.gstatic.com/firebasejs/10.14.1";
 
@@ -52,20 +52,104 @@ setCredentialSource(async () => {
   };
 });
 
-function showAccount(user, onSignOut) {
-  $("accountName").textContent = user.displayName || user.email || "已登入";
-  $("accountRow").hidden = false;
-  $("accountSep").hidden = false;
-  $("signOutBtn").onclick = onSignOut;
+// ---- 右上角頭像：帳號、切換帳號、登出 ----
+function renderAvatar(user) {
+  const guest = user.isAnonymous;
+  const label = guest ? "訪客" : (user.displayName || user.email || "已登入");
+  const img = $("avatarImg"), initial = $("avatarInitial");
+  if (!guest && user.photoURL) {
+    img.src = user.photoURL;
+    img.hidden = false;
+    initial.hidden = true;
+  } else {
+    img.hidden = true;
+    initial.hidden = false;
+    initial.textContent = guest ? "訪" : label.trim().charAt(0).toUpperCase();
+  }
+  $("avatarBtn").title = label;
+  $("avatarMenu").innerHTML = guest
+    ? `<div class="avatar-who"><b>訪客</b><span>資料會在離開訪客時刪除</span></div>
+       <button class="ws-item" data-act="to-google">改用 Google 登入（訪客資料會刪除）</button>
+       <button class="ws-item danger" data-act="leave-guest">離開訪客並刪除資料</button>`
+    : `<div class="avatar-who"><b>${esc(user.displayName || "")}</b><span>${esc(user.email || "")}</span></div>
+       <button class="ws-item" data-act="switch">切換帳號</button>
+       <button class="ws-item" data-act="sign-out">登出</button>`;
+  $("avatarWrap").hidden = false;
 }
+
+function closeAvatarMenu() {
+  $("avatarMenu").hidden = true;
+  $("avatarBtn").setAttribute("aria-expanded", "false");
+}
+$("avatarBtn").addEventListener("click", e => {
+  e.stopPropagation();
+  const open = $("avatarMenu").hidden;
+  $("avatarMenu").hidden = !open;
+  $("avatarBtn").setAttribute("aria-expanded", String(open));
+});
+document.addEventListener("click", e => {
+  if (!$("avatarMenu").hidden && !e.target.closest("#avatarWrap")) closeAvatarMenu();
+});
+
+// 每次都讓使用者選帳號：不加這個，Google 會直接沿用瀏覽器目前登入的那個，「切換帳號」等於沒作用
+function googleProvider() {
+  const provider = new sdk.GoogleAuthProvider();
+  provider.setCustomParameters({ prompt: "select_account" });
+  return provider;
+}
+
+async function signInWithGoogle() {
+  try {
+    await sdk.signInWithPopup(auth, googleProvider());
+    return true;
+  } catch (err) {
+    if (err.code === "auth/popup-closed-by-user" || err.code === "auth/cancelled-popup-request") return false;
+    throw err;
+  }
+}
+
+$("avatarMenu").addEventListener("click", async e => {
+  const act = e.target.closest("[data-act]")?.dataset.act;
+  if (!act) return;
+  closeAvatarMenu();
+  try {
+    if (act === "switch") {
+      await signInWithGoogle();
+    } else if (act === "sign-out") {
+      await sdk.signOut(auth);
+    } else if (act === "to-google") {
+      if (!confirm("改用 Google 登入後，這個訪客的會議與任務會刪除。要繼續嗎？")) return;
+      // 先記住訪客的憑證：登入 Google 之後目前使用者就換人了，拿不到訪客的 token
+      const guestToken = await auth.currentUser.getIdToken();
+      if (!(await signInWithGoogle())) return;  // 取消登入就維持訪客，資料不刪
+      await nativeFetch("/api/guest/data", { method: "DELETE", headers: { Authorization: `Bearer ${guestToken}` } });
+    } else if (act === "leave-guest") {
+      if (!confirm("離開後這個訪客的會議與任務都會刪除，無法復原。要離開嗎？")) return;
+      const resp = await fetch("/api/guest/data", { method: "DELETE" });
+      if (!resp.ok) throw new Error(`刪除訪客資料失敗（${resp.status}）`);
+      await sdk.signOut(auth);
+    }
+  } catch (err) { showError("帳號操作失敗：" + err.message); }
+});
+
+function showLoginOptions(show) {
+  $("loginLoading").hidden = show;
+  $("loginOptions").hidden = !show;
+}
+
+let knownUid = null;  // 換了帳號（切換帳號、登出後換人登入）就要整批重抓資料
 
 async function start() {
   const cfg = await config;
   if (!cfg.enabled) return;
 
-  // 先擋住畫面：在確定「你是誰」之前，底下那些資料一眼都不該露出來
+  // 先擋住畫面：在確定「你是誰」之前，底下那些資料一眼都不該露出來。
+  // 但先顯示「載入中」而不是登入按鈕——已登入的人重新整理時只是要等 SDK 恢復狀態
   const gate = $("loginGate");
   gate.hidden = false;
+  showLoginOptions(false);
+  $("guestBtn").hidden = !cfg.guestEnabled;
+  $("guestNote").hidden = !cfg.guestEnabled;
 
   try {
     const [app, authMod] = await Promise.all([
@@ -74,6 +158,8 @@ async function start() {
     ]);
     sdk = { ...app, ...authMod };
   } catch {
+    showLoginOptions(false);
+    $("loginLoading").hidden = true;
     $("loginError").textContent = "載入登入元件失敗，請檢查網路後重新整理。";
     return;
   }
@@ -85,20 +171,42 @@ async function start() {
   }));
 
   sdk.onAuthStateChanged(auth, user => {
-    gate.hidden = !!user;
-    if (!user) return;
-    showAccount(user, () => sdk.signOut(auth).then(() => location.reload()));
+    if (!user) {
+      gate.hidden = false;
+      showLoginOptions(true);
+      $("avatarWrap").hidden = true;
+      return;
+    }
+    gate.hidden = true;
+    renderAvatar(user);
+    const switched = knownUid !== null && knownUid !== user.uid;
+    knownUid = user.uid;
     signedIn();
+    // 換了人：畫面上全是上一個帳號的資料。不整頁重新載入（不保存登入狀態的瀏覽器
+    // 重新載入就被登出了），改成切回個人工作區、讓各模組用新帳號的憑證重抓
+    if (switched) {
+      window.dispatchEvent(new CustomEvent("accountchange"));
+      switchWorkspace("");
+    }
   });
 
   $("loginBtn").onclick = async () => {
     $("loginError").textContent = "";
     try {
-      await sdk.signInWithPopup(auth, new sdk.GoogleAuthProvider());
+      await signInWithGoogle();
     } catch (err) {
-      // 使用者自己關掉登入視窗不算錯誤，不必嚇他
-      if (err.code === "auth/popup-closed-by-user") return;
       $("loginError").textContent = `登入失敗：${err.message}`;
+    }
+  };
+
+  $("guestBtn").onclick = async () => {
+    $("loginError").textContent = "";
+    try {
+      await sdk.signInAnonymously(auth);
+    } catch (err) {
+      $("loginError").textContent = err.code === "auth/operation-not-allowed" || err.code === "auth/admin-restricted-operation"
+        ? "網站管理者還沒在 Firebase 開啟匿名登入，暫時只能用 Google 登入。"
+        : `訪客登入失敗：${err.message}`;
     }
   };
 }
@@ -113,8 +221,16 @@ async function start() {
 // 行事曆權杖是拿不回來的——所以本來就只能在使用者操作的當下現拿。
 const CALENDAR_SCOPE = "https://www.googleapis.com/auth/calendar.events";
 
+// 訪客（匿名登入）沒有 Google 帳號，加不了 Google 行事曆
 function googleSignedIn() {
-  return !!auth?.currentUser;
+  return !!auth?.currentUser && !auth.currentUser.isAnonymous;
+}
+
+// 登入完成後的身分（沒開登入時永遠不會 resolve，呼叫端要先確認有開）
+function signedInUser() {
+  return ready.then(() => (auth?.currentUser
+    ? { uid: auth.currentUser.uid, guest: auth.currentUser.isAnonymous }
+    : null));
 }
 
 async function requestCalendarToken() {
@@ -130,4 +246,4 @@ async function requestCalendarToken() {
 
 start();
 
-export { googleSignedIn, requestCalendarToken };
+export { googleSignedIn, requestCalendarToken, signedInUser };
