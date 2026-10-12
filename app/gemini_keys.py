@@ -44,8 +44,8 @@ def _backoff_delay(attempt: int) -> float:
 # 過載（退避用盡仍 503）時改用的模型（雙向）。只列本專案實際在用、確定能處理同樣
 # 請求（含音訊）的兩顆，而且都是釘死版本；其他模型（例如向量嵌入）沒有替代，過載照舊往外拋
 OVERLOAD_ALTERNATES = {
-    "gemini-3.5-flash-lite": "gemini-3.5-flash",
-    "gemini-3.5-flash": "gemini-3.5-flash-lite",
+    "gemini-3.5-flash-lite": "gemini-3.6-flash",
+    "gemini-3.6-flash": "gemini-3.5-flash-lite",
 }
 
 

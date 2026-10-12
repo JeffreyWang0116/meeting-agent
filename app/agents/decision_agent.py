@@ -354,7 +354,7 @@ class DecisionAgent:
         response = client.models.generate_content(
             model=model or self.model,
             contents=prompt,
-            config={"response_mime_type": "application/json", "temperature": 0.2},
+            config={"response_mime_type": "application/json"},
         )
         return response.text or ""
 

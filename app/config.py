@@ -37,7 +37,7 @@ class Settings:
     #
     # 分析模型。與轉錄同樣預設用高額度的 lite：免費層 Flash 每日只有 20 次、
     # Lite 有 500 次，預設值選 Flash 會讓照著 README 部署的人很快撞牆。
-    # 想要更強的推理再用 .env 覆蓋（如 gemini-3.5-flash），代價是額度剩 1/25
+    # 想要更強的推理再用 .env 覆蓋（如 gemini-3.6-flash），代價是額度剩 1/25
     gemini_model: str = "gemini-3.5-flash-lite"
     # 轉錄後端：local = 本地 faster-whisper（需 GPU）；gemini = 雲端用 Gemini 聽音訊
     transcribe_engine: str = "local"
@@ -57,13 +57,13 @@ class Settings:
     # 聲紋比對用的模型。一場會議只打一次（相較轉錄每 45 秒一次），所以用強模型
     # 換準確度很划算——比對嗓音比轉錄吃力得多，lite 實測容易亂猜。
     # 空字串＝沿用 correct_model
-    voice_match_model: str | None = "gemini-3.5-flash"
+    voice_match_model: str | None = "gemini-3.6-flash"
     # 上傳的長音檔分段轉錄的每段秒數（0＝不分段，整份送出）。
     # 實測整份送出 17 分鐘錄音時，Gemini 會整份放棄講者標註、時間戳也會漂掉
     transcribe_chunk_seconds: int = 240
     # 較強的轉錄模型：長檔整份單次轉錄、以及某段講者標註率過低時重跑那一段
     # （空字串＝不啟用）。同樣是釘死版本，理由見 gemini_model 上方那段。
-    transcribe_fallback_model: str | None = "gemini-3.5-flash"
+    transcribe_fallback_model: str | None = "gemini-3.6-flash"
     # 單一檔案最多幾段可以動用備援模型。免費層實測額度：Flash Lite 每日 500 次、
     # Flash 每日只有 20 次——備援跑一次就吃掉每日 Flash 額度的 5%，遠高於重試
     # 的成本上限，所以預設 0（不啟用），把預算全花在便宜的 lite 重試，稀有的
@@ -181,11 +181,11 @@ def get_settings() -> Settings:
             os.environ.get("LIVE_ENROLL_MAX_SPEAKERS", "4")
         ),
         voice_match_model=(
-            os.environ.get("VOICE_MATCH_MODEL", "gemini-3.5-flash") or None
+            os.environ.get("VOICE_MATCH_MODEL", "gemini-3.6-flash") or None
         ),
         transcribe_chunk_seconds=int(os.environ.get("TRANSCRIBE_CHUNK_SECONDS", "240")),
         transcribe_fallback_model=(
-            os.environ.get("TRANSCRIBE_FALLBACK_MODEL", "gemini-3.5-flash") or None
+            os.environ.get("TRANSCRIBE_FALLBACK_MODEL", "gemini-3.6-flash") or None
         ),
         transcribe_max_fallback_chunks=int(
             os.environ.get("TRANSCRIBE_MAX_FALLBACK_CHUNKS", "0")

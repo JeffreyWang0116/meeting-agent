@@ -173,8 +173,7 @@ class VoiceMatcher:
             response = client.models.generate_content(
                 model=model or self.model,
                 contents=contents,
-                # temperature=0：這是比對判讀，不要創意
-                config={"response_mime_type": "application/json", "temperature": 0.0},
+                config={"response_mime_type": "application/json"},
             )
             return response.text or ""
         finally:

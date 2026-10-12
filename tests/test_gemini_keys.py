@@ -485,7 +485,7 @@ def test_successful_call_logs_nothing(caplog):
 # 過載是「這個模型」忙，另一個模型的負載與額度是分開的，常常完全正常。
 
 LITE = "gemini-3.5-flash-lite"
-FLASH = "gemini-3.5-flash"
+FLASH = "gemini-3.6-flash"
 
 
 def test_persistent_overload_switches_to_the_alternate_model():

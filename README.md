@@ -54,12 +54,15 @@
 
 轉錄與分析是**兩個獨立的 Gemini 模型設定**，可各自用環境變數覆蓋：
 
-免費層實測額度（2026/07 於 [AI Studio 儀表板](https://aistudio.google.com/rate-limit)確認，Google 可能調整，以你自己的儀表板為準）：
+免費層實測額度（2026/07 首次確認、2026/10/12 於 [AI Studio 儀表板](https://aistudio.google.com/rate-limit)再確認未變；官方額度頁已不公布每個模型的數字，Google 可能調整，以你自己的儀表板為準）：
 
 | 模型系列 | RPM | TPM | **RPD（每日）** |
 |---|---|---|---|
-| **Flash Lite**（本專案主力） | 15 | 250K | **500** |
-| **Flash**（僅作備援） | 5 | 250K | **20** |
+| **Flash Lite**（本專案主力，`gemini-3.5-flash-lite`） | 15 | 250K | **500** |
+| **Flash**（僅作備援，`gemini-3.6-flash`） | 5 | 250K | **20** |
+| **Embedding**（跨會議問答的向量，`gemini-embedding-001`） | 100 | 30K | 1K |
+
+> **2026-10 官方改版（Gemini 3.6）**：`gemini-3.5-flash` 的請求被官方自動轉送到 `gemini-3.6-flash`，所以設定直接釘死 3.6，不依賴轉送；`gemini-3.5-flash-lite` 照舊是正式版、沒有停用日期，兩者都仍有免費層。`temperature`／`top_p`／`top_k` 已棄用——目前 API 直接忽略，官方寫明「未來的模型世代會回傳錯誤」，所以全部請求都已拿掉（`tests/test_gemini_params.py` 守著，不讓它們再出現）。最新的 Flash 是 `gemini-3.8-flash`，刻意先不換：剛發布的版本最容易過載，換之前也要先用 `eval/run.py` 比過品質
 
 > 兩者差 25 倍——這是所有預設值的取捨依據：能用 Lite 解決的就不動用 Flash。
 
@@ -68,7 +71,7 @@
 | 音訊轉錄 | `TRANSCRIBE_MODEL` | `gemini-3.5-flash-lite` | 500 次/日、15 次/分 |
 | 長音檔分段秒數 | `TRANSCRIBE_CHUNK_SECONDS` | `240`（0＝不分段） | 每段各算一次轉錄請求；**六分鐘以內的檔案不分段**，整份送出 |
 | 標註率不足時的 Lite 重試次數 | `TRANSCRIBE_LABEL_RETRIES` | `2` | 每次僅佔每日額度 0.2% |
-| 長檔／講者標註備援的強模型 | `TRANSCRIBE_FALLBACK_MODEL` | `gemini-3.5-flash`（空＝關閉） | 比 lite 分講者好，但每日僅 20 次且常 503 |
+| 長檔／講者標註備援的強模型 | `TRANSCRIBE_FALLBACK_MODEL` | `gemini-3.6-flash`（空＝關閉） | 比 lite 分講者好，但每日僅 20 次且常 503 |
 | 長檔改用強模型的門檻（秒）| `TRANSCRIBE_LONG_FILE_THRESHOLD_SECONDS` | `0`（停用，長檔一律 lite 分段）| 設 600 即恢復長檔用強模型 |
 | 每個檔案最多幾段可用備援模型 | `TRANSCRIBE_MAX_FALLBACK_CHUNKS` | `0`（＝預設完全不動用 Flash） | 設 1 才會在重試仍失敗時降級 |
 | 單一檔案的重試總上限 | `TRANSCRIBE_MAX_RETRY_CALLS` | `10` | 讓重試成本與影片長度脫鉤 |
@@ -76,7 +79,7 @@
 | 聲紋接力最多記幾位講者 | `VOICE_RELAY_MAX_SPEAKERS` | `20`（設 0 停用） | 只影響長檔分段轉錄；每段重傳全部樣本，77 分鐘的檔約多花數分鐘。**設了 `PYANNOTE_API_KEY` 時自動跳過** |
 | 會議分析、跨會議問答 | `GEMINI_MODEL` | `gemini-3.5-flash-lite` | 同上 |
 | 錯字校正（選用） | `CORRECT_MODEL` | `gemini-3.5-flash-lite` | 同上 |
-| 預錄聲音辨識人（選用） | `VOICE_MATCH_MODEL` | `gemini-3.5-flash` | 一場會議只打 1 次，用強模型換準確度 |
+| 預錄聲音辨識人（選用） | `VOICE_MATCH_MODEL` | `gemini-3.6-flash` | 一場會議只打 1 次，用強模型換準確度 |
 | 最多可註冊幾個人的聲音 | `LIVE_ENROLL_MAX_SPEAKERS` | `4`（0＝停用整個功能） | 未勾選就完全不產生請求 |
 | 專門的講者分離（選用） | `PYANNOTE_API_KEY` | 空＝不啟用 | 非 Gemini 額度；pyannoteAI 試用 150 小時，見下方 |
 | 講者分離模型 | `PYANNOTE_MODEL` | `precision-2` | 只有 precision-2 支援 voiceprint |
@@ -88,11 +91,11 @@
 >
 > **關於 429（配額爆掉）**：免費層每日額度是**「每專案每模型」共用**——同一個 Google 專案下的多把 key 共用同一份額度，加 key 只增加每分鐘吞吐、不增加每日總量。要更高每日量：改用**不同專案**的 key，或升級付費。實際額度看 [AI Studio](https://aistudio.google.com/rate-limit)。
 >
-> **品質 vs 額度**：想要更好的分析品質，可把 `GEMINI_MODEL` 設為 `gemini-3.5-flash`（推理較強，但免費層每日僅 20 次，適合少量分析）。
+> **品質 vs 額度**：想要更好的分析品質，可把 `GEMINI_MODEL` 設為 `gemini-3.6-flash`（推理較強，但免費層每日僅 20 次，適合少量分析）。
 >
-> **多人會議的講者分辨**：轉錄的 prompt 已強力要求標註講者，但實測 `gemini-flash-lite` 對「誰在講話」的辨識仍不穩定，3 人以上時常被併成一兩位。需要準確標出多位講者時，把 `TRANSCRIBE_MODEL` 設為 `gemini-3.5-flash`（可正確分出多位講者，代價是免費每日額度較低）。**不要用任何 `-latest` 結尾的別名**（`gemini-flash-latest`、`gemini-flash-lite-latest`…）——那會飄到當下最新版，而剛發布的版本正在被全世界搶，回的就是 `503 UNAVAILABLE / This model is currently experiencing high demand`。2026-09 一支 10 分鐘的上傳整份失敗即是此因，之後所有預設模型都改成釘死版本。
+> **多人會議的講者分辨**：轉錄的 prompt 已強力要求標註講者，但實測 `gemini-flash-lite` 對「誰在講話」的辨識仍不穩定，3 人以上時常被併成一兩位。需要準確標出多位講者時，把 `TRANSCRIBE_MODEL` 設為 `gemini-3.6-flash`（可正確分出多位講者，代價是免費每日額度較低）。**不要用任何 `-latest` 結尾的別名**（`gemini-flash-latest`、`gemini-flash-lite-latest`…）——那會飄到當下最新版，而剛發布的版本正在被全世界搶，回的就是 `503 UNAVAILABLE / This model is currently experiencing high demand`。2026-09 一支 10 分鐘的上傳整份失敗即是此因，之後所有預設模型都改成釘死版本。
 >
-> **講者標註失敗會自動重試**：實測同一段音訊、同一個模型、`temperature=0`，講者標註率可能是 20% 也可能是 100%——這是**執行間的變異**，不是音訊太難，也不是分段太長（縮短分段沒有改善）。所以某一段的標註率低於 **80%** 時會自動重跑。門檻訂在 0.8 而非 0.5：prompt 要求每一行都標講者，一半沒標就是模型沒照做。重跑仍失敗時可改用 `TRANSCRIBE_FALLBACK_MODEL` 跑那一段，但**預設 `TRANSCRIBE_MAX_FALLBACK_CHUNKS=0`，等於預設不啟用**——要開再設 1。**設了 `PYANNOTE_API_KEY` 時不為講者標籤重跑**：講者會依時間戳整份重標，Gemini 標得再差都用不到，重試只留給「整段放棄轉錄」（有時間戳且有內容的行低於 80%）。實測 10.5 分鐘質詢：3 段原本全因標註率低各重跑 2 次，9 次呼叫 114 秒 → 3 次 39 秒，重標後 58 行全部有講者。
+> **講者標註失敗會自動重試**：實測同一段音訊、同一個模型、`temperature=0`（這個參數 Gemini 3.6 起已被忽略、之後移除），講者標註率可能是 20% 也可能是 100%——這是**執行間的變異**，不是音訊太難，也不是分段太長（縮短分段沒有改善）。所以某一段的標註率低於 **80%** 時會自動重跑。門檻訂在 0.8 而非 0.5：prompt 要求每一行都標講者，一半沒標就是模型沒照做。重跑仍失敗時可改用 `TRANSCRIBE_FALLBACK_MODEL` 跑那一段，但**預設 `TRANSCRIBE_MAX_FALLBACK_CHUNKS=0`，等於預設不啟用**——要開再設 1。**設了 `PYANNOTE_API_KEY` 時不為講者標籤重跑**：講者會依時間戳整份重標，Gemini 標得再差都用不到，重試只留給「整段放棄轉錄」（有時間戳且有內容的行低於 80%）。實測 10.5 分鐘質詢：3 段原本全因標註率低各重跑 2 次，9 次呼叫 114 秒 → 3 次 39 秒，重標後 58 行全部有講者。
 >
 > **為什麼重試次數多、降級次數少**：Flash Lite 每日 500 次、Flash 只有 20 次（差 25 倍）。既然失敗是執行間的變異，多試幾次的累積成功率就很划算——實測單次成功率約 6 成，試 3 次約 94%，只花掉 Lite 額度的 0.6%；而降級一次就吃掉 Flash 額度的 5%。所以預設是「Lite 重試 2 次，Flash 完全不用」（`TRANSCRIBE_MAX_FALLBACK_CHUNKS=0`）——把額度全花在便宜又有效的 Lite 重試上。
 >
@@ -132,7 +135,7 @@
 - **多把金鑰輪替**：`GEMINI_API_KEYS`（逗號分隔）round-robin，每次呼叫換下一把；撞 429 自動跳下一把
 - **503 過載自動退避重試**：Google 端暫時過載時指數退避（2s→5s→12s→30s→60s，各加 0~25% 亂數避免多個請求同時重試）重試最多 5 次，整個窗口約兩分鐘
 - **長檔單段失敗不整份作廢**：分段轉錄時某一段重試用盡仍失敗，只在逐字稿留下「這段轉錄失敗」的缺漏標記並繼續轉下一段；全部段落都失敗才報錯
-- **持續過載時自動換模型**：退避重試用盡仍是 503（「This model is currently experiencing high demand」），就改用另一個模型整輪重試——`gemini-3.5-flash-lite` ↔ `gemini-3.5-flash`，兩者負載與額度分開計算，一個過載另一個常常正常。涵蓋轉錄、分析、錯字校正、聲紋比對、翻譯、問答；只有過載才換（429 額度用完不換，免得把另一顆額度也吃掉）。代價是 lite 過載時會用到 3.5-flash 每日僅 20 次的額度
+- **持續過載時自動換模型**：退避重試用盡仍是 503（「This model is currently experiencing high demand」），就改用另一個模型整輪重試——`gemini-3.5-flash-lite` ↔ `gemini-3.6-flash`，兩者負載與額度分開計算，一個過載另一個常常正常。涵蓋轉錄、分析、錯字校正、聲紋比對、翻譯、問答；只有過載才換（429 額度用完不換，免得把另一顆額度也吃掉）。代價是 lite 過載時會用到 3.6-flash 每日僅 20 次的額度
 - **JSON 驗證失敗自動重試**：把 Pydantic 錯誤訊息回饋給模型，最多 3 次
 
 ## 快速開始
@@ -448,7 +451,7 @@ app/
 ├── atomicio.py           # 原子寫檔（斷電不壞資料）
 └── evaluation.py         # 任務抽取 precision/recall（供 eval/run.py）
 eval/                     # 量化評估：標注資料集 + 評估腳本；diarize_poc.py 講者分離實測
-tests/                    # pytest 測試（1021，全部離線、不需金鑰；前端純函式模組的測試另需 node）
+tests/                    # pytest 測試（1024，全部離線、不需金鑰；前端純函式模組的測試另需 node）
 Dockerfile                # 雲端部署映像（Python + ffmpeg，轉錄用 Gemini）
 requirements-cloud.lock   # 雲端完整鎖定版本（Dockerfile 與 CI 共用）
 ruff.toml                 # lint 規則（CI 跑 ruff check .）

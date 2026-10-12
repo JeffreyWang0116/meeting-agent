@@ -45,7 +45,8 @@ _SAFE_AUDIO_EXTS = media.GEMINI_AUDIO_EXTS
 DEFAULT_CHUNK_THRESHOLD_SECONDS = 360  # 6 分鐘
 
 # 一段裡有講者標籤的行數低於這個比例，就當作「模型這輪放棄標講者」而重試。
-# 實測同一段快速交鋒的質詢音訊、同一個模型、temperature=0，標註率可能是 26%
+# 實測同一段快速交鋒的質詢音訊、同一個模型（當時還設著 temperature=0，Gemini 3.6 起
+# 這個參數已被忽略、之後移除），標註率可能是 26%
 # 也可能是 95%——是執行間的變異，不是音訊太難，所以重跑一次通常就正常了。
 #
 # 訂在 0.8 而非 0.5：prompt 要求每一行都標講者，一半沒標就是模型沒照做。
@@ -656,7 +657,6 @@ class GeminiTranscriber:
             args = {
                 "model": model or self.model,
                 "contents": [*resolved_refs, self.build_prompt(hint, user), uploaded],
-                "config": {"temperature": 0.0},
             }
             if on_partial is None:
                 return client.models.generate_content(**args).text or ""

@@ -481,6 +481,6 @@ class AskAgent:
 
         client = genai.Client(api_key=key)
         response = client.models.generate_content(
-            model=model or self.model, contents=prompt, config={"temperature": 0.2}
+            model=model or self.model, contents=prompt
         )
         return response.text or ""

@@ -143,8 +143,7 @@ class CorrectorAgent:
         response = client.models.generate_content(
             model=model or self.model,
             contents=prompt,
-            # temperature=0：校正是機械性工作，不要創意
-            config={"response_mime_type": "application/json", "temperature": 0.0},
+            config={"response_mime_type": "application/json"},
         )
         return response.text or ""
 
