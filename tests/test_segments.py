@@ -15,6 +15,7 @@ from app.transcription.segments import (
     replace_speaker,
     replace_term_in_range,
     shift_timestamps,
+    strip_time_prefix,
     speaker_label_ratio,
     speaker_of,
     timed_speech_ratio,
@@ -489,3 +490,30 @@ def test_pick_evidence_chunks_respects_the_cap_in_appearance_order():
         "[0:30] 講者D：四",
     ]
     assert pick_evidence_chunks(parts, max_chunks=2) == [0, 1]
+
+
+# ---- 模型偶爾在一行吐出兩個時間戳：「[3:51] [3:51] 講者B：。」 ----
+# 平移只認行首第一個，第二個原樣留在內文，畫面變成時間欄 15:31、內文「[3:51] 講者B：。」；
+# 過濾空行時第二個時間戳裡的數字又被當成「有內容」，這行空話因此沒被濾掉
+
+def test_shift_timestamps_drops_repeated_leading_markers():
+    assert shift_timestamps("[3:51] [3:51] 講者B：好。", 700) == "[15:31] 講者B：好。"
+    assert shift_timestamps("[3:51][3:52]講者B：好。", 700) == "[15:31] 講者B：好。"
+
+
+def test_normalize_drops_repeated_leading_markers():
+    assert normalize_timestamps("[3:51] [3:51] 講者B：好。") == "[3:51] 講者B：好。"
+
+
+def test_strip_time_prefix_strips_every_leading_marker():
+    assert strip_time_prefix("[15:31] [3:51] 講者B：。") == "講者B：。"
+
+
+def test_drop_empty_lines_sees_through_repeated_markers():
+    """截圖那一行：兩個時間戳加一個空的講者標籤，沒有任何話。"""
+    assert drop_empty_lines("[15:31] [3:51] 講者B：。\n[15:35] 講者C：好。") == "[15:35] 講者C：好。"
+
+
+def test_marker_in_the_middle_of_speech_is_left_alone():
+    """內文裡講到的時間（「[3:51] 那張投影片」這種）不是行首重複標記，不能動。"""
+    assert shift_timestamps("[0:10] 講者A：請看 [3:51] 那段", 60) == "[1:10] 講者A：請看 [3:51] 那段"

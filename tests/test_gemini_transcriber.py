@@ -31,6 +31,14 @@ def test_transcribe_prompt_asks_for_speaker_labels():
     assert "講者" in _TRANSCRIBE_PROMPT
 
 
+def test_prompt_keeps_english_only_for_spoken_english():
+    """「中英夾雜保留原文」那句會讓模型聽不清楚時改寫英文：立法院質詢「謝謝副院長，
+    請卓院長」被轉成「謝謝副Ping，我們現在請左Ping」。英文只能用在真的說了英文的地方。"""
+    from app.transcription.gemini_transcriber import _TRANSCRIBE_PROMPT
+
+    assert "聽不清楚的中文不要用英文字或拼音代替" in _TRANSCRIBE_PROMPT
+
+
 def test_prompt_forbids_using_names_as_speaker_labels():
     """標籤一律用代號。模型沒有跨段記憶，允許它「聽得出名字就用名字」的話，
     同一個人在聽得到稱謂的段落標「王委員」、聽不到的段落標「講者A」，

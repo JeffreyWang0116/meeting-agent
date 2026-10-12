@@ -22,6 +22,10 @@ import re
 # 講者名存進跨段清單，污染後續段的提示。
 # 輸出一律經過 format_time 正規化成 [分:秒]，所以下游只會看到標準格式。
 TIME_PREFIX_RE = re.compile(r"^\s*\[(\d{1,2}(?::\d{1,2}){0,2})\]\s*")
+# 行首連續好幾個時間標記（模型偶爾吐「[3:51] [3:51] 講者B：。」）。只認第一個，其餘丟掉：
+# 留著的話平移後變成「[15:31] [3:51] 講者B：。」，第二個標記被當成內文顯示，
+# 裡面的數字還讓 _has_speech 誤判成有內容、空話因此濾不掉
+REPEATED_TIME_RE = re.compile(r"^(?:\s*\[\d{1,2}(?::\d{1,2}){0,2}\]\s*)+")
 
 # 行首的講者標註，例如「講者A：」。務必先用 strip_time_prefix 去掉時間戳再比對
 # ——時間戳裡的冒號會讓行首比對誤抓成「[0」。
@@ -70,7 +74,7 @@ def last_timestamp_seconds(text: str) -> int | None:
 
 
 def strip_time_prefix(line: str) -> str:
-    return TIME_PREFIX_RE.sub("", line)
+    return REPEATED_TIME_RE.sub("", line)
 
 
 def speaker_of(line: str) -> str | None:
@@ -349,7 +353,7 @@ def normalize_timestamps(text: str) -> str:
     for line in text.split("\n"):
         m = TIME_PREFIX_RE.match(line)
         if m:
-            line = f"[{format_time(parse_time_label(m.group(1)))}] {line[m.end():]}"
+            line = f"[{format_time(parse_time_label(m.group(1)))}] {strip_time_prefix(line[m.end():])}"
         lines.append(line)
     return "\n".join(lines)
 
@@ -369,7 +373,7 @@ def shift_timestamps(text: str, offset_seconds: float | None) -> str:
             lines.append(line)
             continue
         any_marker = True
-        rest = line[m.end():]
+        rest = strip_time_prefix(line[m.end():])
         if offset_seconds is None:
             lines.append(rest)
         else:
