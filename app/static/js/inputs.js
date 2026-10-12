@@ -88,8 +88,8 @@ $("btnUpload").addEventListener("click", async () => {
         // 重啟時還沒轉到的部分永遠補不回來了，而原始檔案還在使用者手上——
         // 寧可講清楚要不要重傳，也不要讓人以為分析的是完整的一場會議
         showNotice("轉錄工作已遺失（伺服器可能重啟過），已改用瀏覽器保留的逐字稿分析。這份可能不完整，需要完整結果請重新上傳原檔。");
+        resetFilePanel();
         renderResult(rescued, fileTranscriptText);
-        $("fileStatus").textContent = "完成（部分逐字稿）";
         break;
       }
       const pct = Math.round((job.progress || 0) * 100);
@@ -112,7 +112,7 @@ $("btnUpload").addEventListener("click", async () => {
       // 轉錄階段的進度條與逐字稿在「新會議」畫面，看得到才有意義；
       // 進到分析階段才切去結果頁擺骨架
       if (job.status === "analyzing") showResultSkeleton();
-      if (job.status === "done") { renderResult(job.result, job.transcript); break; }
+      if (job.status === "done") { resetFilePanel(); renderResult(job.result, job.transcript); break; }
       if (job.status === "error") throw new Error(job.error || "轉錄失敗");
     }
   } catch (e) {
@@ -1112,9 +1112,10 @@ async function finishLiveSession() {
       showNotice("聆聽 session 已遺失（伺服器可能重啟過），已改用瀏覽器保留的逐字稿分析。請核對逐字稿結尾是否完整。");
     }
     reportEnrollOutcome(result);
-    $("liveStatus").textContent = "完成";
     liveSessionId = null;
     $("btnLiveStart").disabled = false;
+    // 逐字稿已經進到結果頁與歷史會議；留在聆聽區，下次回來開新的一場時看到的是上一場
+    resetLivePanel();
     renderResult(result, result.transcript);
   } catch (e) {
     // 404 走到這裡代表上面的退路也救不了：session 沒了、瀏覽器這份逐字稿又是空的。
@@ -1133,5 +1134,21 @@ async function finishLiveSession() {
   }
 }
 $("btnLiveRetry").addEventListener("click", finishLiveSession);
+
+function resetLivePanel() {
+  liveTranscriptText = "";
+  $("liveTranscript").innerHTML = "";
+  $("liveTranscript").style.display = "none";
+  $("liveStatus").textContent = "";
+}
+
+// 檔案上傳也一樣：成功後把進度條與上一份逐字稿收起來
+function resetFilePanel() {
+  $("fileProgress").style.display = "none";
+  $("fileProgress").firstElementChild.style.width = "0%";
+  $("fileTranscript").innerHTML = "";
+  $("fileTranscript").style.display = "none";
+  $("fileStatus").textContent = "";
+}
 
 export { JOB_STATUS_ZH, inputBusy, acquireSystemAudio, acquireWakeLock, appendCaption, buildLiveStream, closeStage, finishLiveSession, initStageAudio, liveMicStream, liveRecording, liveSegIndex, liveSpeakers, liveStream, liveTick, liveTranscriptText, openStage, orb, pickMime, pumpLevel, recordSegment, releaseLiveStreams, releaseStageAudio, releaseWakeLock, transcriptHome, uploadLiveChunk };

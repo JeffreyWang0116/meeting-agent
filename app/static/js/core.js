@@ -170,10 +170,12 @@ function esc(s) {
   return String(s ?? "").replace(/[&<>"']/g, c =>
     ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
+// 橫幅一律附關閉鈕：原本只有下一次送出分析才會清掉，換頁之後還一直掛在最上面
+const BANNER_CLOSE = `<button class="banner-x" type="button" aria-label="關閉" title="關閉">${"×"}</button>`;
 function showError(msg) {
   const b = $("errorBanner");
   b.classList.remove("notice");
-  b.innerHTML = icon("circle-alert") + `<span>${esc(msg)}</span>`;
+  b.innerHTML = icon("circle-alert") + `<span>${esc(msg)}</span>` + BANNER_CLOSE;
   b.style.display = "flex";
   b.scrollIntoView({ behavior: "smooth", block: "nearest" });
 }
@@ -181,10 +183,13 @@ function showError(msg) {
 function showNotice(msg) {
   const b = $("errorBanner");
   b.classList.add("notice");
-  b.innerHTML = icon("check") + `<span>${esc(msg)}</span>`;
+  b.innerHTML = icon("check") + `<span>${esc(msg)}</span>` + BANNER_CLOSE;
   b.style.display = "flex";
 }
 function clearError() { $("errorBanner").style.display = "none"; }
+document.addEventListener("click", e => {
+  if (e.target.closest("#errorBanner .banner-x")) clearError();
+});
 async function jsonOrThrow(resp) {
   const body = await resp.json().catch(() => ({}));
   if (!resp.ok) {

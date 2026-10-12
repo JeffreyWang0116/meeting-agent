@@ -1,4 +1,4 @@
-import { $ } from "./core.js";
+import { $, clearError } from "./core.js";
 
 /* ==================================================================
    0. 版面路由：側欄一次只顯示一個 view
@@ -27,11 +27,18 @@ function showView(name) {
   window.scrollTo(0, 0);
 }
 // 側欄、數字磚、面板上的「看全部」共用同一個屬性，不必各自綁事件
+// 使用者自己換頁（點側欄、看全部、瀏覽器上一頁）時清掉橫幅：上一頁的錯誤跟新的頁面無關。
+// 程式自己切頁（分析完跳結果頁）不清——那時常常剛顯示一則跟結果有關的提示
 document.addEventListener("click", e => {
   const el = e.target.closest("[data-view]");
-  if (el) showView(el.dataset.view);
+  if (!el) return;
+  clearError();
+  showView(el.dataset.view);
 });
-window.addEventListener("hashchange", () => showView(location.hash.slice(1)));
+window.addEventListener("hashchange", () => {
+  clearError();
+  showView(location.hash.slice(1));
+});
 showView(location.hash.slice(1) || "home");
 
 export { VIEW_TITLES, WIDE, showView };

@@ -289,12 +289,19 @@ $("meetingRows").addEventListener("click", async e => {
   const del = e.target.closest(".del-meeting");
   if (del) {
     if (!confirm("確定要刪除這場會議？它的任務也會一併刪除。")) return;
+    // 404＝伺服器上早就沒有這場（別的裝置或分頁刪過、雲端重新部署清掉了），是列表過時，
+    // 不是刪除失敗：一樣從列表拿掉，講清楚發生什麼事
+    let gone = false;
     try {
       await api.deleteMeeting(del.dataset.id);
-      delete meetingDetailCache[del.dataset.id];
-      if (expandedMeetingId === del.dataset.id) expandedMeetingId = null;
-      refreshMeetings(); refreshTasks(); refreshReminders();
-    } catch (err) { showError("刪除會議失敗：" + err.message); }
+    } catch (err) {
+      if (err.status !== 404) { showError("刪除會議失敗：" + err.message); return; }
+      gone = true;
+    }
+    delete meetingDetailCache[del.dataset.id];
+    if (expandedMeetingId === del.dataset.id) expandedMeetingId = null;
+    refreshMeetings(); refreshTasks(); refreshReminders();
+    if (gone) showNotice("這場會議已經不存在（可能已在其他裝置或分頁刪除），已從列表移除。");
     return;
   }
   // 會議重點 → 跳到逐字稿的時間節點

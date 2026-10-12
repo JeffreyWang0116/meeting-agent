@@ -1,5 +1,5 @@
 import { api } from "./api.js";
-import { $, PRIORITY_ZH, esc, icon, loadFail, pageNo, paginate, registerPager, registerRefresher, renderPager, showError } from "./core.js";
+import { $, PRIORITY_ZH, esc, icon, loadFail, pageNo, paginate, registerPager, registerRefresher, renderPager, showError, showNotice } from "./core.js";
 import { renderHome } from "./home.js";
 import { allMeetings, meetingLabel, refreshMeetings } from "./meetings.js";
 import { refreshReminders } from "./reminders.js";
@@ -180,12 +180,17 @@ groups.addEventListener("click", async e => {
   const btn = e.target.closest(".del-btn");
   if (!btn) return;
   if (!confirm("確定要刪除這筆任務？")) return;
+  let gone = false;  // 404＝早就不在了（見歷史會議的刪除），從列表拿掉就好
   try {
     await api.deleteTask(btn.dataset.id);
-    allTasks = allTasks.filter(t => t.id !== btn.dataset.id);
-    renderTasks();
-    refreshReminders();
-  } catch (err) { showError("刪除任務失敗：" + err.message); }
+  } catch (err) {
+    if (err.status !== 404) { showError("刪除任務失敗：" + err.message); return; }
+    gone = true;
+  }
+  allTasks = allTasks.filter(t => t.id !== btn.dataset.id);
+  renderTasks();
+  refreshReminders();
+  if (gone) showNotice("這筆任務已經不存在（可能已在其他裝置或分頁刪除），已從列表移除。");
 });
 
 // 編輯列快捷鍵：Enter 儲存、Esc 取消
