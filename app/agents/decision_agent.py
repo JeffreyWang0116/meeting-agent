@@ -25,6 +25,8 @@ class DecisionAgentError(Exception):
 
 
 _CODE_FENCE = re.compile(r"^\s*```(?:json)?\s*|\s*```\s*$")
+# 「標記這一刻」送來的時間點。前端給什麼就會進提示詞，所以擋掉不是時間的字串
+_MARK_RE = re.compile(r"\d{1,2}(:\d{1,2}){1,2}")
 
 # 可由使用者勾選開關的功能；title/date/attendees/pending_items/tags 是基本
 # 欄位，不受 features 控制，任何錄音種類都會產生
@@ -249,6 +251,8 @@ def build_prompt(
     features: set[str] | None = None,
     extra_terms: list[dict] | None = None,
     attendees: list[str] | None = None,
+    marks: list[str] | None = None,
+    notes: str | None = None,
 ) -> str:
     # features=None：向後相容，等同全部功能都開（沒有勾選框限制的舊行為）
     features = FEATURE_KEYS if features is None else features
@@ -279,6 +283,27 @@ def build_prompt(
             f"但「在場」不等於「負責」——逐字稿裡沒有明確指派時，"
             f"禁止把這些姓名填進 owner 或用來猜測任何其他欄位。"
         )
+    # 聆聽中按下「標記這一刻」的時間點：使用者當場認定這裡重要，比模型自己挑準
+    mark_line = ""
+    stamps = [str(m).strip() for m in (marks or []) if _MARK_RE.fullmatch(str(m).strip())]
+    if stamps:
+        mark_line = (
+            f"\n使用者在聆聽時按下「標記這一刻」的時間點：{'、'.join(stamps)}。"
+            f"這幾個時間點附近的內容一律優先列入 highlights（time 就填這些時間），"
+            f"但不要因此改寫或誇大那段話的內容。"
+        )
+    # 會議中自己打的筆記。必須與逐字稿分得清清楚楚：混在一起模型會把它當成某個人
+    # 說過的話，source_quote 也會引用到逐字稿裡根本不存在的句子
+    note_line = ""
+    note_text = (notes or "").strip()
+    if note_text:
+        note_line = (
+            f"\n使用者在會議中自己打的筆記（不是逐字稿、不是發言，只是補充說明）：\n"
+            f"{note_text}\n"
+            f"可以用它補足分析，但 source_quote 只能引用逐字稿裡真的出現過的句子，"
+            f"不可以引用這段筆記。"
+        )
+
     # 規則編號接在 PROMPT_TEMPLATE 的第 10 條之後，而且不能跳號——
     # 模型看到 10 之後直接跳 12，會以為自己漏讀了一條
     rules, n = [], 10
@@ -299,7 +324,7 @@ def build_prompt(
         weekday=_WEEKDAY_ZH[meeting_date.weekday()],
         kind_line=kind_line,
         glossary_line=glossary_line,
-        attendee_line=attendee_line,
+        attendee_line=attendee_line + mark_line + note_line,
         feature_note=feature_note,
         schema=_schema_example(features, list(sections_for_kind(kind))),
         transcript=transcript,
@@ -367,6 +392,8 @@ class DecisionAgent:
         extra_terms: list[dict] | None = None,
         user: str = DEFAULT_USER,
         attendees: list[str] | None = None,
+        marks: list[str] | None = None,
+        notes: str | None = None,
     ) -> MeetingAnalysis:
         meeting_date = meeting_date or date.today()
         # features=None：向後相容，等同全部功能都開
@@ -379,6 +406,8 @@ class DecisionAgent:
             features=features,
             extra_terms=extra_terms,
             attendees=attendees,
+            marks=marks,
+            notes=notes,
         )
 
         prompt = base_prompt

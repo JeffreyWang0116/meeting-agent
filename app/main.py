@@ -16,7 +16,7 @@ from typing import Optional
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, Field, ValidationError
 
 from app.agents.corrector_agent import CorrectorAgent
 from app.agents.decision_agent import (
@@ -322,6 +322,9 @@ class MeetingRequest(BaseModel):
     correct_typos: bool = False
     # 本次會議專用詞彙，與全域詞彙表合併使用
     terms: Optional[list[dict]] = None
+    # 聆聽 session 遺失時會改走這支端點救援，標記與筆記不該跟著不見
+    marks: Optional[list[str]] = None
+    notes: Optional[str] = Field(default=None, max_length=20000)
 
 
 class FinishRequest(BaseModel):
@@ -330,6 +333,10 @@ class FinishRequest(BaseModel):
     features: Optional[list[str]] = None
     correct_typos: bool = False
     terms: Optional[list[dict]] = None
+    # 聆聽中按「標記這一刻」的時間點（"5:23"）。不是時間格式的會在提示詞那層丟掉
+    marks: Optional[list[str]] = None
+    # 會議中自己打的筆記。直接進提示詞，所以要有長度上限
+    notes: Optional[str] = Field(default=None, max_length=20000)
 
 
 class ReanalyzeRequest(BaseModel):
@@ -742,6 +749,8 @@ def create_app(
         terms: list[dict] | None = None,
         speaker_prior: dict[str, str] | None = None,
         attendees: list[str] | None = None,
+        marks: list[str] | None = None,
+        notes: str | None = None,
     ) -> dict:
         usage.record("analysis")
         if correct_typos:
@@ -757,6 +766,8 @@ def create_app(
                 user=current_user(),
                 speaker_prior=speaker_prior,
                 attendees=attendees,
+                marks=marks,
+                notes=notes,
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc))
@@ -845,6 +856,8 @@ def create_app(
             resolve_features(req.features, kind),
             correct_typos=req.correct_typos,
             terms=validate_terms(req.terms),
+            marks=req.marks,
+            notes=req.notes,
         )
 
     @app.get("/api/meeting-kinds")
@@ -1558,6 +1571,9 @@ def create_app(
             speaker_prior=speaker_prior,
             # 會前登記的人＝使用者親自指認「這些人在場、姓名這樣寫」
             attendees=enrolled,
+            # 會議當下才有的資訊：按下的標記時間點、手打的筆記
+            marks=req.marks if req else None,
+            notes=req.notes if req else None,
         )
         # result 帶著校正後的 transcript，放在後面覆蓋原始版本。
         # speakers_matched/unmatched 讓前端說得出「預錄的 4 位認出了哪 2 位」——

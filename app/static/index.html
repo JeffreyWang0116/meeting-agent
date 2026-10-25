@@ -341,6 +341,15 @@
                   <option value="zh">譯成中文</option>
                 </select>
               </div>
+              <div class="field">
+                <label class="lbl" for="liveChunk">逐字稿更新頻率</label>
+                <select class="field-sel" id="liveChunk" title="多久把一段錄音送去轉成文字。越短看到字越快，但同樣長度的會議要打更多次 AI 請求">
+                  <option value="20">每 20 秒（最快，一小時約 180 次請求）</option>
+                  <option value="30">每 30 秒（一小時約 120 次請求）</option>
+                  <option value="45" selected>每 45 秒（預設，一小時約 80 次請求）</option>
+                  <option value="60">每 60 秒（最省，一小時約 60 次請求）</option>
+                </select>
+              </div>
             </div>
             <!-- 麥克風來源：樣本與正式聆聽共用同一支，聲紋才比得準（同一個人換裝置錄，
                  音色差距足以讓比對失效）。裝置名稱要授權過才看得到，所以點開才列舉 -->
@@ -411,11 +420,21 @@
                 <svg class="i-sm" aria-hidden="true"><use href="/static/icons.svg#disc"/></svg>
                 回到沉浸畫面
               </button>
+              <button class="ghost" id="btnLiveMark" hidden title="記下現在這個時間點，分析時優先列入會議重點">
+                <svg class="i-sm" aria-hidden="true"><use href="/static/icons.svg#star"/></svg>
+                標記這一刻
+              </button>
               <button class="ghost" id="btnLiveRetry" style="display:none">
                 <svg class="i-sm" aria-hidden="true"><use href="/static/icons.svg#refresh-cw"/></svg>
                 重試分析
               </button>
               <span class="status-line" id="liveStatus"></span>
+            </div>
+            <div class="mark-list" id="liveMarks" hidden></div>
+            <div class="field" id="liveNotesRow" hidden>
+              <label class="lbl" for="liveNotes">我的筆記（會一起送去分析，但不會寫進逐字稿）</label>
+              <textarea class="field-sel" id="liveNotes" rows="3"
+                placeholder="會議中想到的事、聽不清楚要回頭確認的地方…"></textarea>
             </div>
             <div class="transcript-box" id="liveTranscript"></div>
           </div>
