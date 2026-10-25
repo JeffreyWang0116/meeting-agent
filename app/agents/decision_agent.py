@@ -254,11 +254,16 @@ def build_prompt(
     attendees: list[str] | None = None,
     marks: list[str] | None = None,
     notes: str | None = None,
+    # 自訂範本：{"label": 種類名稱, "hint": 說明, "sections": {區塊: 說明}}。
+    # 有值時取代內建種類的查表，其餘流程完全一樣
+    kind_spec: dict | None = None,
 ) -> str:
     # features=None：向後相容，等同全部功能都開（沒有勾選框限制的舊行為）
     features = FEATURE_KEYS if features is None else features
     kind_line = ""
-    if kind:
+    if kind_spec:
+        kind_line = f"\n會議種類：{kind_spec.get('label', '')}。{kind_spec.get('hint', '')}"
+    elif kind:
         resolved = resolve_kind(kind)
         kind_line = f"\n會議種類：{resolved}。{KIND_HINTS.get(resolved, '')}"
     glossary_line = ""
@@ -311,7 +316,7 @@ def build_prompt(
     if FEATURE_KEYS - features:
         n += 1
         rules.append(f"\n{n}. 這次不需要 {'、'.join(sorted(FEATURE_KEYS - features))} 欄位，不要輸出。")
-    spec = sections_for_kind(kind)
+    spec = kind_spec.get("sections", {}) if kind_spec else sections_for_kind(kind)
     if spec:
         n += 1
         detail = "\n".join(f"   - {label}：{desc}" for label, desc in spec.items())
@@ -327,7 +332,7 @@ def build_prompt(
         glossary_line=glossary_line,
         attendee_line=attendee_line + mark_line + note_line,
         feature_note=feature_note,
-        schema=_schema_example(features, list(sections_for_kind(kind))),
+        schema=_schema_example(features, list(spec)),
         transcript=transcript,
     )
 
@@ -395,6 +400,7 @@ class DecisionAgent:
         attendees: list[str] | None = None,
         marks: list[str] | None = None,
         notes: str | None = None,
+        kind_spec: dict | None = None,
     ) -> MeetingAnalysis:
         meeting_date = meeting_date or date.today()
         # features=None：向後相容，等同全部功能都開
@@ -409,6 +415,7 @@ class DecisionAgent:
             attendees=attendees,
             marks=marks,
             notes=notes,
+            kind_spec=kind_spec,
         )
 
         prompt = base_prompt

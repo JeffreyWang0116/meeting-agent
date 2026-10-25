@@ -143,6 +143,22 @@ class TaskStore(ABC):
     def groups_for(self, uid: str, email: str | None) -> list[dict]:
         """uid 是成員、或 email 有待接受邀請的群組。"""
 
+    # ---- 自訂會議範本：存在工作區底下，群組成員自動共用。不進備份 ----
+
+    @abstractmethod
+    def save_template(self, template: dict) -> None:
+        """新增或整份覆蓋一個範本（template 自帶 id 與 user）。"""
+
+    @abstractmethod
+    def get_template(self, template_id: str, user: str) -> dict | None:
+        """別的工作區的一律當作不存在。"""
+
+    @abstractmethod
+    def list_templates(self, user: str) -> list[dict]: ...
+
+    @abstractmethod
+    def delete_template(self, template_id: str, user: str) -> None: ...
+
     # ---- AI 錯誤回報：累積真實案例，換模型前拿來回歸測試。不進備份 ----
 
     @abstractmethod

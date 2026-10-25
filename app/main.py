@@ -59,6 +59,7 @@ from app.stores import make_store
 from app.transcription import media
 from app.transcription.segments import parse_time_label, replace_term_in_range
 from app.refine import RefineError, Refiner, apply_patch, parse_patch
+from app.templates import TemplateError, is_custom, kind_value, normalize_template, prompt_hint, sections_map, template_id
 from app.translate import TARGETS as TRANSLATE_TARGETS
 from app.translate import Translator
 from app.transcription.diarizer import build_diarizer
@@ -766,7 +767,25 @@ def create_app(
             "guestEnabled": settings.auth_enabled and settings.guest_login_enabled,
         }
 
-    def validate_kind(kind: str | None) -> str | None:
+    def kind_spec_of(kind: str | None) -> dict | None:
+        """自訂種類 → 餵進提示詞的 {label, hint, sections}；內建種類回 None。
+
+        範本被刪掉時也回 None：用它分析過的舊會議還在，重新分析時退回通用格式，
+        總比整個失敗好。"""
+        if not is_custom(kind):
+            return None
+        tpl = store.get_template(template_id(kind), current_user())
+        if tpl is None:
+            return None
+        return {"label": tpl["name"], "hint": prompt_hint(tpl), "sections": sections_map(tpl)}
+
+    def validate_kind(kind: str | None, *, existing: bool = False) -> str | None:
+        """existing=True：這個 kind 來自已存檔的會議（編輯、重新分析）。
+        範本可能已經被刪掉，不該因此打不開那場會議。"""
+        if is_custom(kind):
+            if existing or store.get_template(template_id(kind), current_user()):
+                return kind
+            raise HTTPException(status_code=400, detail="找不到這個自訂範本")
         # LEGACY_KINDS 一併放行：改版前存下來的會議帶的是舊的錄音種類值，
         # 編輯或重新分析那些紀錄時不該被擋下來
         if kind and kind not in MEETING_KINDS and kind not in LEGACY_KINDS:
@@ -789,6 +808,7 @@ def create_app(
         notes: str | None = None,
     ) -> dict:
         usage.record("analysis")
+        spec = kind_spec_of(kind)
         if correct_typos:
             usage.record("correct")  # 校正是額外一次請求，用量面板要分開看得到
         try:
@@ -804,6 +824,7 @@ def create_app(
                 attendees=attendees,
                 marks=marks,
                 notes=notes,
+                kind_spec=spec,
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc))
@@ -916,8 +937,25 @@ def create_app(
                     ],
                 }
                 for label, kinds in KIND_GROUPS
-            ],
+            ] + custom_kind_groups(),
         }
+
+    def custom_kind_groups() -> list[dict]:
+        """自訂範本在下拉選單自成一組，排在內建種類後面。"""
+        mine = sorted(store.list_templates(current_user()), key=lambda t: t.get("name", ""))
+        if not mine:
+            return []
+        return [{
+            "label": "我的範本",
+            "kinds": [
+                {
+                    "value": kind_value(t["id"]),
+                    "hint": t.get("hint") or "自訂範本",
+                    "features": sorted(t.get("features") or FEATURE_KEYS),
+                }
+                for t in mine
+            ],
+        }]
 
     @app.get("/api/meetings")
     def list_meetings():
@@ -942,7 +980,10 @@ def create_app(
                 status_code=400, detail=f"不允許修改的欄位：{'、'.join(sorted(unknown))}"
             )
         if "kind" in fields:
-            validate_kind(fields["kind"])
+            # 編輯時前端會把目前的 kind 原樣帶回來。範本已經被刪掉的話，
+            # 嚴格檢查會讓那場會議連標題都改不了——沒換種類就放行
+            current = store.get_meeting(meeting_id, user=current_user()) or {}
+            validate_kind(fields["kind"], existing=fields["kind"] == current.get("kind"))
         if "tags" in fields and not _is_str_list(fields["tags"]):
             raise HTTPException(status_code=400, detail="tags 必須是字串陣列")
         if "attendees" in fields and not _is_str_list(fields["attendees"]):
@@ -1000,6 +1041,42 @@ def create_app(
                 except ValueError:
                     pass
         return {"meeting": updated, "replaced": count, "glossary_added": added}
+
+    # ---- 自訂會議範本：自己定義種類名稱、要哪些區塊、每個區塊抓什麼 ----
+
+    @app.get("/api/templates")
+    def list_templates():
+        mine = sorted(store.list_templates(current_user()), key=lambda t: t.get("name", ""))
+        return {"templates": mine}
+
+    @app.post("/api/templates")
+    def create_template(body: dict):
+        try:
+            fields = normalize_template(body)
+        except TemplateError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        template = {"id": uuid.uuid4().hex[:12], "user": current_user(), **fields}
+        store.save_template(template)
+        return {"template": template}
+
+    @app.patch("/api/templates/{tpl_id}")
+    def update_template(tpl_id: str, body: dict):
+        user = current_user()
+        if store.get_template(tpl_id, user) is None:
+            raise HTTPException(status_code=404, detail="找不到這個範本")
+        try:
+            fields = normalize_template(body)
+        except TemplateError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        template = {"id": tpl_id, "user": user, **fields}
+        store.save_template(template)
+        return {"template": template}
+
+    @app.delete("/api/templates/{tpl_id}")
+    def delete_template(tpl_id: str):
+        # 用它分析過的會議照舊存在，只是重新分析時退回通用格式（見 kind_spec_of）
+        store.delete_template(tpl_id, current_user())
+        return {"deleted": tpl_id}
 
     # ---- 回報 AI 的錯誤：累積真實案例，換模型前拿來回歸測試 ----
 
