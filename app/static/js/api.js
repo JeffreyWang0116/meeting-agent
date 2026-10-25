@@ -72,6 +72,7 @@ const api = {
   // ---- 提醒 / 用量 / 健康檢查 ----
   reminders: () => get("/api/reminders"),
   usage: () => get("/api/usage"),
+  quota: () => get("/api/quota"),
   health: () => get("/api/health"),
 
   // ---- 詞彙表 ----

@@ -1045,6 +1045,17 @@ def create_app(
     def list_tasks(meeting_id: Optional[str] = None):
         return {"tasks": store.list_tasks(meeting_id=meeting_id, user=current_user())}
 
+    @app.get("/api/quota")
+    def get_quota():
+        """自己今天的額度。/api/usage 是全站合計，不能拿來告訴使用者還剩多少"""
+        if CURRENT_GUEST.get():
+            limiter, key = guest_limiter, f"ip:{CURRENT_IP.get()}"
+        else:
+            limiter, key = rate_limiter, current_account()
+        if not limiter.enabled:
+            return {"enabled": False, "buckets": {}}
+        return {"enabled": True, "buckets": limiter.usage(key)}
+
     @app.get("/api/usage")
     def get_usage():
         return usage.snapshot()

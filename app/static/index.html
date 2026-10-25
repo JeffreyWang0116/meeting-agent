@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="dark">
-<meta name="theme-color" content="#151515">
+<meta name="theme-color" content="#151515" id="themeColor">
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="icon" href="/static/icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="/static/icon.svg">
@@ -114,11 +114,11 @@
                 <svg class="i-sm" aria-hidden="true"><use href="/static/icons.svg#moon"/></svg>
                 深淺色主題
               </span>
-              <button class="ghost" id="themeToggle" title="切換深淺色主題" aria-label="切換深淺色主題">
-                <svg class="i-sm icon-moon" aria-hidden="true"><use href="/static/icons.svg#moon"/></svg>
-                <svg class="i-sm icon-sun" aria-hidden="true"><use href="/static/icons.svg#sun"/></svg>
-                切換
-              </button>
+              <select id="themeSelect" class="set-select" aria-label="深淺色主題">
+                <option value="system">跟隨系統</option>
+                <option value="light">淺色</option>
+                <option value="dark">深色</option>
+              </select>
             </div>
             <hr class="set-sep">
             <div class="set-row">
@@ -152,15 +152,11 @@
             <div class="set-row">
               <span class="set-label">
                 <svg class="i-sm" aria-hidden="true"><use href="/static/icons.svg#clock"/></svg>
-                今日 API 用量
+                我今天的額度
               </span>
             </div>
-            <div class="usage-grid" id="usageToday">
-              <div class="usage-tile"><span class="usage-num" id="usageCalls">—</span><span class="usage-lbl">API 呼叫</span></div>
-              <div class="usage-tile"><span class="usage-num" id="usageAnalysis">—</span><span class="usage-lbl">分析</span></div>
-              <div class="usage-tile"><span class="usage-num" id="usageAsk">—</span><span class="usage-lbl">問答</span></div>
-              <div class="usage-tile"><span class="usage-num" id="usageLive">—</span><span class="usage-lbl">錄音段</span></div>
-            </div>
+            <div class="quota-list" id="quotaList"></div>
+            <p class="quota-site" id="usageSite"></p>
           </div>
         </div>
       </div>
@@ -327,6 +323,7 @@
                 <svg class="i" aria-hidden="true"><use href="/static/icons.svg#upload"/></svg>
                 上傳並轉錄
               </button>
+              <span class="quota-hint" id="uploadQuota"></span>
             </div>
             <div class="progress" id="fileProgress" style="display:none"><div></div></div>
             <div class="status-line" id="fileStatus"></div>

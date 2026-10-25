@@ -112,3 +112,26 @@ def test_live_chunk_minute_limit_leaves_room_for_the_end_of_meeting_flush():
     """結束會議時前端會一次補送先前上傳失敗的錄音段，限太緊會把那幾段吃掉。"""
     per_minute, _ = DEFAULT_LIMITS["live_chunk"]
     assert per_minute >= 15
+
+
+# ---- 使用者看自己的額度：等撞到 429 才知道已經沒了太晚 ----
+
+def test_usage_reports_todays_count_and_limits_per_user():
+    limiter, clock = make({"media": (3, 20), "ask": (10, 0)})
+    limiter.check("media", "amy")
+    limiter.check("media", "amy")
+    limiter.check("media", "bob")
+
+    usage = limiter.usage("amy")
+
+    assert usage["media"] == {"label": "檔案上傳", "used": 2, "per_day": 20, "per_minute": 3}
+    assert usage["ask"]["used"] == 0
+    assert usage["ask"]["per_day"] == 0  # 0＝不限
+
+
+def test_usage_resets_on_a_new_day():
+    limiter, clock = make({"media": (0, 20)})
+    limiter.check("media", "amy")
+    clock.day = date(2026, 9, 15)
+
+    assert limiter.usage("amy")["media"]["used"] == 0

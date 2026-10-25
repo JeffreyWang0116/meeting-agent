@@ -1478,3 +1478,18 @@ def test_health_reports_work_in_progress(client):
     client.post("/api/live/start")
 
     assert client.get("/api/health").json()["active_work"]["live_sessions"] == 1
+
+
+def test_quota_shows_my_usage_today(tmp_path):
+    client = _limited_client(tmp_path, "analyze=0/5")
+    client.post("/api/meetings", json={"text": "志明下週一交 prompt"})
+
+    body = client.get("/api/quota").json()
+
+    assert body["enabled"] is True
+    assert body["buckets"]["analyze"]["used"] == 1
+    assert body["buckets"]["analyze"]["per_day"] == 5
+
+
+def test_quota_when_rate_limit_is_off(client):
+    assert client.get("/api/quota").json() == {"enabled": False, "buckets": {}}

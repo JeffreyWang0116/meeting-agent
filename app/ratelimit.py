@@ -104,6 +104,21 @@ class RateLimiter:
             recent.append(now)
             self._daily[day_key] = self._daily.get(day_key, 0) + 1
 
+    def usage(self, user: str) -> dict[str, dict]:
+        """這個人今天各項已用幾次、上限多少（per_day 為 0＝不限）。"""
+        today = self._today()
+        with self._lock:
+            self._prune_days(today)
+            return {
+                bucket: {
+                    "label": LABELS.get(bucket, bucket),
+                    "used": self._daily.get((today, bucket, user), 0),
+                    "per_day": per_day,
+                    "per_minute": per_minute,
+                }
+                for bucket, (per_minute, per_day) in self.limits.items()
+            }
+
     def _prune_days(self, today: date) -> None:
         stale = [key for key in self._daily if key[0] != today]
         for key in stale:

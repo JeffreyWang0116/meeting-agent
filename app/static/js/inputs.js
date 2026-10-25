@@ -2,6 +2,7 @@ import { api } from "./api.js";
 import { createSilenceWatch, shouldFallbackToDefaultMic, silenceWarning, systemAudioGuide } from "./audioguide.js";
 import { $, clearError, currentWorkspace, esc, showError, showNotice } from "./core.js";
 import { hideResultSkeleton, markAnalysisStart, renderResult, showResultSkeleton } from "./result.js";
+import { refreshQuota } from "./settings.js";
 import { PLATFORM, chunkSeconds, correctTypos, meetingTerms, micConstraints, micDeviceId, populateMicDevices, selectedFeatures, sysSourceValue, wantSystemAudio } from "./setup.js";
 import { chatHtml, renderChat } from "./transcript.js";
 
@@ -76,6 +77,7 @@ $("btnUpload").addEventListener("click", async () => {
     if (features !== null) form.append("features", features.join(","));
     if (correctTypos()) form.append("correct_typos", "true");
     const { job_id } = await api.uploadMedia(form);
+    refreshQuota();
     savePendingJob({ job_id, options, workspace: currentWorkspace() });
     await pollMediaJob(job_id, options);
   } catch (e) {
