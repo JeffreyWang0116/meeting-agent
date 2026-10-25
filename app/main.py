@@ -815,6 +815,12 @@ def create_app(
             "speaker_diarization": "pyannote" if diarizer else None,
             # 速率限制有沒有開（公開部署預設開）
             "rate_limit": rate_limiter.enabled,
+            # 進行中的工作。推 master 會觸發重新部署、清掉記憶體裡的聆聽 session，
+            # 部署前看一眼有沒有人正在用
+            "active_work": {
+                "media_jobs": job_manager.active_count(),
+                "live_sessions": live_manager.active_count(),
+            },
         }
 
     # ---- 輸入路徑 1：純文字 ----

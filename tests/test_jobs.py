@@ -474,3 +474,14 @@ def test_store_failure_does_not_break_the_job(tmp_path, audio_file):
     mgr.wait(job_id, timeout=5)
 
     assert mgr.get(job_id)["status"] == "done"
+
+
+def test_active_count_only_counts_unfinished_jobs(tmp_path, audio_file):
+    mgr = MediaJobManager(FakeTranscriber(), FakeOrchestrator(), tmp_path)
+    assert mgr.active_count() == 0
+
+    mgr.wait(mgr.submit(audio_file), timeout=5)
+
+    assert mgr.active_count() == 0
+    mgr._jobs["x"] = {"status": "transcribing"}
+    assert mgr.active_count() == 1

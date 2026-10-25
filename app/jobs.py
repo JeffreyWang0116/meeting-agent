@@ -159,6 +159,10 @@ class MediaJobManager:
         except Exception:
             logger.exception("儲存工作紀錄失敗：%s", job.get("id"))
 
+    def active_count(self) -> int:
+        with self._lock:
+            return sum(1 for j in self._jobs.values() if j["status"] not in ("done", "error"))
+
     def wait(self, job_id: str, timeout: float | None = None) -> None:
         """等待工作結束（測試與除錯用）。"""
         thread = self._threads.get(job_id)

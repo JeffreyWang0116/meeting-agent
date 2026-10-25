@@ -86,6 +86,9 @@ class LiveSessionManager:
     # 閒置多久算被遺棄。比任何一場真實會議都長，但仍有上界
     SESSION_TTL_SECONDS = 2 * 60 * 60
 
+    # 多久內收過音訊段才算「正在聆聽」（每段 45 秒，十分鐘綽綽有餘）
+    ACTIVE_WINDOW_SECONDS = 10 * 60
+
     # 最多幾個人可以錄聲音樣本。上限存在是為了讓送進比對的音訊量有界；
     # 人再多時嗓音相近的機率也上升，比對本來就不該當唯一依據
     MAX_ENROLLMENTS = 4
@@ -487,6 +490,13 @@ class LiveSessionManager:
         except Exception as exc:
             logger.warning("重標後的姓名比對失敗，逐字稿維持講者代號：%s", exc)
             return {}
+
+    def active_count(self) -> int:
+        cutoff = self._now() - self.ACTIVE_WINDOW_SECONDS
+        with self._lock:
+            return sum(
+                1 for s in self._sessions.values() if not s.closed and s.last_active >= cutoff
+            )
 
     def finish(self, session_id: str, user: str = DEFAULT_USER) -> str:
         session = self._get(session_id, user)

@@ -1468,3 +1468,13 @@ def test_rate_limit_is_off_by_default_for_local_settings(client):
 
 def test_health_reports_rate_limit_state(tmp_path):
     assert _limited_client(tmp_path, "").get("/api/health").json()["rate_limit"] is True
+
+
+def test_health_reports_work_in_progress(client):
+    """推 master 會觸發 Render 重新部署、清掉記憶體裡的聆聽 session。
+    health 回報進行中的工作，部署前先看一眼有沒有人正在用。"""
+    assert client.get("/api/health").json()["active_work"] == {"media_jobs": 0, "live_sessions": 0}
+
+    client.post("/api/live/start")
+
+    assert client.get("/api/health").json()["active_work"]["live_sessions"] == 1
