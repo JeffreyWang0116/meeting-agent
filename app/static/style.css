@@ -1074,6 +1074,16 @@
     padding-left: 10px; margin: 0; line-height: 1.6;
   }
   .why { font-size: .8rem; color: var(--muted); margin: 0; }
+  /* 相對日期換算的原話：只看換算結果看不出對錯 */
+  .from-phrase { display: block; font-size: .7rem; color: var(--faint); font-family: var(--sans); }
+  /* 沒有逐字稿根據的產出，不該和有根據的長得一樣可信 */
+  .unverified {
+    font-size: .78rem; color: var(--medium); margin: 0;
+    border-left: 2px dashed var(--medium); padding-left: 10px; line-height: 1.6;
+  }
+  /* 轉錄缺漏的那幾段：本來和正常內容一個樣，看不出這裡原本有話沒聽到 */
+  .chat-line.gap .line-body { color: var(--medium); font-style: italic; }
+  .chat-line.gap { background: var(--medium-soft); }
 
   .pending-list, .event-list { display: flex; flex-direction: column; gap: 10px; }
   .pending-item, .event-item {

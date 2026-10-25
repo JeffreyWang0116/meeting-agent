@@ -39,7 +39,8 @@ function taskRowHtml(t) {
   return `<tr class="${t.status === "done" ? "row-done" : ""}">
         <td>${esc(t.task)}</td>
         <td>${t.owner ? esc(t.owner) : `<span class="unassigned">未指派</span>`}</td>
-        <td class="mono">${esc(t.due_date || "—")}</td>
+        <td class="mono">${esc(t.due_date || "—")}${
+          t.due_phrase ? `<span class="from-phrase">原話：${esc(t.due_phrase)}</span>` : ""}</td>
         <td><span class="pr-dot ${t.priority}"></span>${PRIORITY_ZH[t.priority] || esc(t.priority)}</td>
         <td><select class="status-sel st-${t.status}" data-id="${esc(t.id)}">
           ${Object.entries(STATUS_ZH).map(([v, zh]) =>

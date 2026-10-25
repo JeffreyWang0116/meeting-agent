@@ -129,11 +129,16 @@ function renderTodos(todos) {
         <div class="todo-head"><span class="led"></span><span class="todo-task">${esc(t.task)}</span></div>
         <div class="badges">
           <span class="badge ${t.owner ? "" : "owner-none"}">負責人 <b>${esc(t.owner || "未指派")}</b></span>
-          <span class="badge">期限 <b>${esc(t.due_date || "未定")}</b></span>
+          <span class="badge">期限 <b>${esc(t.due_date || "未定")}</b>${
+            t.due_phrase ? `<span class="from-phrase">原話：${esc(t.due_phrase)}</span>` : ""}</span>
           <span class="badge pr-${t.priority}" ${t.priority_reason ? `title="${esc(t.priority_reason)}"` : ""}>優先級 <b>${PRIORITY_ZH[t.priority]}</b></span>
         </div>
         ${t.priority_reason ? `<p class="why">判斷依據：${esc(t.priority_reason)}</p>` : ""}
-        ${t.source_quote ? `<p class="quote clickable" data-quote="${esc(t.source_quote)}" title="點擊跳到逐字稿出處">${esc(t.source_quote)}</p>` : ""}
+        ${t.source_quote
+          ? `<p class="quote clickable" data-quote="${esc(t.source_quote)}" title="點擊跳到逐字稿出處">${esc(t.source_quote)}</p>`
+          // 每筆代辦都該附原句（提示詞第 4 條）。沒有＝這筆沒有逐字稿根據，
+          // 看起來卻和有根據的長得一樣可信，所以要標出來
+          : `<p class="unverified">⚠ 這筆沒有附上逐字稿原句，請自行核對</p>`}
       </div>`).join("")
     : `<p class="empty-note">未偵測到代辦事項</p>`;
 }

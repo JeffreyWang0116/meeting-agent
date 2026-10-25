@@ -46,7 +46,10 @@ function chatHtml(text, speakerMap, translation, knownNames = []) {
   msgs.forEach((m, i) => {
     const showName = m.speaker && m.speaker !== prevSpeaker;
     prevSpeaker = m.speaker;
-    html += `<div class="chat-line ${m.speaker ? `sp-${colorOf(m.speaker)}` : ""}" data-i="${i}"${
+    // 轉錄缺漏的那幾段（後端寫成「——（… 這段轉錄失敗，未取得內容）——」）
+    // 原本和正常內容長得一樣，看不出這裡本來有話沒聽到
+    const gap = m.text.includes("這段轉錄失敗") ? " gap" : "";
+    html += `<div class="chat-line${gap} ${m.speaker ? `sp-${colorOf(m.speaker)}` : ""}" data-i="${i}"${
         m.time ? ` data-t="${timeLabelToSeconds(m.time)}"` : ""}>` +
       `<span class="line-time">${m.time ? esc(m.time) : ""}</span>` +
       `<span class="line-body">${showName ? `<b class="line-speaker">${esc(m.speaker)}</b>` : ""}${esc(m.text)}` +
