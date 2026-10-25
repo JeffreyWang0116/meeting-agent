@@ -2,6 +2,7 @@ import { api } from "./api.js";
 import { createSilenceWatch, shouldFallbackToDefaultMic, silenceWarning, systemAudioGuide } from "./audioguide.js";
 import { $, clearError, currentWorkspace, esc, showError, showNotice } from "./core.js";
 import { hideResultSkeleton, markAnalysisStart, renderResult, showResultSkeleton } from "./result.js";
+import { createEta, formatEta } from "./progress.js";
 import { refreshQuota } from "./settings.js";
 import { PLATFORM, chunkSeconds, correctTypos, meetingTerms, micConstraints, micDeviceId, populateMicDevices, selectedFeatures, sysSourceValue, wantSystemAudio } from "./setup.js";
 import { chatHtml, renderChat } from "./transcript.js";
@@ -94,6 +95,8 @@ function showFilePanel() {
 
 function failMediaJob(e) {
   clearPendingJob();
+  setTabProgress(null);
+  notifyDone("轉錄失敗了，回來看一下訊息。");
   hideResultSkeleton();
   // 走到這裡的 404 代表輪詢裡的退路也救不了：工作沒了，而且還沒轉出任何逐字稿。
   // 原始檔案還在使用者手上，講清楚「重傳就好」比丟一句 404 有用得多
@@ -107,6 +110,7 @@ function failMediaJob(e) {
 // 遺失時同一條路（finishLiveSession 的 404 退路）
 async function rescueFromTranscript(text, options) {
   showResultSkeleton();
+  setTabProgress(null);
   const rescued = await api.analyze({ text, ...options });
   clearPendingJob();
   // 重啟時還沒轉到的部分永遠補不回來了，而原始檔案還在使用者手上——
@@ -116,11 +120,28 @@ async function rescueFromTranscript(text, options) {
   renderResult(rescued, text);
 }
 
+// 分頁標題顯示進度：切到別的分頁也看得到還要多久
+const BASE_TITLE = document.title;
+function setTabProgress(pct) {
+  document.title = pct === null ? BASE_TITLE : `(${pct}%) ${BASE_TITLE}`;
+}
+
+// 轉錄完成時通知。只在頁面不在前景時發——正看著畫面還跳通知只是吵
+function notifyDone(body) {
+  if (document.visibilityState === "visible") return;
+  if (!("Notification" in window) || Notification.permission !== "granted") return;
+  try {
+    new Notification("會議 Agent", { body, icon: "/static/icon.svg" });
+  } catch { /* 部分瀏覽器要由 service worker 發，失敗就算了 */ }
+}
+
 async function pollMediaJob(job_id, options) {
   // 瀏覽器端的逐字稿副本：伺服器連工作紀錄都查不到（404，例如資料庫寫入失敗）時，
   // 這份是唯一還救得回來的內容
   let fileTranscriptText = "";
   let lastPct = -1, stalled = 0;
+  const eta = createEta();
+  const started = Date.now();
   while (true) {
     await new Promise(r => setTimeout(r, 1500));
     let job;
@@ -140,8 +161,11 @@ async function pollMediaJob(job_id, options) {
     lastPct = pct;
     const stuck = stalled >= 2;
     $("fileProgress").classList.toggle("stuck", stuck);
+    // 剩餘時間只在轉錄階段有意義：抽音軌、分析階段沒有進度可以外插
+    const remain = transcribing ? formatEta(eta.update((Date.now() - started) / 1000, job.progress || 0)) : "";
+    setTabProgress(transcribing ? pct : null);
     $("fileStatus").innerHTML =
-      esc(JOB_STATUS_ZH[job.status] + (transcribing ? `（${pct}%）` : "")) +
+      esc(JOB_STATUS_ZH[job.status] + (transcribing ? `（${pct}%${remain ? "，" + remain : ""}）` : "")) +
       (stuck ? '<span class="spinner" aria-hidden="true"></span>' : "");
     if (job.transcript) {
       fileTranscriptText = job.transcript;
@@ -157,6 +181,8 @@ async function pollMediaJob(job_id, options) {
     if (job.status === "analyzing") showResultSkeleton();
     if (job.status === "done") {
       clearPendingJob();
+      setTabProgress(null);
+      notifyDone("會議分析完成，可以回來看結果了。");
       resetFilePanel();
       renderResult(job.result, job.transcript);
       return;
@@ -1248,6 +1274,7 @@ async function finishLiveSession() {
       showNotice("聆聽 session 已遺失（伺服器可能重啟過），已改用瀏覽器保留的逐字稿分析。請核對逐字稿結尾是否完整。");
     }
     reportEnrollOutcome(result);
+    notifyDone("會議分析完成，可以回來看結果了。");
     liveSessionId = null;
     $("btnLiveStart").disabled = false;
     // 逐字稿已經進到結果頁與歷史會議；留在聆聽區，下次回來開新的一場時看到的是上一場
