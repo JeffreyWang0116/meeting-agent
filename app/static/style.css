@@ -32,6 +32,11 @@
     * { animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; }
   }
 
+  /* hidden 屬性一律生效。瀏覽器預設的 [hidden]{display:none} 優先度最低，
+     元件只要自己設了 display（.field、button…）就蓋掉它，東西該藏卻還在畫面上。
+     這是本專案反覆踩過的坑，所以在這裡一次擋掉，不再每個元件各補一條 */
+  [hidden] { display: none !important; }
+
   :root {
     /* 扁平材質層次：畫布 #151515，卡片靠明度往上抬（#242424），無陰影 */
     --bg: #151515;
@@ -155,7 +160,6 @@
     min-width: 20px; text-align: center; padding: 1px 7px; border-radius: 999px;
     color: var(--medium); background: var(--medium-soft); border: 1px solid var(--medium);
   }
-  .nav-badge[hidden] { display: none; }
 
   .main { min-width: 0; display: flex; flex-direction: column; }
 
@@ -176,7 +180,6 @@
     background: var(--card-2); box-shadow: 0 12px 32px rgba(0, 0, 0, .35);
     display: flex; flex-direction: column; gap: 2px;
   }
-  .ws-menu[hidden] { display: none; }
   .ws-head { font-size: .72rem; color: var(--faint); padding: 6px 10px 2px; }
   .ws-sep { height: 1px; background: var(--border); margin: 4px 6px; }
   .ws-item {
@@ -226,7 +229,6 @@
   .settings-wrap { position: relative; }
   /* ---- 帳號頭像 ---- */
   .avatar-wrap { position: relative; }
-  .avatar-wrap[hidden] { display: none; }
   .avatar {
     width: 34px; height: 34px; padding: 0; border-radius: 50%; overflow: hidden; flex: none;
     display: inline-flex; align-items: center; justify-content: center;
@@ -235,14 +237,12 @@
   }
   .avatar:hover { border-color: var(--ink); }
   .avatar img { width: 100%; height: 100%; object-fit: cover; }
-  .avatar img[hidden], .avatar span[hidden] { display: none; }
   .avatar-menu {
     position: absolute; right: 0; top: calc(100% + 8px); z-index: 60;
     display: flex; flex-direction: column; gap: 2px; width: min(280px, calc(100vw - 24px)); padding: 6px;
     background: var(--card-2); border: 1px solid var(--border-strong); border-radius: var(--radius-md);
     box-shadow: 0 12px 32px rgba(0, 0, 0, .35);
   }
-  .avatar-menu[hidden] { display: none; }
   /* 手機：頭像在頂列偏右，從它往左展開會超出畫面，改成貼齊畫面兩側 */
   @media (max-width: 640px) { .avatar-menu { position: fixed; top: 58px; left: 12px; right: 12px; width: auto; } }
   .avatar-who { display: flex; flex-direction: column; gap: 2px; padding: 8px 10px 10px; border-bottom: 1px solid var(--border); margin-bottom: 4px; }
@@ -667,6 +667,22 @@
     color: var(--faint); font-size: .82rem; margin-top: 3px; padding-top: 3px;
     border-top: 1px dashed var(--border);
   }
+  /* ---- 聆聽中的標記與筆記 ---- */
+  .mark-list { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 0; }
+  .mark-chip {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 3px 8px; font-size: .78rem; font-family: var(--mono);
+    color: var(--medium); background: var(--medium-soft);
+    border: 1px solid var(--border); border-radius: 999px;
+  }
+  .mark-chip button {
+    border: 0; background: none; color: var(--faint); cursor: pointer;
+    font-size: .9rem; line-height: 1; padding: 0;
+  }
+  .mark-chip button:hover { color: var(--high); }
+  #liveNotesRow { margin-top: 10px; }
+  #liveNotes { resize: vertical; line-height: 1.6; }
+
   /* ---- 逐字稿就地修正 ---- */
   .edit-hint, .edit-foot { font-size: .78rem; color: var(--faint); margin: 6px 0 2px; }
   .edit-foot {
@@ -730,7 +746,6 @@
   .site-footer ul { margin: 8px 0 0; padding-left: 18px; display: flex; flex-direction: column; gap: 4px; line-height: 1.7; }
 
   /* ---- 平板／手機：側欄改成底部 tab bar ---- */
-  .nav-item[hidden] { display: none; }
   @media (max-width: 900px) {
     .app { grid-template-columns: 1fr; }
     .sidebar {
@@ -819,7 +834,6 @@
   }
   .speaker-chip:hover { border-color: var(--accent); color: var(--accent); }
   .speaker-rename { display: flex; flex-direction: column; gap: 6px; }
-  .speaker-rename[hidden] { display: none; }
   .term-tool { display: flex; flex-direction: column; gap: 8px; }
   .term-replace { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
   .term-replace input[type="text"] {
@@ -1192,7 +1206,6 @@
     background: var(--bg);
     animation: fadeIn .3s ease;
   }
-  .live-stage[hidden] { display: none; }
   .stage-close { position: absolute; top: 18px; right: 18px; }
   .stage-orb {
     width: min(46vh, 78vw); height: min(46vh, 78vw); flex: none;
@@ -1263,7 +1276,6 @@
     display: flex; align-items: center; justify-content: center; padding: 24px;
     background: var(--bg);
   }
-  .login-gate[hidden] { display: none; }
   .login-card {
     display: flex; flex-direction: column; align-items: center; gap: 14px;
     width: min(380px, 100%); text-align: center;
@@ -1278,7 +1290,5 @@
   .login-hint { margin: 0; font-size: .86rem; line-height: 1.7; color: var(--muted); }
   .login-error { margin: 0; font-size: .82rem; color: var(--high); min-height: 1.2em; }
   .login-options { display: flex; flex-direction: column; align-items: stretch; gap: 10px; width: 100%; }
-  .login-options[hidden], .login-hint[hidden] { display: none; }
   .login-options button { justify-content: center; }
   .login-note { margin: 0; font-size: .76rem; line-height: 1.6; color: var(--faint); }
-  .login-note[hidden] { display: none; }
