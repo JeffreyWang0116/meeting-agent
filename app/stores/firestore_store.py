@@ -42,6 +42,7 @@ class FirestoreStore(TaskStore):
         meta: str = "meta",
         rag: str = "rag_records",
         groups: str = "groups",
+        jobs: str = "media_jobs",
     ):
         self._db = db
         self._meetings = meetings
@@ -49,6 +50,7 @@ class FirestoreStore(TaskStore):
         self._meta = meta
         self._rag = rag
         self._groups = groups
+        self._jobs = jobs
         self._lock = threading.Lock()
         self._backfill_lock = threading.Lock()  # 與 _lock 分開，才能在鎖內安全呼叫
         self._backfilled = False
@@ -388,3 +390,19 @@ class FirestoreStore(TaskStore):
         with self._lock:
             doc = scoped_write(self._meta_doc("speakers"), user, "names", names)
             self._db.collection(self._meta).document("speakers").set(doc)
+
+    # ---- 轉錄工作紀錄 ----
+
+    def save_job(self, job: dict) -> None:
+        self._db.collection(self._jobs).document(job["id"]).set(dict(job))
+
+    def get_job(self, job_id: str) -> dict | None:
+        snap = self._db.collection(self._jobs).document(job_id).get()
+        return snap.to_dict() if snap.exists else None
+
+    def delete_job(self, job_id: str) -> None:
+        self._db.collection(self._jobs).document(job_id).delete()
+
+    def list_jobs(self, user: str) -> list[dict]:
+        query = self._db.collection(self._jobs).where(filter=_user_filter(user))
+        return [snap.to_dict() for snap in query.stream()]

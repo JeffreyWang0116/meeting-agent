@@ -389,3 +389,88 @@ def test_other_errors_keep_their_original_message(tmp_path):
     job_id = mgr.submit(audio)
     mgr.wait(job_id, timeout=5)
     assert mgr.get(job_id)["error"] == "音檔格式不支援"
+
+
+# ---- 工作紀錄落地：重啟後還查得到 ----
+
+from app.stores.local_store import LocalJsonStore  # noqa: E402
+
+_DAY = 24 * 60 * 60
+
+
+def test_finished_job_survives_a_new_manager(tmp_path, audio_file):
+    store = LocalJsonStore(tmp_path / "db.json")
+    mgr = MediaJobManager(FakeTranscriber(), FakeOrchestrator(), tmp_path, store=store)
+    job_id = mgr.submit(audio_file, user="uid-A")
+    mgr.wait(job_id, timeout=5)
+
+    restarted = MediaJobManager(FakeTranscriber(), FakeOrchestrator(), tmp_path, store=store)
+    job = restarted.get(job_id, user="uid-A")
+
+    assert job["status"] == "done"
+    assert job["result"]["meeting_id"] == "m123"
+
+
+def test_unfinished_job_after_restart_reports_interrupted_with_partial_transcript(tmp_path):
+    store = LocalJsonStore(tmp_path / "db.json")
+    store.save_job({"id": "j1", "user": "uid-A", "status": "transcribing", "progress": 0.4,
+                    "transcript": "0:01 講者A：前半段", "result": None, "error": None,
+                    "created_at": 1000.0})
+    mgr = MediaJobManager(FakeTranscriber(), FakeOrchestrator(), tmp_path, store=store,
+                          clock=lambda: 1000.0 + 60)
+
+    job = mgr.get("j1", user="uid-A")
+
+    assert job["status"] == "error"
+    assert job["interrupted"] is True
+    assert job["transcript"] == "0:01 講者A：前半段"
+    assert "重新" in job["error"]
+
+
+def test_persisted_job_of_another_user_is_invisible(tmp_path):
+    store = LocalJsonStore(tmp_path / "db.json")
+    store.save_job({"id": "j1", "user": "uid-B", "status": "done", "created_at": 1000.0})
+    mgr = MediaJobManager(FakeTranscriber(), FakeOrchestrator(), tmp_path, store=store,
+                          clock=lambda: 1000.0)
+
+    assert mgr.get("j1", user="uid-A") is None
+
+
+def test_job_older_than_a_day_is_gone(tmp_path):
+    store = LocalJsonStore(tmp_path / "db.json")
+    store.save_job({"id": "j1", "user": "uid-A", "status": "done", "created_at": 1000.0})
+    mgr = MediaJobManager(FakeTranscriber(), FakeOrchestrator(), tmp_path, store=store,
+                          clock=lambda: 1000.0 + _DAY + 1)
+
+    assert mgr.get("j1", user="uid-A") is None
+    assert store.get_job("j1") is None
+
+
+def test_submit_clears_that_users_old_jobs(tmp_path, audio_file):
+    store = LocalJsonStore(tmp_path / "db.json")
+    store.save_job({"id": "old", "user": "uid-A", "status": "done", "created_at": 1000.0})
+    store.save_job({"id": "fresh", "user": "uid-A", "status": "done", "created_at": 1000.0 + _DAY})
+    mgr = MediaJobManager(FakeTranscriber(), FakeOrchestrator(), tmp_path, store=store,
+                          clock=lambda: 1000.0 + _DAY + 1)
+
+    mgr.wait(mgr.submit(audio_file, user="uid-A"), timeout=5)
+
+    assert store.get_job("old") is None
+    assert store.get_job("fresh") is not None
+
+
+def test_store_failure_does_not_break_the_job(tmp_path, audio_file):
+    """存工作紀錄只是保險，Firestore 一時出錯不能賠上整份轉錄。"""
+
+    class BrokenStore:
+        def save_job(self, job):
+            raise RuntimeError("firestore down")
+
+        def list_jobs(self, user):
+            raise RuntimeError("firestore down")
+
+    mgr = MediaJobManager(FakeTranscriber(), FakeOrchestrator(), tmp_path, store=BrokenStore())
+    job_id = mgr.submit(audio_file)
+    mgr.wait(job_id, timeout=5)
+
+    assert mgr.get(job_id)["status"] == "done"

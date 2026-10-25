@@ -143,6 +143,22 @@ class TaskStore(ABC):
     def groups_for(self, uid: str, email: str | None) -> list[dict]:
         """uid 是成員、或 email 有待接受邀請的群組。"""
 
+    # ---- 上傳轉錄的工作紀錄：伺服器重啟後還查得到進度與已轉好的逐字稿。不進備份 ----
+
+    @abstractmethod
+    def save_job(self, job: dict) -> None:
+        """新增或整份覆蓋一筆工作紀錄（job 自帶 id 與 user）。"""
+
+    @abstractmethod
+    def get_job(self, job_id: str) -> dict | None:
+        """不依使用者過濾：歸屬由 MediaJobManager 比對。"""
+
+    @abstractmethod
+    def delete_job(self, job_id: str) -> None: ...
+
+    @abstractmethod
+    def list_jobs(self, user: str) -> list[dict]: ...
+
     @abstractmethod
     def export_all(self, *, user: str = DEFAULT_USER) -> dict:
         """匯出整份資料（meetings + tasks + glossary + speaker_roster）供備份下載。"""

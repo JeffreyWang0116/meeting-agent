@@ -586,7 +586,8 @@ def create_app(
         )
         live_manager.MAX_ENROLLMENTS = settings.live_enroll_max_speakers
     job_manager = job_manager or MediaJobManager(
-        transcriber, orchestrator, settings.data_dir / "tmp", diarizer=diarizer
+        transcriber, orchestrator, settings.data_dir / "tmp", diarizer=diarizer,
+        store=store,
     )
     rag_index = None
     if ask_agent is None:

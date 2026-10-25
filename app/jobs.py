@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 import uuid
 from datetime import date
 from pathlib import Path
@@ -35,8 +36,23 @@ def _error_message(exc: BaseException) -> str:
     return str(exc) or type(exc).__name__
 
 
+INTERRUPTED_MESSAGE = (
+    "伺服器重新啟動，這次轉錄中斷了。已經轉好的部分可以先拿去分析，"
+    "或重新上傳檔案再轉一次。"
+)
+
+
 class MediaJobManager:
-    def __init__(self, transcriber, orchestrator, work_dir: Path | str, diarizer=None):
+    # 工作紀錄只留一天：夠前端重新整理後找回結果，又不會在資料庫裡越積越多
+    JOB_TTL_SECONDS = 24 * 60 * 60
+
+    def __init__(
+        self, transcriber, orchestrator, work_dir: Path | str, diarizer=None,
+        store=None, clock=time.time,
+    ):
+        # store：工作紀錄落地，重新部署後還查得到（None＝只放記憶體）
+        self._store = store
+        self._clock = clock
         self._transcriber = transcriber
         self._orchestrator = orchestrator
         # pyannote 講者分離（選用，見 app/transcription/diarizer.py）。None＝講者照舊由轉錄模型標
@@ -60,6 +76,7 @@ class MediaJobManager:
         user: str = DEFAULT_USER,
     ) -> str:
         job_id = uuid.uuid4().hex[:12]
+        self._prune_stored(user)
         with self._lock:
             self._prune_locked()
             self._jobs[job_id] = {
@@ -73,7 +90,10 @@ class MediaJobManager:
                 "result": None,
                 "error": None,
                 "file": Path(file_path).name,
+                "created_at": self._clock(),
             }
+            snapshot = dict(self._jobs[job_id])
+        self._persist(snapshot)
         thread = threading.Thread(
             target=self._run,
             args=(
@@ -91,9 +111,53 @@ class MediaJobManager:
         知道 job_id 就看得到等於沒有隔離。"""
         with self._lock:
             job = self._jobs.get(job_id)
-            if job is None or job.get("user", DEFAULT_USER) != user:
-                return None
+        if job is None:
+            return self._get_stored(job_id, user)
+        if job.get("user", DEFAULT_USER) != user:
+            return None
+        with self._lock:
             return dict(job)
+
+    def _get_stored(self, job_id: str, user: str) -> dict | None:
+        """記憶體裡沒有＝伺服器重啟過（或工作早被清掉）。去 store 找。"""
+        if self._store is None:
+            return None
+        try:
+            job = self._store.get_job(job_id)
+        except Exception:
+            logger.exception("讀取工作紀錄失敗：%s", job_id)
+            return None
+        if job is None or job.get("user", DEFAULT_USER) != user:
+            return None
+        if self._expired(job):
+            self._store.delete_job(job_id)
+            return None
+        if job.get("status") not in ("done", "error"):
+            # 背景執行緒跟著舊行程一起沒了，這份工作不會再有進展
+            job.update(status="error", interrupted=True, error=INTERRUPTED_MESSAGE)
+        return job
+
+    def _expired(self, job: dict) -> bool:
+        return self._clock() - job.get("created_at", 0) > self.JOB_TTL_SECONDS
+
+    def _prune_stored(self, user: str) -> None:
+        if self._store is None:
+            return
+        try:
+            for job in self._store.list_jobs(user):
+                if self._expired(job):
+                    self._store.delete_job(job["id"])
+        except Exception:
+            logger.exception("清理舊工作紀錄失敗")
+
+    def _persist(self, job: dict) -> None:
+        """存工作紀錄只是保險：store 出錯只記 log，轉錄照常進行。"""
+        if self._store is None:
+            return
+        try:
+            self._store.save_job(job)
+        except Exception:
+            logger.exception("儲存工作紀錄失敗：%s", job.get("id"))
 
     def wait(self, job_id: str, timeout: float | None = None) -> None:
         """等待工作結束（測試與除錯用）。"""
@@ -104,6 +168,9 @@ class MediaJobManager:
     def _update(self, job_id: str, **fields) -> None:
         with self._lock:
             self._jobs[job_id].update(fields)
+            snapshot = dict(self._jobs[job_id])
+        # 鎖外寫入：Firestore 一次往返幾十毫秒，不該卡住前端的輪詢
+        self._persist(snapshot)
 
     def _prune_locked(self) -> None:
         """在鎖內把已結束的舊工作清掉，只保留最近 _MAX_JOBS 筆。"""
