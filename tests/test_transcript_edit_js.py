@@ -133,7 +133,7 @@ def test_editing_never_loses_the_time_markers_of_other_lines():
 
     out = call("editBubble", text, 1, {"text": "乙乙乙"})
 
-    assert [l.split("]")[0] + "]" for l in out.splitlines()] == ["[0:01]", "[0:05]", "[0:09]"]
+    assert [line.split("]")[0] + "]" for line in out.splitlines()] == ["[0:01]", "[0:05]", "[0:09]"]
 
 
 def test_split_keeps_the_time_marker_on_the_first_half_only():

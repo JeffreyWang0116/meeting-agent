@@ -15,6 +15,7 @@
     groupinvite 群組角色名稱、邀請信 Gmail 草稿網址（純函式）
     groups      工作區切換（個人／群組）、群組管理與邀請
     transcript  逐字稿渲染與時間/引用句跳轉
+    transcriptedit 逐字稿就地編輯的純函式（改句、改講者、合併、拆句、刪句）
     result      分析結果頁
     tasks       任務庫
     meetings    歷史會議
@@ -33,6 +34,7 @@ import "./speakers.js";
 import "./audioguide.js";
 import "./groupinvite.js";
 import "./transcript.js";
+import "./transcriptedit.js";
 import "./calendar.js";
 import "./result.js";
 import "./tasks.js";
