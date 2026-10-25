@@ -1,5 +1,6 @@
 import { $, esc } from "./core.js";
-import { LABEL_RE, matchSpeaker, speakerLabels } from "./speakers.js";
+import { LABEL_RE } from "./speakers.js";
+import { parseChatMessages } from "./transcriptedit.js";
 
 /* ==================================================================
    3. 逐字稿：連續文件式渲染（時間欄＋講者＋內文）與時間/引用句跳轉
@@ -16,37 +17,8 @@ function timeLabelToSeconds(label) {
   return String(label).split(":").reduce((acc, p) => acc * 60 + Number(p), 0);
 }
 
-// knownNames：出席者、已對應的講者姓名——只講過一句話的人也要認得出來
-function parseChatMessages(text, knownNames = []) {
-  const rows = [];
-  for (const rawLine of String(text || "").split("\n")) {
-    let line = rawLine.trim();
-    if (!line) continue;
-    const tm = line.match(TIME_RE);
-    if (tm) line = line.slice(tm[0].length).trim();
-    if (line) rows.push({ time: tm ? tm[1] : null, line });
-  }
-  const labels = speakerLabels(rows.map(r => r.line), knownNames);
-  const msgs = [];
-  let lastSpeaker = null;
-  for (const { time, line } of rows) {
-    const m = matchSpeaker(line, labels);
-    // 轉錄模型只在「換人講」時標註講者，同一人連續發言的後續行不再重複標籤
-    // （逐字稿的標準慣例）。沒有標籤就沿用上一行的講者，否則那些續行會失去
-    // 顏色分組、還會讓下一行重複顯示已經出現過的名字
-    const speaker = m ? m.speaker : lastSpeaker;
-    if (speaker) lastSpeaker = speaker;
-    const content = m ? m.rest : line;
-    const last = msgs[msgs.length - 1];
-    if (!time && last && last.speaker === speaker) {
-      last.text += (last.text ? " " : "") + content;
-      last.lines += 1;
-    } else {
-      msgs.push({ speaker, text: content, time, lines: 1 });
-    }
-  }
-  return msgs;
-}
+// 泡泡怎麼切（含講者標籤的繼承規則）只有 transcriptedit.js 一份：就地編輯要靠
+// 「畫面上第幾個泡泡 ＝ 原文哪幾行」對得起來，兩邊各切一次遲早會不一致
 
 // speakerMap：跨段落維持同講者同色（即時聆聽逐段附加時傳入同一個 map）
 // translation：對應的譯文（可選）。行數對得上就逐句雙語對照，對不上就整段附在最後。
@@ -74,7 +46,7 @@ function chatHtml(text, speakerMap, translation, knownNames = []) {
   msgs.forEach((m, i) => {
     const showName = m.speaker && m.speaker !== prevSpeaker;
     prevSpeaker = m.speaker;
-    html += `<div class="chat-line ${m.speaker ? `sp-${colorOf(m.speaker)}` : ""}"${
+    html += `<div class="chat-line ${m.speaker ? `sp-${colorOf(m.speaker)}` : ""}" data-i="${i}"${
         m.time ? ` data-t="${timeLabelToSeconds(m.time)}"` : ""}>` +
       `<span class="line-time">${m.time ? esc(m.time) : ""}</span>` +
       `<span class="line-body">${showName ? `<b class="line-speaker">${esc(m.speaker)}</b>` : ""}${esc(m.text)}` +

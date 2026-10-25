@@ -43,9 +43,13 @@ function editableBubbles(text, knownNames = []) {
     if (!time && last && last.speaker === speaker) {
       last.text += (last.text ? " " : "") + content;
       last.to = index;
+      last.lines += 1;
     } else {
-      // labelled：原文這一行自己標了講者。改講者時據此判斷下一句是不是沿用來的
-      bubbles.push({ from: index, to: index, time, speaker, text: content, labelled: Boolean(m) });
+      bubbles.push({
+        from: index, to: index, time, speaker, text: content,
+        // labelled：原文這一行自己標了講者；lines：合併了幾行（譯文對齊要用）
+        labelled: Boolean(m), lines: 1,
+      });
     }
   }
   return bubbles;
@@ -118,4 +122,11 @@ function deleteBubble(text, index, knownNames = []) {
   return spliceBubble(text, bubbles, index, []);
 }
 
-export { editBubble, editableBubbles, deleteBubble, mergeWithNext, splitBubble };
+// 渲染用的形狀。切分規則只有這一份：畫面上第幾個泡泡，就是 editableBubbles 的
+// 第幾個，編輯才不會改到別句
+function parseChatMessages(text, knownNames = []) {
+  return editableBubbles(text, knownNames)
+    .map(({ speaker, text: body, time, lines }) => ({ speaker, text: body, time, lines }));
+}
+
+export { editBubble, editableBubbles, deleteBubble, mergeWithNext, parseChatMessages, splitBubble };

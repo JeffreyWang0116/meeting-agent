@@ -157,3 +157,31 @@ def test_empty_transcript_has_no_bubbles():
     assert call("editableBubbles", "", []) == []
     assert call("mergeWithNext", "", 0) == ""
     assert call("deleteBubble", "", 0) == ""
+
+
+# ---- 與畫面渲染共用同一套切分：序號對不上就會改到別句 ----
+# transcript.js 的 chatHtml 直接用這裡的 parseChatMessages 切泡泡（它自己那份已移除），
+# 所以畫面上第幾個泡泡，就是 editableBubbles 的第幾個。
+
+@pytest.mark.parametrize("text", [
+    SAMPLE,
+    "\n".join(["講者A：甲", "乙", "丙", "講者B：丁"]),
+    "\n".join(["[0:01] 講者A：甲", "[0:05] 乙", "[0:09] 講者B：丙"]),
+    "沒有講者也沒有時間的一行",
+    "\n".join(["王小明：你好", "", "  ", "李小華：你好"]),
+])
+def test_render_bubbles_come_from_the_same_split_as_edit_bubbles(text):
+    edit = call("editableBubbles", text, [])
+    render = call("parseChatMessages", text, [])
+
+    def shape(bubbles):
+        return [(b["speaker"], b["text"], b["time"]) for b in bubbles]
+
+    assert shape(edit) == shape(render)
+
+
+def test_merged_bubble_reports_how_many_source_lines_it_holds():
+    """譯文對齊要靠它：原文每句合併了幾行，譯文就取幾行。"""
+    msgs = call("parseChatMessages", "\n".join(["講者A：甲", "乙", "丙"]), [])
+
+    assert [m["lines"] for m in msgs] == [3]
