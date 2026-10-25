@@ -40,6 +40,7 @@ INTERRUPTED_MESSAGE = (
     "伺服器重新啟動，這次轉錄中斷了。已經轉好的部分可以先拿去分析，"
     "或重新上傳檔案再轉一次。"
 )
+INTERRUPTED_EMPTY_MESSAGE = "伺服器重新啟動，這次轉錄中斷了，還沒轉出任何內容。請重新上傳檔案。"
 
 
 class MediaJobManager:
@@ -134,7 +135,8 @@ class MediaJobManager:
             return None
         if job.get("status") not in ("done", "error"):
             # 背景執行緒跟著舊行程一起沒了，這份工作不會再有進展
-            job.update(status="error", interrupted=True, error=INTERRUPTED_MESSAGE)
+            message = INTERRUPTED_MESSAGE if (job.get("transcript") or "").strip() else INTERRUPTED_EMPTY_MESSAGE
+            job.update(status="error", interrupted=True, error=message)
         return job
 
     def _expired(self, job: dict) -> bool:

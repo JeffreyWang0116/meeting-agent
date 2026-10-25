@@ -1028,16 +1028,10 @@ const CONSENT_KEY = "recordConsent";
 function confirmRecordingConsent() {
   try { if (localStorage.getItem(CONSENT_KEY)) return true; } catch { /* 無痕：每次都問 */ }
   const ok = confirm(
-    "開始錄音前，請先告知在場與會者：
-
-" +
-    "・這場會議會被錄音並轉成逐字稿
-" +
-    "・錄音會傳送給 Google Gemini（以及講者分離服務 pyannoteAI，若伺服器有啟用）處理
-" +
-    "・錄音檔轉完即刪除，逐字稿與分析結果會保存在你的帳號
-
-" +
+    "開始錄音前，請先告知在場與會者：\n\n" +
+    "・這場會議會被錄音並轉成逐字稿\n" +
+    "・錄音會傳送給 Google Gemini（以及講者分離服務 pyannoteAI，若伺服器有啟用）處理\n" +
+    "・錄音檔轉完即刪除，逐字稿與分析結果會保存在你的帳號\n\n" +
     "確認與會者都同意後按「確定」。"
   );
   if (ok) { try { localStorage.setItem(CONSENT_KEY, "1"); } catch { /* 同上 */ } }

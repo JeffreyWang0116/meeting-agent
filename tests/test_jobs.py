@@ -485,3 +485,16 @@ def test_active_count_only_counts_unfinished_jobs(tmp_path, audio_file):
     assert mgr.active_count() == 0
     mgr._jobs["x"] = {"status": "transcribing"}
     assert mgr.active_count() == 1
+
+
+def test_interrupted_before_any_transcript_just_asks_to_reupload(tmp_path):
+    store = LocalJsonStore(tmp_path / "db.json")
+    store.save_job({"id": "j1", "user": "uid-A", "status": "extracting", "transcript": "",
+                    "created_at": 1000.0})
+    mgr = MediaJobManager(FakeTranscriber(), FakeOrchestrator(), tmp_path, store=store,
+                          clock=lambda: 1000.0)
+
+    job = mgr.get("j1", user="uid-A")
+
+    assert "已經轉好" not in job["error"]
+    assert "重新上傳" in job["error"]

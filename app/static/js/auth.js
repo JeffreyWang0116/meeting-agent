@@ -130,10 +130,7 @@ $("avatarMenu").addEventListener("click", async e => {
       if (!resp.ok) throw new Error(`刪除訪客資料失敗（${resp.status}）`);
       await sdk.signOut(auth);
     } else if (act === "delete-account") {
-      const typed = prompt("這會刪除你個人工作區的所有會議、任務、詞彙表，退出所有群組，並刪除帳號，無法復原。
-（群組裡的會議會留給其他成員。）
-
-確定要刪除請輸入「刪除」：");
+      const typed = prompt("這會刪除你個人工作區的所有會議、任務、詞彙表，退出所有群組，並刪除帳號，無法復原。\n（群組裡的會議會留給其他成員。）\n\n確定要刪除請輸入「刪除」：");
       if (typed?.trim() !== "刪除") return;
       // 先切回個人：請求帶著群組工作區的話，「只能看」的成員會被群組權限擋下
       switchWorkspace("");
