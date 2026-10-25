@@ -127,7 +127,8 @@ function renderTodos(todos) {
   $("rTodos").innerHTML = todos.length
     ? todos.map(t => `
       <div class="todo-card p-${t.priority}">
-        <div class="todo-head"><span class="led"></span><span class="todo-task">${esc(t.task)}</span></div>
+        <div class="todo-head"><span class="led"></span><span class="todo-task">${esc(t.task)}</span>
+          ${badBtn("todo", t.task)}</div>
         <div class="badges">
           <span class="badge ${t.owner ? "" : "owner-none"}">負責人 <b>${esc(t.owner || "未指派")}</b></span>
           <span class="badge">期限 <b>${esc(t.due_date || "未定")}</b>${
@@ -157,12 +158,20 @@ function renderHighlights(highlights) {
     : `<p class="empty-note">未擷取到會議重點</p>`;
 }
 
+// 回報 AI 弄錯了。不是為了改這一筆（改有「請 AI 修改」和就地編輯），
+// 而是累積真實錯誤案例——換模型前要能用自己的資料回歸測試
+function badBtn(target, text) {
+  return `<button class="bad-btn" data-target="${esc(target)}" data-text="${esc(text || "")}"` +
+    ` title="回報這裡 AI 弄錯了" aria-label="回報錯誤">👎</button>`;
+}
+
 function renderDecisions(decisions) {
   const show = decisions.length > 0;
   $("hDecisions").style.display = show ? "flex" : "none";
   $("rDecisions").style.display = show ? "flex" : "none";
   $("rDecisions").innerHTML = show
-    ? decisions.map(d => `<li>${esc(d.description)}${d.context ? ` <span class="ctx">（${esc(d.context)}）</span>` : ""}</li>`).join("")
+    ? decisions.map(d => `<li>${esc(d.description)}${d.context ? ` <span class="ctx">（${esc(d.context)}）</span>` : ""}`
+        + `${badBtn("decision", d.description)}</li>`).join("")
     : `<p class="empty-note">本次會議無正式決議</p>`;
 }
 
@@ -416,6 +425,37 @@ async function reanalyzeCurrent() {
 
 wireTranscriptEditor();
 wireRefine();
+
+// ---- 回報 AI 的錯誤 ----
+const FEEDBACK_REASONS = {
+  not_discussed: "會議中沒有這件事",
+  owner_wrong: "負責人錯了",
+  date_wrong: "日期錯了",
+  wrong_content: "內容理解錯誤",
+  missing: "漏掉了重要的事",
+  other: "其他",
+};
+
+async function reportMistake(target, text) {
+  const id = currentResult?.meeting_id;
+  if (!id) return;
+  const keys = Object.keys(FEEDBACK_REASONS);
+  const menu = keys.map((k, i) => `${i + 1}. ${FEEDBACK_REASONS[k]}`).join("\n");
+  const picked = prompt(`這裡哪裡錯了？輸入編號：\n\n${menu}`);
+  const reason = keys[Number(picked) - 1];
+  if (!reason) return;
+  // 正確答案選填：不想打字的人按確定就好，願意寫的人留下更有用的回歸測試素材
+  const note = prompt("正確的應該是什麼？（可留空）") || "";
+  try {
+    await api.addFeedback({ meeting_id: id, target, target_text: text, reason, note: note.trim() });
+    showNotice("已記錄這次回報，設定裡可以匯出給評估使用。謝謝！");
+  } catch (err) { showError("回報失敗：" + err.message); }
+}
+
+document.addEventListener("click", e => {
+  const btn = e.target.closest(".bad-btn");
+  if (btn) reportMistake(btn.dataset.target, btn.dataset.text);
+});
 
 // AI 修改套用後：只重畫受影響的區塊，與講者改名同一套作法
 function applyRefinedMeeting(meeting, tasks) {

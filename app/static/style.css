@@ -275,6 +275,7 @@
   .quota-bar > span { display: block; height: 100%; background: var(--accent); }
   .quota-row.near .quota-bar > span { background: var(--medium); }
   .quota-row.full .quota-bar > span { background: var(--high); }
+  .set-count { font-size: .76rem; color: var(--faint); font-family: var(--mono); }
   .quota-site, .quota-hint { font-size: .72rem; color: var(--faint); margin: 2px 8px 8px; }
   .quota-hint { margin: 0 0 0 4px; align-self: center; }
 
@@ -667,6 +668,14 @@
     color: var(--faint); font-size: .82rem; margin-top: 3px; padding-top: 3px;
     border-top: 1px dashed var(--border);
   }
+  /* 回報 AI 弄錯了：平常很淡，滑過才明顯——它不該跟內容搶注意力 */
+  .bad-btn {
+    border: 0; background: none; cursor: pointer; opacity: .25;
+    font-size: .8rem; line-height: 1; padding: 2px 4px; margin-left: auto;
+    transition: opacity .15s;
+  }
+  .bad-btn:hover { opacity: 1; }
+
   /* ---- 請 AI 修改結果（先預覽再套用） ---- */
   .refine-box {
     margin-top: 12px; padding: 10px 12px; background: var(--card-2);

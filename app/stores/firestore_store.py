@@ -43,6 +43,7 @@ class FirestoreStore(TaskStore):
         rag: str = "rag_records",
         groups: str = "groups",
         jobs: str = "media_jobs",
+        feedback: str = "feedback",
     ):
         self._db = db
         self._meetings = meetings
@@ -51,6 +52,7 @@ class FirestoreStore(TaskStore):
         self._rag = rag
         self._groups = groups
         self._jobs = jobs
+        self._feedback = feedback
         self._lock = threading.Lock()
         self._backfill_lock = threading.Lock()  # 與 _lock 分開，才能在鎖內安全呼叫
         self._backfilled = False
@@ -406,3 +408,19 @@ class FirestoreStore(TaskStore):
     def list_jobs(self, user: str) -> list[dict]:
         query = self._db.collection(self._jobs).where(filter=_user_filter(user))
         return [snap.to_dict() for snap in query.stream()]
+
+    # ---- AI 錯誤回報 ----
+
+    def save_feedback(self, item: dict) -> None:
+        self._db.collection(self._feedback).document(item["id"]).set(dict(item))
+
+    def list_feedback(self, user: str) -> list[dict]:
+        query = self._db.collection(self._feedback).where(filter=_user_filter(user))
+        return [snap.to_dict() for snap in query.stream()]
+
+    def delete_feedback(self, feedback_id: str, user: str) -> None:
+        ref = self._db.collection(self._feedback).document(feedback_id)
+        snap = ref.get()
+        if snap.exists and (snap.to_dict() or {}).get("user") == user:
+            ref.delete()
+

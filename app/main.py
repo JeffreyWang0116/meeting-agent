@@ -9,7 +9,7 @@ import logging
 import re
 import sys
 import uuid
-from datetime import date
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -344,6 +344,26 @@ class RefineRequest(BaseModel):
     # 預覽：使用者的修改要求（一句話）。套用：前端把預覽拿到的 patch 原樣送回
     request: Optional[str] = Field(default=None, max_length=2000)
     patch: Optional[dict] = None
+
+
+# 回報 AI 哪裡錯了。原因做成固定幾種：自由文字沒辦法統計，也沒辦法拿來篩選案例
+FEEDBACK_REASONS = {
+    "not_discussed": "會議中沒有這件事",
+    "owner_wrong": "負責人錯了",
+    "date_wrong": "日期錯了",
+    "wrong_content": "內容理解錯誤",
+    "missing": "漏掉了重要的事",
+    "other": "其他",
+}
+FEEDBACK_TARGETS = {"todo", "decision", "summary", "highlight", "pending", "section"}
+
+
+class FeedbackRequest(BaseModel):
+    meeting_id: str
+    target: str                       # 哪一類產出（代辦、決議、摘要…）
+    target_text: str = Field(default="", max_length=2000)   # 被回報的那一筆內容
+    reason: str
+    note: str = Field(default="", max_length=2000)          # 選填：正確答案是什麼
 
 
 class ReanalyzeRequest(BaseModel):
@@ -980,6 +1000,73 @@ def create_app(
                 except ValueError:
                     pass
         return {"meeting": updated, "replaced": count, "glossary_added": added}
+
+    # ---- 回報 AI 的錯誤：累積真實案例，換模型前拿來回歸測試 ----
+
+    @app.post("/api/feedback")
+    def add_feedback(req: FeedbackRequest):
+        if req.reason not in FEEDBACK_REASONS:
+            raise HTTPException(
+                status_code=400, detail=f"reason 只能是：{'、'.join(sorted(FEEDBACK_REASONS))}"
+            )
+        if req.target not in FEEDBACK_TARGETS:
+            raise HTTPException(
+                status_code=400, detail=f"target 只能是：{'、'.join(sorted(FEEDBACK_TARGETS))}"
+            )
+        user = current_user()
+        if store.get_meeting(req.meeting_id, user=user) is None:
+            raise HTTPException(status_code=404, detail=f"找不到會議：{req.meeting_id}")
+        item = {
+            "id": uuid.uuid4().hex[:12],
+            "user": user,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            **req.model_dump(),
+        }
+        store.save_feedback(item)
+        return {"feedback": item}
+
+    @app.get("/api/feedback")
+    def list_feedback():
+        items = sorted(
+            store.list_feedback(current_user()), key=lambda f: f.get("created_at", ""), reverse=True
+        )
+        return {"feedback": items, "reasons": FEEDBACK_REASONS}
+
+    @app.delete("/api/feedback/{feedback_id}")
+    def delete_feedback(feedback_id: str):
+        store.delete_feedback(feedback_id, current_user())
+        return {"deleted": feedback_id}
+
+    @app.get("/api/feedback/export.jsonl")
+    def export_feedback():
+        """匯出成一行一筆的 JSONL，格式比照 eval/dataset.jsonl，可直接拿去跑回歸測試。
+
+        逐字稿一定要帶：少了它就重現不了那次錯誤，回報也就沒用了。
+        """
+        user = current_user()
+        lines = []
+        for f in sorted(store.list_feedback(user), key=lambda x: x.get("created_at", "")):
+            record = store.get_meeting(f.get("meeting_id", ""), user=user)
+            if record is None:
+                continue  # 會議已刪除，沒有逐字稿可以重現
+            lines.append(json.dumps({
+                "id": f["id"],
+                "meeting_date": (record.get("meeting") or {}).get("date"),
+                "kind": record.get("kind"),
+                "transcript": record.get("transcript") or "",
+                "reported": {
+                    "target": f.get("target"),
+                    "target_text": f.get("target_text"),
+                    "reason": f.get("reason"),
+                    "reason_label": FEEDBACK_REASONS.get(f.get("reason"), ""),
+                    "note": f.get("note", ""),
+                },
+            }, ensure_ascii=False))
+        return Response(
+            content="\n".join(lines) + ("\n" if lines else ""),
+            media_type="application/x-ndjson",
+            headers={"Content-Disposition": 'attachment; filename="ai-feedback.jsonl"'},
+        )
 
     @app.post("/api/meetings/{meeting_id}/refine")
     def refine_meeting(meeting_id: str, req: RefineRequest):

@@ -71,6 +71,10 @@ window.addEventListener("accountchange", refreshQuota);
     if (open) {  // 打開時順便更新額度
       refreshQuota();
       try {
+        const n = (await api.listFeedback()).feedback.length;
+        $("feedbackCount").textContent = `${n} 筆`;
+      } catch { $("feedbackCount").textContent = "—"; }
+      try {
         const u = await api.usage();
         $("usageSite").textContent = `全站今日 AI 呼叫 ${u.today?.gemini_call || 0} 次`;
       } catch { $("usageSite").textContent = ""; }

@@ -280,6 +280,34 @@ class LocalJsonStore(TaskStore):
             if uid in g.get("member_uids", []) or (email and email in g.get("invite_emails", []))
         ]
 
+    # ---- AI 錯誤回報（同目錄的 feedback.json）。理由同群組：不跟著備份還原 ----
+
+    def _feedback_path(self):
+        return self._path.with_name("feedback.json")
+
+    def _feedback(self) -> dict:
+        return self._read_doc(self._feedback_path()).get("feedback", {})
+
+    def _write_feedback(self, items: dict) -> None:
+        atomic_write_text(
+            self._feedback_path(), json.dumps({"feedback": items}, ensure_ascii=False, indent=2)
+        )
+
+    def save_feedback(self, item: dict) -> None:
+        with self._lock:
+            items = self._feedback()
+            items[item["id"]] = dict(item)
+            self._write_feedback(items)
+
+    def list_feedback(self, user: str) -> list[dict]:
+        return [dict(f) for f in self._feedback().values() if f.get("user") == user]
+
+    def delete_feedback(self, feedback_id: str, user: str) -> None:
+        with self._lock:
+            items = self._feedback()
+            if items.get(feedback_id, {}).get("user") == user and items.pop(feedback_id, None):
+                self._write_feedback(items)
+
     # ---- 轉錄工作紀錄（同目錄的 jobs.json）。理由同群組：不跟著備份還原 ----
 
     def _jobs_path(self):
