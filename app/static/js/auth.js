@@ -20,7 +20,7 @@
    Firebase SDK 用動態 import 從官方 CDN 取，維持本專案「沒有建置步驟」的
    做法；沒啟用登入的部署根本不會下載它。
    ================================================================== */
-import { $, API_TOKEN_KEY, esc, nativeFetch, setCredentialSource, showError, switchWorkspace } from "./core.js";
+import { $, API_TOKEN_KEY, esc, nativeFetch, setCredentialSource, showError, showNotice, switchWorkspace } from "./core.js";
 
 const SDK = "https://www.gstatic.com/firebasejs/10.14.1";
 
@@ -73,7 +73,8 @@ function renderAvatar(user) {
        <button class="ws-item danger" data-act="leave-guest">離開訪客並刪除資料</button>`
     : `<div class="avatar-who"><b>${esc(user.displayName || "")}</b><span>${esc(user.email || "")}</span></div>
        <button class="ws-item" data-act="switch">切換帳號</button>
-       <button class="ws-item" data-act="sign-out">登出</button>`;
+       <button class="ws-item" data-act="sign-out">登出</button>
+       <button class="ws-item danger" data-act="delete-account">刪除帳號與所有資料</button>`;
   $("avatarWrap").hidden = false;
 }
 
@@ -128,6 +129,19 @@ $("avatarMenu").addEventListener("click", async e => {
       const resp = await fetch("/api/guest/data", { method: "DELETE" });
       if (!resp.ok) throw new Error(`刪除訪客資料失敗（${resp.status}）`);
       await sdk.signOut(auth);
+    } else if (act === "delete-account") {
+      const typed = prompt("這會刪除你個人工作區的所有會議、任務、詞彙表，退出所有群組，並刪除帳號，無法復原。
+（群組裡的會議會留給其他成員。）
+
+確定要刪除請輸入「刪除」：");
+      if (typed?.trim() !== "刪除") return;
+      // 先切回個人：請求帶著群組工作區的話，「只能看」的成員會被群組權限擋下
+      switchWorkspace("");
+      const resp = await fetch("/api/account", { method: "DELETE" });
+      const body = await resp.json().catch(() => ({}));
+      if (!resp.ok) throw new Error(body.detail || `刪除失敗（${resp.status}）`);
+      await sdk.signOut(auth);
+      showNotice(`帳號已刪除，共刪除 ${body.deleted_meetings || 0} 場會議。`);
     }
   } catch (err) { showError("帳號操作失敗：" + err.message); }
 });

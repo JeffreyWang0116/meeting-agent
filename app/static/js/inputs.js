@@ -1022,6 +1022,28 @@ $("liveEnrollOn").addEventListener("change", () => {
 });
 $("liveEnrollCount").addEventListener("change", renderEnrollRows);
 
+// 錄別人說話前提醒使用者徵得同意：錄音會送到第三方處理，與會者有權知道。
+// 只問第一次，之後記在這個瀏覽器
+const CONSENT_KEY = "recordConsent";
+function confirmRecordingConsent() {
+  try { if (localStorage.getItem(CONSENT_KEY)) return true; } catch { /* 無痕：每次都問 */ }
+  const ok = confirm(
+    "開始錄音前，請先告知在場與會者：
+
+" +
+    "・這場會議會被錄音並轉成逐字稿
+" +
+    "・錄音會傳送給 Google Gemini（以及講者分離服務 pyannoteAI，若伺服器有啟用）處理
+" +
+    "・錄音檔轉完即刪除，逐字稿與分析結果會保存在你的帳號
+
+" +
+    "確認與會者都同意後按「確定」。"
+  );
+  if (ok) { try { localStorage.setItem(CONSENT_KEY, "1"); } catch { /* 同上 */ } }
+  return ok;
+}
+
 $("btnLiveStart").addEventListener("click", async () => {
   clearError();
   // 樣本還在錄的時候開始聆聽，那個人會來不及上傳而被略過，但錄完後畫面仍會
@@ -1032,6 +1054,7 @@ $("btnLiveStart").addEventListener("click", async () => {
   }
   const availErr = micAvailabilityError();
   if (availErr) { showError(availErr); return; }
+  if (!confirmRecordingConsent()) return;
   try {
     liveStream = await buildLiveStream(wantSystemAudio());
   } catch (e) { releaseLiveStreams(); showError(e.message); return; }
