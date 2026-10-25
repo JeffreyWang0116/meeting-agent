@@ -929,6 +929,9 @@ def create_app(
                     "kinds": [
                         {
                             "value": k,
+                            # 下拉選單上顯示的字。自訂範本的 value 是 custom:<id>，
+                            # 不能直接拿來當標籤
+                            "label": k,
                             # 給人看的說明，不是拼進 prompt 的 KIND_HINTS
                             "hint": KIND_DESCRIPTIONS[k],
                             "features": sorted(KIND_DEFAULT_FEATURES.get(k, FEATURE_KEYS)),
@@ -950,6 +953,7 @@ def create_app(
             "kinds": [
                 {
                     "value": kind_value(t["id"]),
+                    "label": t["name"],
                     "hint": t.get("hint") or "自訂範本",
                     "features": sorted(t.get("features") or FEATURE_KEYS),
                 }

@@ -27,6 +27,7 @@
     ask         跨會議問答
     inputs      三條輸入路徑：文字貼上／檔案上傳／即時聆聽
     settings    主題、設定選單、詞彙表、備份、PWA
+    templates   自訂會議範本（種類名稱、要哪些區塊）
 */
 import "./core.js";
 import "./auth.js";
@@ -50,4 +51,5 @@ import "./home.js";
 import "./ask.js";
 import "./inputs.js";
 import "./settings.js";
+import "./templates.js";
 import "./groups.js";

@@ -131,6 +131,14 @@
             <hr class="set-sep">
             <div class="set-row">
               <span class="set-label">
+                <svg class="i-sm" aria-hidden="true"><use href="/static/icons.svg#clipboard-list"/></svg>
+                自訂會議範本
+              </span>
+              <button class="ghost" id="btnTemplates">管理</button>
+            </div>
+            <hr class="set-sep">
+            <div class="set-row">
+              <span class="set-label">
                 <svg class="i-sm" aria-hidden="true"><use href="/static/icons.svg#database"/></svg>
                 資料備份
               </span>
@@ -776,6 +784,47 @@
       <button class="primary" id="btnGlosAdd">新增</button>
     </div>
     <div id="glosList"><p class="empty-note">尚無詞彙</p></div>
+  </div>
+</div>
+
+<!-- 自訂會議範本：種類名稱、要哪些區塊、每個區塊抓什麼 -->
+<div class="modal-overlay" id="templateModal">
+  <div class="modal">
+    <div class="panel-head">
+      <h2>自訂會議範本</h2>
+      <button class="panel-x" id="btnTemplateClose" aria-label="關閉">
+        <svg class="i-sm" aria-hidden="true"><use href="/static/icons.svg#x"/></svg>
+      </button>
+    </div>
+    <p class="hint">內建的八種種類是通用的。自己開一種，AI 就會照你列的欄位整理這類會議。</p>
+
+    <div id="tplList"></div>
+
+    <div class="tpl-edit" id="tplEdit" hidden>
+      <div class="field">
+        <label class="lbl" for="tplName">種類名稱</label>
+        <input type="text" id="tplName" placeholder="例如：專題 meeting">
+      </div>
+      <div class="field">
+        <label class="lbl" for="tplHint">告訴 AI 這類會議的重點（選填）</label>
+        <textarea id="tplHint" rows="2" placeholder="例如：學校專題的每週進度會議，摘要聚焦這週做完什麼、下週要做什麼。"></textarea>
+      </div>
+      <div class="field">
+        <label class="lbl">要哪些欄位</label>
+        <div class="tpl-features" id="tplFeatures"></div>
+      </div>
+      <div class="field">
+        <label class="lbl">這個種類專屬的區塊（選填，最多 20 個）</label>
+        <div id="tplSections"></div>
+        <button class="ghost" id="btnTplAddSection">＋ 加一個區塊</button>
+      </div>
+      <div class="tpl-actions">
+        <button class="ghost" id="btnTplCancel">取消</button>
+        <button class="primary" id="btnTplSave">儲存範本</button>
+      </div>
+    </div>
+
+    <button class="primary" id="btnTplNew">＋ 新增範本</button>
   </div>
 </div>
 

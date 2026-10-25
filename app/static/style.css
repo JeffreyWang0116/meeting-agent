@@ -676,6 +676,27 @@
   }
   .bad-btn:hover { opacity: 1; }
 
+  /* ---- 自訂會議範本 ---- */
+  .tpl-item {
+    display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; margin-bottom: 8px;
+    background: var(--card-2); border: 1px solid var(--border); border-radius: var(--radius-md);
+  }
+  .tpl-item .tpl-body { flex: 1; min-width: 0; }
+  .tpl-item b { font-size: .9rem; }
+  .tpl-item .tpl-meta { display: block; font-size: .76rem; color: var(--faint); margin-top: 3px; }
+  .tpl-edit {
+    display: grid; gap: 12px; margin: 12px 0; padding: 12px;
+    background: var(--card-2); border: 1px solid var(--accent-border); border-radius: var(--radius-md);
+  }
+  .tpl-edit input, .tpl-edit textarea {
+    width: 100%; font: inherit; font-size: .86rem; color: var(--ink); background: var(--card);
+    border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 7px 9px;
+  }
+  .tpl-features { display: flex; flex-wrap: wrap; gap: 12px; }
+  .tpl-section-row { display: flex; gap: 6px; margin-bottom: 6px; }
+  .tpl-section-row input:first-child { flex: 0 0 34%; }
+  .tpl-actions { display: flex; gap: 8px; justify-content: flex-end; }
+
   /* ---- 請 AI 修改結果（先預覽再套用） ---- */
   .refine-box {
     margin-top: 12px; padding: 10px 12px; background: var(--card-2);
