@@ -899,3 +899,17 @@ def test_voiceprint_enabled_path_does_not_call_gemini_matcher(tmp_path):
     mgr.add_chunk(sid, b"a", offset_seconds=0)
     assert mgr.diarize_session(sid) == {"講者B": "王小明"}
     assert matcher.calls == []
+
+
+def test_active_count_skips_finished_and_idle_sessions(tmp_path):
+    """health 用它判斷「現在部署會不會打斷誰」。結束的不算；十分鐘沒收到音訊段
+    的多半是關掉分頁沒按結束，也不算——否則它會擋住部署整整兩小時。"""
+    clock = {"t": 0.0}
+    mgr = make_clocked_manager(tmp_path, ["a", "b"], clock)
+    done = mgr.start()
+    mgr.finish(done)
+    mgr.start()
+    assert mgr.active_count() == 1
+
+    clock["t"] = LiveSessionManager.ACTIVE_WINDOW_SECONDS + 1
+    assert mgr.active_count() == 0

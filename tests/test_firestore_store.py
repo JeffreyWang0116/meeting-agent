@@ -34,6 +34,7 @@ class _FakeDocRef:
         self.id = doc_id
 
     def set(self, data):
+        self._col.writes += 1
         self._col._docs[self.id] = dict(data)
 
     def get(self):
@@ -45,6 +46,7 @@ class _FakeDocRef:
         self._col._docs[self.id].update(fields)
 
     def delete(self):
+        self._col.writes += 1
         self._col._docs.pop(self.id, None)
 
 
@@ -68,6 +70,7 @@ class _FakeCollection:
     def __init__(self):
         self._docs = {}
         self.scans = 0  # 整份 collection 掃描的次數（＝Firestore 會計費的讀取）
+        self.writes = 0  # set／delete 次數（＝Firestore 會計費的寫入）
 
     def document(self, doc_id):
         return _FakeDocRef(self, doc_id)

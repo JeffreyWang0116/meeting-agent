@@ -1,7 +1,8 @@
 import { api } from "./api.js";
 import { createSilenceWatch, shouldFallbackToDefaultMic, silenceWarning, systemAudioGuide } from "./audioguide.js";
-import { $, clearError, esc, showError, showNotice } from "./core.js";
+import { $, clearError, currentWorkspace, esc, showError, showNotice } from "./core.js";
 import { hideResultSkeleton, markAnalysisStart, renderResult, showResultSkeleton } from "./result.js";
+import { refreshQuota } from "./settings.js";
 import { PLATFORM, chunkSeconds, correctTypos, meetingTerms, micConstraints, micDeviceId, populateMicDevices, selectedFeatures, sysSourceValue, wantSystemAudio } from "./setup.js";
 import { chatHtml, renderChat } from "./transcript.js";
 
@@ -36,6 +37,19 @@ const JOB_STATUS_ZH = {
   diarizing: "辨識講者中…", analyzing: "AI 分析中…", done: "完成", error: "失敗",
 };
 
+// 上傳中的工作記在瀏覽器：重新整理或關掉頁面再回來，還能接著輪詢拿到結果
+// （伺服器把工作紀錄存進資料庫，一天內都查得到）。options 一起記，救援分析要用
+const PENDING_JOB_KEY = "pendingMediaJob";
+function savePendingJob(entry) {
+  try { localStorage.setItem(PENDING_JOB_KEY, JSON.stringify(entry)); } catch { /* 無痕：只是少了續傳 */ }
+}
+function loadPendingJob() {
+  try { return JSON.parse(localStorage.getItem(PENDING_JOB_KEY) || "null"); } catch { return null; }
+}
+function clearPendingJob() {
+  try { localStorage.removeItem(PENDING_JOB_KEY); } catch { /* 同上 */ }
+}
+
 $("btnUpload").addEventListener("click", async () => {
   clearError();
   const file = $("fileInput").files[0];
@@ -44,14 +58,7 @@ $("btnUpload").addEventListener("click", async () => {
   const btn = $("btnUpload");
   btn.disabled = true;
   markAnalysisStart();
-  $("fileProgress").style.display = "block";
-  $("fileTranscript").style.display = "block";
-  $("fileTranscript").textContent = "";
-
-  // 瀏覽器端的逐字稿副本，與即時聆聽的 liveTranscriptText 同一個用途：轉錄
-  // 工作只存在伺服器記憶體，行程一重啟就連同暫時性磁碟上的上傳檔一起消失，
-  // 這份副本是那時唯一還救得回來的內容。見下方輪詢的 404 退路。
-  let fileTranscriptText = "";
+  showFilePanel();
   const options = {
     meeting_date: $("meetingDate").value || null,
     kind: $("meetingKind").value,
@@ -70,62 +77,108 @@ $("btnUpload").addEventListener("click", async () => {
     if (features !== null) form.append("features", features.join(","));
     if (correctTypos()) form.append("correct_typos", "true");
     const { job_id } = await api.uploadMedia(form);
-
-    let lastPct = -1, stalled = 0;
-    while (true) {
-      await new Promise(r => setTimeout(r, 1500));
-      let job;
-      try {
-        job = await api.mediaJob(job_id);
-      } catch (e) {
-        // 404＝工作不見了。它只存在伺服器記憶體，行程一重啟（雲端重新部署、
-        // 當掉重生）就永遠找不回來，再輪詢幾次都是同樣的 404。已經轉出來的
-        // 部分還在瀏覽器這邊，改走純文字分析救回來——與聆聽 session 遺失時
-        // 同一條路（finishLiveSession 的 404 退路）。
-        if (e.status !== 404 || !fileTranscriptText.trim()) throw e;
-        showResultSkeleton();
-        const rescued = await api.analyze({ text: fileTranscriptText, ...options });
-        // 重啟時還沒轉到的部分永遠補不回來了，而原始檔案還在使用者手上——
-        // 寧可講清楚要不要重傳，也不要讓人以為分析的是完整的一場會議
-        showNotice("轉錄工作已遺失（伺服器可能重啟過），已改用瀏覽器保留的逐字稿分析。這份可能不完整，需要完整結果請重新上傳原檔。");
-        resetFilePanel();
-        renderResult(rescued, fileTranscriptText);
-        break;
-      }
-      const pct = Math.round((job.progress || 0) * 100);
-      $("fileProgress").firstElementChild.style.width = pct + "%";
-      // 卡在同一個百分比超過兩輪（~3 秒）就切成「處理中」樣式：長段落轉錄時
-      // 進度本來就會不動好一陣子，靜止的進度條會讓人以為當掉了
-      const transcribing = job.status === "transcribing";
-      stalled = transcribing && pct === lastPct ? stalled + 1 : 0;
-      lastPct = pct;
-      const stuck = stalled >= 2;
-      $("fileProgress").classList.toggle("stuck", stuck);
-      $("fileStatus").innerHTML =
-        esc(JOB_STATUS_ZH[job.status] + (transcribing ? `（${pct}%）` : "")) +
-        (stuck ? '<span class="spinner" aria-hidden="true"></span>' : "");
-      if (job.transcript) {
-        fileTranscriptText = job.transcript;
-        renderChat($("fileTranscript"), job.transcript);
-        $("fileTranscript").scrollTop = $("fileTranscript").scrollHeight;
-      }
-      // 轉錄階段的進度條與逐字稿在「新會議」畫面，看得到才有意義；
-      // 進到分析階段才切去結果頁擺骨架
-      if (job.status === "analyzing") showResultSkeleton();
-      if (job.status === "done") { resetFilePanel(); renderResult(job.result, job.transcript); break; }
-      if (job.status === "error") throw new Error(job.error || "轉錄失敗");
-    }
+    refreshQuota();
+    savePendingJob({ job_id, options, workspace: currentWorkspace() });
+    await pollMediaJob(job_id, options);
   } catch (e) {
-    hideResultSkeleton();
-    // 走到這裡的 404 代表上面的退路也救不了：工作沒了，而且還沒轉出任何逐字稿。
-    // 原始檔案還在使用者手上，講清楚「重傳就好」比丟一句 404 有用得多
-    showError(e.status === 404
-      ? "轉錄工作已遺失（伺服器可能重啟過），而且還沒轉出任何逐字稿可以救。請重新上傳原檔。"
-      : e.message);
-    $("fileStatus").textContent = "失敗";
+    failMediaJob(e);
   }
   finally { btn.disabled = false; }
 });
+
+function showFilePanel() {
+  $("fileProgress").style.display = "block";
+  $("fileTranscript").style.display = "block";
+  $("fileTranscript").textContent = "";
+}
+
+function failMediaJob(e) {
+  clearPendingJob();
+  hideResultSkeleton();
+  // 走到這裡的 404 代表輪詢裡的退路也救不了：工作沒了，而且還沒轉出任何逐字稿。
+  // 原始檔案還在使用者手上，講清楚「重傳就好」比丟一句 404 有用得多
+  showError(e.status === 404
+    ? "轉錄工作已遺失（伺服器可能重啟過），而且還沒轉出任何逐字稿可以救。請重新上傳原檔。"
+    : e.message);
+  $("fileStatus").textContent = "失敗";
+}
+
+// 伺服器重啟、工作中斷時，用已經轉好的部分改走純文字分析——與聆聽 session
+// 遺失時同一條路（finishLiveSession 的 404 退路）
+async function rescueFromTranscript(text, options) {
+  showResultSkeleton();
+  const rescued = await api.analyze({ text, ...options });
+  clearPendingJob();
+  // 重啟時還沒轉到的部分永遠補不回來了，而原始檔案還在使用者手上——
+  // 寧可講清楚要不要重傳，也不要讓人以為分析的是完整的一場會議
+  showNotice("轉錄中途伺服器重新啟動，已改用轉好的部分逐字稿分析。這份可能不完整，需要完整結果請重新上傳原檔。");
+  resetFilePanel();
+  renderResult(rescued, text);
+}
+
+async function pollMediaJob(job_id, options) {
+  // 瀏覽器端的逐字稿副本：伺服器連工作紀錄都查不到（404，例如資料庫寫入失敗）時，
+  // 這份是唯一還救得回來的內容
+  let fileTranscriptText = "";
+  let lastPct = -1, stalled = 0;
+  while (true) {
+    await new Promise(r => setTimeout(r, 1500));
+    let job;
+    try {
+      job = await api.mediaJob(job_id);
+    } catch (e) {
+      if (e.status !== 404 || !fileTranscriptText.trim()) throw e;
+      await rescueFromTranscript(fileTranscriptText, options);
+      return;
+    }
+    const pct = Math.round((job.progress || 0) * 100);
+    $("fileProgress").firstElementChild.style.width = pct + "%";
+    // 卡在同一個百分比超過兩輪（~3 秒）就切成「處理中」樣式：長段落轉錄時
+    // 進度本來就會不動好一陣子，靜止的進度條會讓人以為當掉了
+    const transcribing = job.status === "transcribing";
+    stalled = transcribing && pct === lastPct ? stalled + 1 : 0;
+    lastPct = pct;
+    const stuck = stalled >= 2;
+    $("fileProgress").classList.toggle("stuck", stuck);
+    $("fileStatus").innerHTML =
+      esc(JOB_STATUS_ZH[job.status] + (transcribing ? `（${pct}%）` : "")) +
+      (stuck ? '<span class="spinner" aria-hidden="true"></span>' : "");
+    if (job.transcript) {
+      fileTranscriptText = job.transcript;
+      renderChat($("fileTranscript"), job.transcript);
+      $("fileTranscript").scrollTop = $("fileTranscript").scrollHeight;
+    }
+    if (job.interrupted && job.transcript?.trim()) {
+      await rescueFromTranscript(job.transcript, options);
+      return;
+    }
+    // 轉錄階段的進度條與逐字稿在「新會議」畫面，看得到才有意義；
+    // 進到分析階段才切去結果頁擺骨架
+    if (job.status === "analyzing") showResultSkeleton();
+    if (job.status === "done") {
+      clearPendingJob();
+      resetFilePanel();
+      renderResult(job.result, job.transcript);
+      return;
+    }
+    if (job.status === "error") throw new Error(job.error || "轉錄失敗");
+  }
+}
+
+// 重新整理前有工作在跑 → 接著輪詢。換了工作區的不接：工作屬於原本的工作區，
+// 請求帶著新的工作區會查不到（後端當作別人的工作）
+(function resumePendingJob() {
+  const pending = loadPendingJob();
+  if (!pending?.job_id) return;
+  if ((pending.workspace || "") !== currentWorkspace()) { clearPendingJob(); return; }
+  const btn = $("btnUpload");
+  btn.disabled = true;
+  showFilePanel();
+  $("fileStatus").textContent = "接續上次的轉錄…";
+  pollMediaJob(pending.job_id, pending.options || {})
+    .catch(failMediaJob)
+    .finally(() => { btn.disabled = false; });
+})();
 
 // ---- 拖曳上傳 ----
 (function () {
@@ -969,6 +1022,22 @@ $("liveEnrollOn").addEventListener("change", () => {
 });
 $("liveEnrollCount").addEventListener("change", renderEnrollRows);
 
+// 錄別人說話前提醒使用者徵得同意：錄音會送到第三方處理，與會者有權知道。
+// 只問第一次，之後記在這個瀏覽器
+const CONSENT_KEY = "recordConsent";
+function confirmRecordingConsent() {
+  try { if (localStorage.getItem(CONSENT_KEY)) return true; } catch { /* 無痕：每次都問 */ }
+  const ok = confirm(
+    "開始錄音前，請先告知在場與會者：\n\n" +
+    "・這場會議會被錄音並轉成逐字稿\n" +
+    "・錄音會傳送給 Google Gemini（以及講者分離服務 pyannoteAI，若伺服器有啟用）處理\n" +
+    "・錄音檔轉完即刪除，逐字稿與分析結果會保存在你的帳號\n\n" +
+    "確認與會者都同意後按「確定」。"
+  );
+  if (ok) { try { localStorage.setItem(CONSENT_KEY, "1"); } catch { /* 同上 */ } }
+  return ok;
+}
+
 $("btnLiveStart").addEventListener("click", async () => {
   clearError();
   // 樣本還在錄的時候開始聆聽，那個人會來不及上傳而被略過，但錄完後畫面仍會
@@ -979,6 +1048,7 @@ $("btnLiveStart").addEventListener("click", async () => {
   }
   const availErr = micAvailabilityError();
   if (availErr) { showError(availErr); return; }
+  if (!confirmRecordingConsent()) return;
   try {
     liveStream = await buildLiveStream(wantSystemAudio());
   } catch (e) { releaseLiveStreams(); showError(e.message); return; }

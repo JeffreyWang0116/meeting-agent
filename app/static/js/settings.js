@@ -7,14 +7,58 @@ import { refreshTasks } from "./tasks.js";
 /* ==================================================================
    10. 介面與資料工具：主題、設定選單、自訂詞彙、備份還原、PWA、觸覺回饋
    ================================================================== */
-// ---- 深淺色主題切換（記住偏好） ----
+// ---- 深淺色主題：跟隨系統／淺色／深色（記住偏好） ----
+// 沒選過＝跟隨系統：手機設成淺色模式的人，一打開就是一整片深色很突兀
 (function () {
-  if (localStorage.getItem("theme") === "light") document.body.classList.add("light");
-  $("themeToggle").addEventListener("click", () => {
-    const light = document.body.classList.toggle("light");
-    localStorage.setItem("theme", light ? "light" : "dark");
+  const sysLight = window.matchMedia("(prefers-color-scheme: light)");
+  let chosen = null;  // localStorage 不能用（無痕）時，至少這一頁記得住
+  const pref = () => {
+    try { return localStorage.getItem("theme") || chosen || "system"; } catch { return chosen || "system"; }
+  };
+  function apply() {
+    const p = pref();
+    const light = p === "light" || (p === "system" && sysLight.matches);
+    document.body.classList.toggle("light", light);
+    // 手機狀態列／網址列的顏色跟著換，不然淺色頁面頂上會有一條黑邊
+    $("themeColor").setAttribute("content", getComputedStyle(document.body).getPropertyValue("--bg").trim());
+    $("themeSelect").value = p;
+  }
+  apply();
+  sysLight.addEventListener("change", apply);
+  $("themeSelect").addEventListener("change", e => {
+    chosen = e.target.value;
+    try { localStorage.setItem("theme", chosen); } catch { /* 用 chosen */ }
+    apply();
   });
 })();
+
+// ---- 額度：自己今天各項用了幾次。等撞到 429 才知道已經沒了太晚 ----
+async function refreshQuota() {
+  try {
+    const q = await api.quota();
+    const b = q.buckets.media;
+    $("uploadQuota").textContent = q.enabled && b?.per_day
+      ? `今天還能上傳 ${Math.max(0, b.per_day - b.used)} 次` : "";
+    if (!q.enabled) {
+      $("quotaList").innerHTML = `<p class="empty-note">這個伺服器沒有啟用額度限制</p>`;
+      return;
+    }
+    // 即時聆聽錄音段是自動送的，使用者控制不了，列出來只會造成困擾
+    $("quotaList").innerHTML = Object.entries(q.buckets)
+      .filter(([k, v]) => k !== "live_chunk" && v.per_day)
+      .map(([, v]) => {
+        const ratio = Math.min(1, v.used / v.per_day);
+        const cls = ratio >= 1 ? "full" : ratio >= 0.8 ? "near" : "";
+        return `<div class="quota-row ${cls}"><span>${esc(v.label)}</span><b>${v.used} / ${v.per_day}</b>
+          <span class="quota-bar"><span style="width:${Math.round(ratio * 100)}%"></span></span></div>`;
+      }).join("");
+  } catch {
+    $("quotaList").innerHTML = `<p class="empty-note">額度讀取失敗</p>`;
+  }
+}
+refreshQuota();
+window.addEventListener("workspacechange", refreshQuota);
+window.addEventListener("accountchange", refreshQuota);
 
 // ---- 設定選單（齒輪）----
 (function () {
@@ -24,18 +68,12 @@ import { refreshTasks } from "./tasks.js";
     e.stopPropagation();
     const open = menu.classList.toggle("open");
     btn.setAttribute("aria-expanded", open);
-    if (open) {  // 打開時順便更新今日用量
+    if (open) {  // 打開時順便更新額度
+      refreshQuota();
       try {
         const u = await api.usage();
-        const t = u.today || {};
-        $("usageCalls").textContent = t.gemini_call || 0;
-        $("usageAnalysis").textContent = t.analysis || 0;
-        $("usageAsk").textContent = t.ask || 0;
-        $("usageLive").textContent = t.live_chunk || 0;
-      } catch (err) {
-        $("usageCalls").textContent = $("usageAnalysis").textContent =
-          $("usageAsk").textContent = $("usageLive").textContent = "—";
-      }
+        $("usageSite").textContent = `全站今日 AI 呼叫 ${u.today?.gemini_call || 0} 次`;
+      } catch { $("usageSite").textContent = ""; }
     }
   });
   document.addEventListener("click", e => {
@@ -130,4 +168,4 @@ if ("serviceWorker" in navigator) {
   }, { passive: true });
 })();
 
-export { glosTerms, renderGlossary, saveGlossary };
+export { glosTerms, refreshQuota, renderGlossary, saveGlossary };

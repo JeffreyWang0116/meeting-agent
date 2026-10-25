@@ -118,8 +118,13 @@ class TaskStore(ABC):
         """
 
     @abstractmethod
-    def save_rag_records(self, dim: int | None, records: list[dict]) -> None:
-        """整份取代索引內容。dim 一起存：向量維度改過時舊向量要整份作廢。"""
+    def save_rag_records(
+        self, dim: int | None, records: list[dict], meeting_ids: set[str] | None = None
+    ) -> None:
+        """存索引。records 永遠是完整的一份；dim 一起存：向量維度改過時舊向量要整份作廢。
+
+        meeting_ids：只有這幾場會議的片段有變動（新增、重建或移除），後端可以只
+        寫它們。None＝整份取代。"""
 
     # ---- 群組（工作區）：成員與邀請。會議與任務本身照舊用 user 欄位，群組的蓋 group:<id> ----
 
@@ -137,6 +142,22 @@ class TaskStore(ABC):
     @abstractmethod
     def groups_for(self, uid: str, email: str | None) -> list[dict]:
         """uid 是成員、或 email 有待接受邀請的群組。"""
+
+    # ---- 上傳轉錄的工作紀錄：伺服器重啟後還查得到進度與已轉好的逐字稿。不進備份 ----
+
+    @abstractmethod
+    def save_job(self, job: dict) -> None:
+        """新增或整份覆蓋一筆工作紀錄（job 自帶 id 與 user）。"""
+
+    @abstractmethod
+    def get_job(self, job_id: str) -> dict | None:
+        """不依使用者過濾：歸屬由 MediaJobManager 比對。"""
+
+    @abstractmethod
+    def delete_job(self, job_id: str) -> None: ...
+
+    @abstractmethod
+    def list_jobs(self, user: str) -> list[dict]: ...
 
     @abstractmethod
     def export_all(self, *, user: str = DEFAULT_USER) -> dict:

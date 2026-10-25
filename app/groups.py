@@ -185,6 +185,26 @@ def disband(store, group_id: str, uid: str, on_scope_deleted=None) -> None:
     store.delete_group(group_id)
 
 
+def delete_account(store, uid: str, email: str | None, on_scope_deleted=None) -> int:
+    """刪帳號前的資料清理：退出所有群組、婉拒邀請、刪掉個人資料，回傳刪掉的會議數。
+
+    群組裡的會議屬於群組、留給其他成員。建立的群組要先解散——不能默默把一群人的
+    資料一起刪掉，也沒有一個合理的「自動交給誰」。先全部檢查完才動手，擋下來時
+    什麼都沒刪。"""
+    groups = store.groups_for(uid, email)
+    owned = [g["name"] for g in groups if g.get("owner") == uid]
+    if owned:
+        raise GroupError(409, f"你是「{'」「'.join(owned)}」的建立者，請先解散群組再刪除帳號")
+    for g in groups:
+        if role_of(g, uid):
+            remove_member(store, g["id"], uid, uid)
+        else:
+            decline(store, g["id"], email)
+    for job in store.list_jobs(uid):
+        store.delete_job(job["id"])
+    return purge_scope(store, uid, on_scope_deleted)
+
+
 def summary_for(store, uid: str, email: str | None) -> dict:
     """側欄要的東西：我在的群組（含成員與待接受邀請）、寄給我的邀請。"""
     groups, invites = [], []

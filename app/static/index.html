@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="dark">
-<meta name="theme-color" content="#151515">
+<meta name="theme-color" content="#151515" id="themeColor">
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="icon" href="/static/icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="/static/icon.svg">
@@ -114,11 +114,11 @@
                 <svg class="i-sm" aria-hidden="true"><use href="/static/icons.svg#moon"/></svg>
                 深淺色主題
               </span>
-              <button class="ghost" id="themeToggle" title="切換深淺色主題" aria-label="切換深淺色主題">
-                <svg class="i-sm icon-moon" aria-hidden="true"><use href="/static/icons.svg#moon"/></svg>
-                <svg class="i-sm icon-sun" aria-hidden="true"><use href="/static/icons.svg#sun"/></svg>
-                切換
-              </button>
+              <select id="themeSelect" class="set-select" aria-label="深淺色主題">
+                <option value="system">跟隨系統</option>
+                <option value="light">淺色</option>
+                <option value="dark">深色</option>
+              </select>
             </div>
             <hr class="set-sep">
             <div class="set-row">
@@ -152,15 +152,11 @@
             <div class="set-row">
               <span class="set-label">
                 <svg class="i-sm" aria-hidden="true"><use href="/static/icons.svg#clock"/></svg>
-                今日 API 用量
+                我今天的額度
               </span>
             </div>
-            <div class="usage-grid" id="usageToday">
-              <div class="usage-tile"><span class="usage-num" id="usageCalls">—</span><span class="usage-lbl">API 呼叫</span></div>
-              <div class="usage-tile"><span class="usage-num" id="usageAnalysis">—</span><span class="usage-lbl">分析</span></div>
-              <div class="usage-tile"><span class="usage-num" id="usageAsk">—</span><span class="usage-lbl">問答</span></div>
-              <div class="usage-tile"><span class="usage-num" id="usageLive">—</span><span class="usage-lbl">錄音段</span></div>
-            </div>
+            <div class="quota-list" id="quotaList"></div>
+            <p class="quota-site" id="usageSite"></p>
           </div>
         </div>
       </div>
@@ -198,7 +194,7 @@
           </button>
           <div class="stat-tile static">
             <span class="stat-num" id="statUsage"><span class="skel skel-num"></span></span>
-            <span class="stat-lbl">今日分析次數</span>
+            <span class="stat-lbl">全站今日 AI 呼叫</span>
           </div>
         </div>
 
@@ -327,6 +323,7 @@
                 <svg class="i" aria-hidden="true"><use href="/static/icons.svg#upload"/></svg>
                 上傳並轉錄
               </button>
+              <span class="quota-hint" id="uploadQuota"></span>
             </div>
             <div class="progress" id="fileProgress" style="display:none"><div></div></div>
             <div class="status-line" id="fileStatus"></div>
@@ -677,10 +674,11 @@
         <details>
           <summary>隱私與資料處理說明</summary>
           <ul>
-            <li>你貼上或錄製的會議內容，只用於本次分析：文字與音訊會傳送給 Google Gemini API 進行轉錄與結構化分析。</li>
-            <li>分析產出的任務與會議紀錄存在伺服器的本地資料檔；上傳的音訊檔在轉錄後即不再使用。</li>
-            <li>本服務不會將你的內容用於任何模型訓練，也不會提供給第三方。</li>
-            <li>公開測試站的資料可能在系統重新部署時清空，請自行下載需要保留的會議紀錄（Markdown / CSV）。</li>
+            <li><b>送去哪裡處理</b>：貼上的文字與錄音會傳送給 Google Gemini API 做轉錄與分析。本站使用 Gemini 的免費方案，依 Google 條款，免費方案的內容可能被 Google 用於改進其產品、並可能經人工審閱——<b>請勿上傳機密或敏感內容</b>。</li>
+            <li>若伺服器啟用了講者分離，錄音也會上傳給 pyannoteAI 處理，對方會在 24～48 小時內自動刪除。</li>
+            <li><b>保存什麼</b>：逐字稿、分析結果與任務存在 Google Firebase（Firestore）資料庫，只有你（或你所在群組的成員）看得到。上傳的音檔與錄音在轉錄完成後即刪除，不會保存。</li>
+            <li>預錄聲音辨識人的聲音樣本只用在該場會議的比對，會議結束就刪除，不進資料庫。</li>
+            <li><b>怎麼刪除</b>：單場會議可在歷史會議刪除；右上角頭像選單可「刪除帳號與所有資料」。設定裡的「資料備份」可下載你的全部資料。</li>
           </ul>
         </details>
       </footer>

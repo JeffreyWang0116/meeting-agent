@@ -173,6 +173,8 @@ class RagIndex:
         self._store = store
         self._embedder = embedder
         self._lock = threading.Lock()
+        # 載入時把舊索引作廢了，store 裡的舊記錄還在——第一次存檔要整份重寫才清得掉
+        self._stale = False
         self._records = self._load()
 
     def _load(self) -> list[dict]:
@@ -180,17 +182,22 @@ class RagIndex:
         expected = getattr(self._embedder, "dim", None)
         # 向量維度改過（例如從 3072 降到 768）→ 舊向量與新問題向量不同長，
         # 直接作廢整份索引，下次 sync 用新維度重建。
-        if expected is not None and data.get("dim") != expected:
-            return []
         records = data.get("records", [])
+        if expected is not None and data.get("dim") != expected:
+            self._stale = bool(records)
+            return []
         # 改版前的逐字稿切塊固定 400 字、沒有時間戳，列出的段落跳不回原文 → 整份重建
         if any("source" not in r for r in records):
+            self._stale = True
             return []
         return records
 
-    def _flush(self) -> None:
+    def _flush(self, meeting_ids: set[str] | None = None) -> None:
+        """meeting_ids：這次動到哪幾場，store 只寫它們（None＝整份重寫）。"""
+        if self._stale:
+            meeting_ids, self._stale = None, False
         self._store.save_rag_records(
-            getattr(self._embedder, "dim", None), self._records
+            getattr(self._embedder, "dim", None), self._records, meeting_ids=meeting_ids
         )
 
     def sync(self, store, user: str = DEFAULT_USER) -> int:
@@ -198,6 +205,7 @@ class RagIndex:
         with self._lock:
             indexed = {r["meeting_id"] for r in self._records}
             added = 0
+            changed: set[str] = set()
             for meeting in store.list_meetings(user=user):
                 if meeting["id"] in indexed:
                     continue
@@ -222,8 +230,9 @@ class RagIndex:
                         }
                     )
                 added += len(pieces)
+                changed.add(meeting["id"])
             if added:
-                self._flush()
+                self._flush(changed)
             return added
 
     def reset(self, user: str | None = None) -> None:
@@ -232,12 +241,13 @@ class RagIndex:
         還原是單一使用者的動作，所以預設只清那個人的；user=None 才是整份清空。
         """
         with self._lock:
-            self._records = (
-                []
-                if user is None
-                else [r for r in self._records if _record_user(r) != user]
-            )
-            self._flush()
+            if user is None:
+                self._records = []
+                self._flush()
+                return
+            dropped = {r["meeting_id"] for r in self._records if _record_user(r) == user}
+            self._records = [r for r in self._records if _record_user(r) != user]
+            self._flush(dropped)
 
     def drop_meeting(self, meeting_id: str) -> int:
         """把某場會議的片段從索引移除（會議被編輯/刪除時呼叫），
@@ -247,7 +257,7 @@ class RagIndex:
             self._records = [r for r in self._records if r["meeting_id"] != meeting_id]
             removed = before - len(self._records)
             if removed:
-                self._flush()
+                self._flush({meeting_id})
             return removed
 
     def _visible(self, meeting_ids: list[str] | None, user: str) -> list[dict]:

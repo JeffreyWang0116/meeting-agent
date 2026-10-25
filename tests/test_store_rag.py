@@ -92,3 +92,44 @@ def test_many_records_are_not_crammed_into_one_firestore_document():
     store.save_rag_records(768, [_rec("m1", f"片段{i}", [float(i)]) for i in range(30)])
 
     assert len(store.get_rag_records()["records"]) == 30
+
+
+def test_saving_only_changed_meetings_keeps_the_others(store):
+    """帶 meeting_ids 時只換掉那幾場的片段，其他會議的記錄原封不動。"""
+    store.save_rag_records(768, [_rec("m1", "甲", [0.1]), _rec("m2", "乙", [0.2])])
+    store.save_rag_records(
+        768,
+        [_rec("m1", "甲", [0.1]), _rec("m2", "乙改", [0.3]), _rec("m3", "丙", [0.4])],
+        meeting_ids={"m2", "m3"},
+    )
+
+    got = sorted(r["text"] for r in store.get_rag_records()["records"])
+    assert got == ["丙", "乙改", "甲"]
+
+
+def test_dropping_one_meeting_by_id_removes_only_it(store):
+    store.save_rag_records(768, [_rec("m1", "甲", [0.1]), _rec("m2", "乙", [0.2])])
+    store.save_rag_records(768, [_rec("m2", "乙", [0.2])], meeting_ids={"m1"})
+
+    assert [r["text"] for r in store.get_rag_records()["records"]] == ["乙"]
+
+
+def test_incremental_save_touches_only_that_meetings_documents():
+    """Firestore 按寫入次數計費。原本每次存檔都重寫全站所有記錄——
+    索引 300 筆時分析一場新會議要寫 300+ 次，免費額度一天 2 萬次很快見底。"""
+    from app.stores.firestore_store import FirestoreStore
+
+    db = FakeFirestore()
+    store = FirestoreStore(db)
+    others = [_rec(f"old{i}", f"舊{i}", [0.1], user="uid-B") for i in range(50)]
+    store.save_rag_records(768, others)
+    col = db.collection("rag_records")
+    col.writes = col.scans = 0
+
+    store.save_rag_records(
+        768, others + [_rec("new", "新1", [0.2]), _rec("new", "新2", [0.3])],
+        meeting_ids={"new"},
+    )
+
+    assert col.writes == 2
+    assert col.scans == 0

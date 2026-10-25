@@ -208,7 +208,10 @@ class LocalJsonStore(TaskStore):
         doc = self._read_doc(self._rag_path())
         return {"dim": doc.get("dim"), "records": doc.get("records", [])}
 
-    def save_rag_records(self, dim: int | None, records: list[dict]) -> None:
+    def save_rag_records(
+        self, dim: int | None, records: list[dict], meeting_ids: set[str] | None = None
+    ) -> None:
+        # 本地是單一檔案，整份寫跟只寫幾場的成本一樣，meeting_ids 用不到
         atomic_write_text(
             self._rag_path(),
             json.dumps({"dim": dim, "records": records}, ensure_ascii=False),
@@ -276,6 +279,36 @@ class LocalJsonStore(TaskStore):
             dict(g) for g in self._groups().values()
             if uid in g.get("member_uids", []) or (email and email in g.get("invite_emails", []))
         ]
+
+    # ---- 轉錄工作紀錄（同目錄的 jobs.json）。理由同群組：不跟著備份還原 ----
+
+    def _jobs_path(self):
+        return self._path.with_name("jobs.json")
+
+    def _jobs(self) -> dict:
+        return self._read_doc(self._jobs_path()).get("jobs", {})
+
+    def _write_jobs(self, jobs: dict) -> None:
+        atomic_write_text(self._jobs_path(), json.dumps({"jobs": jobs}, ensure_ascii=False))
+
+    def save_job(self, job: dict) -> None:
+        with self._lock:
+            jobs = self._jobs()
+            jobs[job["id"]] = dict(job)
+            self._write_jobs(jobs)
+
+    def get_job(self, job_id: str) -> dict | None:
+        job = self._jobs().get(job_id)
+        return dict(job) if job else None
+
+    def delete_job(self, job_id: str) -> None:
+        with self._lock:
+            jobs = self._jobs()
+            if jobs.pop(job_id, None) is not None:
+                self._write_jobs(jobs)
+
+    def list_jobs(self, user: str) -> list[dict]:
+        return [dict(j) for j in self._jobs().values() if j.get("user") == user]
 
     def _glossary_path(self):
         return self._path.with_name("glossary.json")

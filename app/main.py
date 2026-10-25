@@ -457,6 +457,7 @@ def create_app(
     translator=None,
     verify_token=None,
     diarizer=None,
+    delete_auth_user=None,
 ) -> FastAPI:
     _configure_logging()
     settings = settings or get_settings()
@@ -586,7 +587,8 @@ def create_app(
         )
         live_manager.MAX_ENROLLMENTS = settings.live_enroll_max_speakers
     job_manager = job_manager or MediaJobManager(
-        transcriber, orchestrator, settings.data_dir / "tmp", diarizer=diarizer
+        transcriber, orchestrator, settings.data_dir / "tmp", diarizer=diarizer,
+        store=store,
     )
     rag_index = None
     if ask_agent is None:
@@ -627,6 +629,14 @@ def create_app(
             "一切正常：服務活著、首頁打得開，沒有任何徵兆顯示門是開的。"
             "真的要開一個沒有門的公開站，設 ALLOW_NO_AUTH=1 明講。"
         )
+
+    def remove_auth_user(uid: str) -> None:
+        if delete_auth_user is not None:
+            delete_auth_user(uid)
+            return
+        from firebase_admin import auth as firebase_auth
+
+        firebase_auth.delete_user(uid)
 
     if settings.auth_enabled:
         # Firebase Auth：一人一份資料。優先於共用 API_TOKEN——兩個都設的時候，
@@ -814,6 +824,12 @@ def create_app(
             "speaker_diarization": "pyannote" if diarizer else None,
             # 速率限制有沒有開（公開部署預設開）
             "rate_limit": rate_limiter.enabled,
+            # 進行中的工作。推 master 會觸發重新部署、清掉記憶體裡的聆聽 session，
+            # 部署前看一眼有沒有人正在用
+            "active_work": {
+                "media_jobs": job_manager.active_count(),
+                "live_sessions": live_manager.active_count(),
+            },
         }
 
     # ---- 輸入路徑 1：純文字 ----
@@ -1038,6 +1054,17 @@ def create_app(
     def list_tasks(meeting_id: Optional[str] = None):
         return {"tasks": store.list_tasks(meeting_id=meeting_id, user=current_user())}
 
+    @app.get("/api/quota")
+    def get_quota():
+        """自己今天的額度。/api/usage 是全站合計，不能拿來告訴使用者還剩多少"""
+        if CURRENT_GUEST.get():
+            limiter, key = guest_limiter, f"ip:{CURRENT_IP.get()}"
+        else:
+            limiter, key = rate_limiter, current_account()
+        if not limiter.enabled:
+            return {"enabled": False, "buckets": {}}
+        return {"enabled": True, "buckets": limiter.usage(key)}
+
     @app.get("/api/usage")
     def get_usage():
         return usage.snapshot()
@@ -1259,6 +1286,32 @@ def create_app(
     @app.delete("/api/groups/{group_id}/members/{member_uid}")
     def remove_group_member(group_id: str, member_uid: str):
         return group_call(group_svc.remove_member, store, group_id, current_account(), member_uid)
+
+    @app.delete("/api/account")
+    def delete_account():
+        """刪除帳號與全部個人資料，最後刪掉 Firebase 帳號本身。"""
+        if not settings.auth_enabled:
+            # 共用 API Token 模式所有人是同一個使用者，刪下去等於清空整個服務
+            raise HTTPException(status_code=400, detail="這個伺服器沒有帳號制，沒有帳號可以刪除")
+        uid = current_account()
+
+        def drop_rag(scope: str) -> None:
+            if rag_index is not None:
+                rag_index.reset(user=scope)
+
+        try:
+            count = group_svc.delete_account(store, uid, CURRENT_EMAIL.get(), drop_rag)
+        except group_svc.GroupError as exc:
+            raise HTTPException(status_code=exc.status, detail=exc.detail)
+        try:
+            remove_auth_user(uid)
+            auth_deleted = True
+        except Exception:
+            # 資料已經刪光了，這一步失敗不能回 500 讓人以為什麼都沒刪；
+            # 剩下一個空帳號，前端照樣登出
+            logger.exception("刪除 Firebase 帳號失敗：%s", uid)
+            auth_deleted = False
+        return {"deleted_meetings": count, "auth_deleted": auth_deleted}
 
     @app.delete("/api/guest/data")
     def wipe_guest_data():
