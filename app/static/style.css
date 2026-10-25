@@ -667,6 +667,28 @@
     color: var(--faint); font-size: .82rem; margin-top: 3px; padding-top: 3px;
     border-top: 1px dashed var(--border);
   }
+  /* ---- 逐字稿就地修正 ---- */
+  .edit-hint, .edit-foot { font-size: .78rem; color: var(--faint); margin: 6px 0 2px; }
+  .edit-foot {
+    display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between;
+    margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--border);
+  }
+  .transcript-full.editing .chat-line { cursor: text; }
+  .transcript-full.editing .chat-line:hover { background: var(--card-2); }
+  .line-edit { display: grid; gap: 6px; }
+  .line-edit textarea {
+    width: 100%; min-height: 56px; resize: vertical; font: inherit; line-height: 1.6;
+    color: var(--ink); background: var(--card); border: 1px solid var(--accent-border);
+    border-radius: var(--radius-sm); padding: 6px 8px;
+  }
+  .line-edit-bar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+  .line-edit-bar select, .line-edit-bar input {
+    font: inherit; font-size: .8rem; color: var(--ink); background: var(--card-2);
+    border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 3px 6px; max-width: 150px;
+  }
+  .line-edit-bar .ghost { padding: 3px 8px; font-size: .78rem; }
+  .line-edit-bar .spacer { flex: 1; }
+
   .summary-trans {
     margin: 10px 0 0; padding: 12px 14px; font-size: .9rem; line-height: 1.75; color: var(--muted);
     background: var(--card-2); border: 1px dashed var(--border-strong); border-radius: var(--radius-md);

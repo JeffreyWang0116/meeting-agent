@@ -103,9 +103,17 @@ def test_splitting_cuts_a_bubble_at_the_character_offset():
     assert out.splitlines() == ["[0:01] 講者A：大家好", "今天要談預算", "[0:20] 講者B：我同意"]
 
 
-def test_splitting_at_the_edges_is_a_no_op():
-    assert call("splitBubble", SAMPLE, 0, 0) == SAMPLE
-    assert call("splitBubble", SAMPLE, 1, 3) == SAMPLE
+def test_splitting_at_the_edges_is_rejected():
+    """不能用「結果和原文相同」判斷失敗：原文本來就是兩行時，拆開後文字會一模一樣。"""
+    assert call("splitBubble", SAMPLE, 0, 0) is None
+    assert call("splitBubble", SAMPLE, 1, 3) is None
+    assert call("splitBubble", SAMPLE, 9, 1) is None
+
+
+def test_splitting_a_bubble_that_is_already_two_lines_still_succeeds():
+    already = "\n".join(["[0:01] 講者A：大家好", "今天要談預算"])
+
+    assert call("splitBubble", already, 0, 3) == already
 
 
 def test_deleting_a_bubble_removes_its_lines():

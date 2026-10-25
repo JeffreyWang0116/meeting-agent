@@ -99,14 +99,15 @@ function mergeWithNext(text, index, knownNames = []) {
   return raw.filter(l => l.trim()).join("\n");
 }
 
-// 在第 offset 個字處拆成兩句。切在頭尾等於沒切
+// 在第 offset 個字處拆成兩句。切在頭尾（兩邊有一邊是空的）時回 null。
+// 不能用「結果和原文相同」來判斷失敗：原文本來就是兩行時，拆開後的文字會一模一樣
 function splitBubble(text, index, offset, knownNames = []) {
   const bubbles = editableBubbles(text, knownNames);
   const target = bubbles[index];
-  if (!target) return String(text || "");
+  if (!target) return null;
   const head = target.text.slice(0, offset).trim();
   const tail = target.text.slice(offset).trim();
-  if (!head || !tail) return String(text || "");
+  if (!head || !tail) return null;
   // 後半沿用同一個講者，所以不重複標籤（與轉錄的慣例一致）；時間標記留給前半，
   // 後半沒有自己的時間——硬掰一個會讓「點重點跳到那一行」跳到錯的位置
   return spliceBubble(text, bubbles, index, [

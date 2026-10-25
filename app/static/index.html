@@ -524,12 +524,21 @@
                 <summary>
                   <svg class="i-sm" aria-hidden="true"><use href="/static/icons.svg#scroll-text"/></svg>
                   會議逐字稿
-                  <button class="ghost" id="btnCopyTranscript" style="margin-left:auto">
+                  <button class="ghost" id="btnEditTranscript" style="margin-left:auto" hidden>
+                    <svg class="i-sm" aria-hidden="true"><use href="/static/icons.svg#pencil"/></svg>
+                    修正
+                  </button>
+                  <button class="ghost" id="btnCopyTranscript">
                     <svg class="i-sm" aria-hidden="true"><use href="/static/icons.svg#copy"/></svg>
                     複製
                   </button>
                 </summary>
+                <p class="edit-hint" id="transEditHint" hidden>點任一句可修正文字或改講者；也可以與下一句合併、從游標處拆開、刪掉整句。</p>
                 <div class="transcript-full" id="rTranscript"></div>
+                <div class="edit-foot" id="transEditFoot" hidden>
+                  <span>逐字稿已修改，分析結果還是舊的。</span>
+                  <button class="primary" id="btnReanalyzeEdited">用修正後的逐字稿重新分析</button>
+                </div>
               </details>
 
               <details class="transcript-details" id="rCorrSec" style="display:none">
