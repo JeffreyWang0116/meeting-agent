@@ -457,6 +457,25 @@
               <span class="hint">講者（點擊改名，逐字稿與出席者跟著更新）</span>
               <div class="speaker-chips" id="rSpeakerChips"></div>
             </div>
+            <!-- 用一句話請 AI 修改這份結果。改完先預覽，按下套用才寫進去 -->
+            <div class="refine-box" id="rRefine" hidden>
+              <div class="refine-row">
+                <input id="refineInput" type="text" autocomplete="off"
+                  placeholder="請 AI 修改：把摘要改短一點、第二個任務的負責人是小明…">
+                <button class="ghost" id="btnRefine">
+                  <svg class="i-sm" aria-hidden="true"><use href="/static/icons.svg#send"/></svg>
+                  送出
+                </button>
+              </div>
+              <p class="refine-note">逐字稿不能用這種方式改——請用右邊逐字稿的「修正」。</p>
+              <div class="refine-preview" id="refinePreview" hidden>
+                <div class="refine-changes" id="refineChanges"></div>
+                <div class="refine-actions">
+                  <button class="ghost" id="btnRefineCancel">取消</button>
+                  <button class="primary" id="btnRefineApply">套用這些修改</button>
+                </div>
+              </div>
+            </div>
           </div>
 
           <div class="report-grid">

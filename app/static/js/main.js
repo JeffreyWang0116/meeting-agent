@@ -19,6 +19,7 @@
     transcriptedit 逐字稿就地編輯的純函式（改句、改講者、合併、拆句、刪句）
     transcriptui 逐字稿就地修正的介面（接上面的純函式到畫面）
     result      分析結果頁
+    refine      請 AI 修改結果（一句話 → 預覽 → 套用）
     tasks       任務庫
     meetings    歷史會議
     reminders   主動提醒
@@ -40,6 +41,7 @@ import "./progress.js";
 import "./transcriptedit.js";
 import "./transcriptui.js";
 import "./calendar.js";
+import "./refine.js";
 import "./result.js";
 import "./tasks.js";
 import "./meetings.js";

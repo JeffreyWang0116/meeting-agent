@@ -7,6 +7,7 @@ import { WIDE, showView } from "./router.js";
 import { maybePromoteTerms } from "./setup.js";
 import { refreshTasks } from "./tasks.js";
 import { jumpToTranscript, renderChat } from "./transcript.js";
+import { bindRefine, wireRefine } from "./refine.js";
 import { bindTranscriptEditor, wireTranscriptEditor } from "./transcriptui.js";
 
 /* ==================================================================
@@ -199,6 +200,11 @@ function renderResult(result, transcript, { kind = null, fromHistory = false } =
       ...(currentResult?.speaker_names || []).map(s => s.name),
     ],
     reanalyze: reanalyzeCurrent,
+  });
+  // 請 AI 修改結果：套用後把新的內容畫回去，不重跑整份 renderResult
+  bindRefine({
+    meetingId: () => currentResult?.meeting_id || null,
+    applied: applyRefinedMeeting,
   });
   renderCorrections(result.corrections || []);
   // 成效指標：這場會議 AI 幫你做了多少事、花了多久
@@ -409,6 +415,36 @@ async function reanalyzeCurrent() {
 }
 
 wireTranscriptEditor();
+wireRefine();
+
+// AI 修改套用後：只重畫受影響的區塊，與講者改名同一套作法
+function applyRefinedMeeting(meeting, tasks) {
+  if (!currentResult || !meeting) return;
+  const a = currentResult.analysis;
+  a.meeting.title = meeting.meeting.title;
+  a.meeting.summary = meeting.meeting.summary;
+  a.decisions = meeting.decisions || [];
+  a.pending_items = meeting.pending_items || [];
+  a.sections = meeting.sections || [];
+  a.tags = meeting.tags || [];
+  a.todos = (tasks || []).map(t => ({
+    task: t.task, owner: t.owner, due_date: t.due_date, due_phrase: t.due_phrase,
+    priority: t.priority, priority_reason: t.priority_reason, source_quote: t.source_quote,
+  }));
+  $("rTitle").textContent = a.meeting.title;
+  $("rSummary").textContent = a.meeting.summary || "";
+  // 摘要換過了，之前翻好的譯文已經過期
+  $("rSummaryTrans").textContent = "";
+  $("rSummaryTrans").style.display = "none";
+  renderMeta();
+  renderHighlights(a.highlights || []);
+  renderDecisions(a.decisions);
+  renderTodos(a.todos);
+  renderPending(a.pending_items);
+  renderSections(a.sections);
+  refreshTasks();
+  refreshMeetings();
+}
 
 // ---- 會議重點：點擊 → 展開逐字稿、跳到該時間節點（沒有時間就用原句比對） ----
 $("rHighlights").addEventListener("click", e => {

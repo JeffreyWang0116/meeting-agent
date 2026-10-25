@@ -667,6 +667,26 @@
     color: var(--faint); font-size: .82rem; margin-top: 3px; padding-top: 3px;
     border-top: 1px dashed var(--border);
   }
+  /* ---- 請 AI 修改結果（先預覽再套用） ---- */
+  .refine-box {
+    margin-top: 12px; padding: 10px 12px; background: var(--card-2);
+    border: 1px solid var(--border); border-radius: var(--radius-md);
+  }
+  .refine-row { display: flex; gap: 8px; align-items: center; }
+  .refine-row input {
+    flex: 1; min-width: 0; font: inherit; font-size: .86rem; color: var(--ink);
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: var(--radius-sm); padding: 7px 10px;
+  }
+  .refine-note { font-size: .72rem; color: var(--faint); margin: 6px 0 0; }
+  .refine-preview { margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--border); }
+  .refine-changes { display: grid; gap: 8px; }
+  .refine-change { font-size: .82rem; line-height: 1.6; }
+  .refine-change b { color: var(--ink); }
+  .refine-change .before { color: var(--faint); text-decoration: line-through; }
+  .refine-change .after { color: var(--accent); }
+  .refine-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 10px; }
+
   /* ---- 聆聽中的標記與筆記 ---- */
   .mark-list { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 0; }
   .mark-chip {
