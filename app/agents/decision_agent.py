@@ -50,6 +50,7 @@ def _schema_example(features: set[str], section_labels: list[str] | None = None)
                 "task": "具體的代辦事項",
                 "owner": "會議中講出的負責人姓名；沒講出姓名就填承接的講者代號；無法確定填 null",
                 "due_date": "YYYY-MM-DD，無法確定填 null",
+                "due_phrase": "期限在會議中的原話，如「下禮拜三」；會議中直接講絕對日期或沒提期限就填 null",
                 "priority": "high 或 medium 或 low",
                 "priority_reason": "一句話說明優先級判斷依據，不明顯就填 null",
                 "source_quote": "逐字稿中的原句（可截斷）",
@@ -218,7 +219,7 @@ PROMPT_TEMPLATE = """你是「會議助手」的決策模組。以下是一場�
 
 務必遵守的規則：
 1. 只輸出一個 JSON 物件。不要 markdown 圍欄、不要任何額外說明文字。
-2. 所有相對日期（「下週五」「月底前」「後天」等）必須以上面的會議日期為基準，換算成 YYYY-MM-DD 絕對日期；無法確定具體日期時 due_date 填 null，禁止猜測。
+2. 所有相對日期（「下週五」「月底前」「後天」等）必須以上面的會議日期為基準，換算成 YYYY-MM-DD 絕對日期；無法確定具體日期時 due_date 填 null，禁止猜測。換算自相對日期時，把原話原樣填進 due_phrase（如「下禮拜三」），讓使用者核對換算對不對；會議中直接講出絕對日期（「10 月 29 號」）或根本沒提期限時，due_phrase 填 null，不要重複塞一份日期字串。
 3. owner：會議中有講出負責人的姓名或稱謂（例如「這份資料請王委員提供」）就填該姓名；只知道是哪位講者承接（例如講者A 說「這個我來處理」）就填該講者的代號，不要推斷代號背後的真實姓名。找不到明確負責人的代辦事項，owner 填 null，並同時在 pending_items 加入一筆「需指派負責人」的說明。
 4. 每個代辦事項的 source_quote 必須引用紀錄中的原句（可截斷），方便人工核對。
 5. 只記錄紀錄中真實出現的內容，禁止編造。討論過但沒有結論的議題放入 pending_items。
@@ -253,11 +254,16 @@ def build_prompt(
     attendees: list[str] | None = None,
     marks: list[str] | None = None,
     notes: str | None = None,
+    # 自訂範本：{"label": 種類名稱, "hint": 說明, "sections": {區塊: 說明}}。
+    # 有值時取代內建種類的查表，其餘流程完全一樣
+    kind_spec: dict | None = None,
 ) -> str:
     # features=None：向後相容，等同全部功能都開（沒有勾選框限制的舊行為）
     features = FEATURE_KEYS if features is None else features
     kind_line = ""
-    if kind:
+    if kind_spec:
+        kind_line = f"\n會議種類：{kind_spec.get('label', '')}。{kind_spec.get('hint', '')}"
+    elif kind:
         resolved = resolve_kind(kind)
         kind_line = f"\n會議種類：{resolved}。{KIND_HINTS.get(resolved, '')}"
     glossary_line = ""
@@ -310,7 +316,7 @@ def build_prompt(
     if FEATURE_KEYS - features:
         n += 1
         rules.append(f"\n{n}. 這次不需要 {'、'.join(sorted(FEATURE_KEYS - features))} 欄位，不要輸出。")
-    spec = sections_for_kind(kind)
+    spec = kind_spec.get("sections", {}) if kind_spec else sections_for_kind(kind)
     if spec:
         n += 1
         detail = "\n".join(f"   - {label}：{desc}" for label, desc in spec.items())
@@ -326,7 +332,7 @@ def build_prompt(
         glossary_line=glossary_line,
         attendee_line=attendee_line + mark_line + note_line,
         feature_note=feature_note,
-        schema=_schema_example(features, list(sections_for_kind(kind))),
+        schema=_schema_example(features, list(spec)),
         transcript=transcript,
     )
 
@@ -394,6 +400,7 @@ class DecisionAgent:
         attendees: list[str] | None = None,
         marks: list[str] | None = None,
         notes: str | None = None,
+        kind_spec: dict | None = None,
     ) -> MeetingAnalysis:
         meeting_date = meeting_date or date.today()
         # features=None：向後相容，等同全部功能都開
@@ -408,6 +415,7 @@ class DecisionAgent:
             attendees=attendees,
             marks=marks,
             notes=notes,
+            kind_spec=kind_spec,
         )
 
         prompt = base_prompt

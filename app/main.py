@@ -9,7 +9,7 @@ import logging
 import re
 import sys
 import uuid
-from datetime import date
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -58,6 +58,8 @@ from app.speaker_rename import name_problem, rename_meeting_fields, rename_task_
 from app.stores import make_store
 from app.transcription import media
 from app.transcription.segments import parse_time_label, replace_term_in_range
+from app.refine import RefineError, Refiner, apply_patch, parse_patch
+from app.templates import TemplateError, is_custom, kind_value, normalize_template, prompt_hint, sections_map, template_id
 from app.translate import TARGETS as TRANSLATE_TARGETS
 from app.translate import Translator
 from app.transcription.diarizer import build_diarizer
@@ -339,6 +341,32 @@ class FinishRequest(BaseModel):
     notes: Optional[str] = Field(default=None, max_length=20000)
 
 
+class RefineRequest(BaseModel):
+    # 預覽：使用者的修改要求（一句話）。套用：前端把預覽拿到的 patch 原樣送回
+    request: Optional[str] = Field(default=None, max_length=2000)
+    patch: Optional[dict] = None
+
+
+# 回報 AI 哪裡錯了。原因做成固定幾種：自由文字沒辦法統計，也沒辦法拿來篩選案例
+FEEDBACK_REASONS = {
+    "not_discussed": "會議中沒有這件事",
+    "owner_wrong": "負責人錯了",
+    "date_wrong": "日期錯了",
+    "wrong_content": "內容理解錯誤",
+    "missing": "漏掉了重要的事",
+    "other": "其他",
+}
+FEEDBACK_TARGETS = {"todo", "decision", "summary", "highlight", "pending", "section"}
+
+
+class FeedbackRequest(BaseModel):
+    meeting_id: str
+    target: str                       # 哪一類產出（代辦、決議、摘要…）
+    target_text: str = Field(default="", max_length=2000)   # 被回報的那一筆內容
+    reason: str
+    note: str = Field(default="", max_length=2000)          # 選填：正確答案是什麼
+
+
 class ReanalyzeRequest(BaseModel):
     features: Optional[list[str]] = None
     correct_typos: bool = False
@@ -465,6 +493,7 @@ def create_app(
     verify_token=None,
     diarizer=None,
     delete_auth_user=None,
+    refine_generate=None,
 ) -> FastAPI:
     _configure_logging()
     settings = settings or get_settings()
@@ -570,6 +599,14 @@ def create_app(
         api_keys=settings.gemini_api_keys,
         on_call=record_call,
         model=settings.transcribe_model,
+    )
+    # 用一句話改分析結果。只回「要改哪些欄位」，所以用額度高的輕量模型就夠
+    refiner = Refiner(
+        api_key=settings.gemini_api_key,
+        api_keys=settings.gemini_api_keys,
+        on_call=record_call,
+        model=settings.gemini_model,
+        generate=refine_generate,
     )
     if live_manager is None:
         # 預錄聲音辨識人（選用）：沒設定人數上限就整個不建，等同功能不存在
@@ -730,7 +767,25 @@ def create_app(
             "guestEnabled": settings.auth_enabled and settings.guest_login_enabled,
         }
 
-    def validate_kind(kind: str | None) -> str | None:
+    def kind_spec_of(kind: str | None) -> dict | None:
+        """自訂種類 → 餵進提示詞的 {label, hint, sections}；內建種類回 None。
+
+        範本被刪掉時也回 None：用它分析過的舊會議還在，重新分析時退回通用格式，
+        總比整個失敗好。"""
+        if not is_custom(kind):
+            return None
+        tpl = store.get_template(template_id(kind), current_user())
+        if tpl is None:
+            return None
+        return {"label": tpl["name"], "hint": prompt_hint(tpl), "sections": sections_map(tpl)}
+
+    def validate_kind(kind: str | None, *, existing: bool = False) -> str | None:
+        """existing=True：這個 kind 來自已存檔的會議（編輯、重新分析）。
+        範本可能已經被刪掉，不該因此打不開那場會議。"""
+        if is_custom(kind):
+            if existing or store.get_template(template_id(kind), current_user()):
+                return kind
+            raise HTTPException(status_code=400, detail="找不到這個自訂範本")
         # LEGACY_KINDS 一併放行：改版前存下來的會議帶的是舊的錄音種類值，
         # 編輯或重新分析那些紀錄時不該被擋下來
         if kind and kind not in MEETING_KINDS and kind not in LEGACY_KINDS:
@@ -753,6 +808,7 @@ def create_app(
         notes: str | None = None,
     ) -> dict:
         usage.record("analysis")
+        spec = kind_spec_of(kind)
         if correct_typos:
             usage.record("correct")  # 校正是額外一次請求，用量面板要分開看得到
         try:
@@ -768,6 +824,7 @@ def create_app(
                 attendees=attendees,
                 marks=marks,
                 notes=notes,
+                kind_spec=spec,
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc))
@@ -872,6 +929,9 @@ def create_app(
                     "kinds": [
                         {
                             "value": k,
+                            # 下拉選單上顯示的字。自訂範本的 value 是 custom:<id>，
+                            # 不能直接拿來當標籤
+                            "label": k,
                             # 給人看的說明，不是拼進 prompt 的 KIND_HINTS
                             "hint": KIND_DESCRIPTIONS[k],
                             "features": sorted(KIND_DEFAULT_FEATURES.get(k, FEATURE_KEYS)),
@@ -880,8 +940,26 @@ def create_app(
                     ],
                 }
                 for label, kinds in KIND_GROUPS
-            ],
+            ] + custom_kind_groups(),
         }
+
+    def custom_kind_groups() -> list[dict]:
+        """自訂範本在下拉選單自成一組，排在內建種類後面。"""
+        mine = sorted(store.list_templates(current_user()), key=lambda t: t.get("name", ""))
+        if not mine:
+            return []
+        return [{
+            "label": "我的範本",
+            "kinds": [
+                {
+                    "value": kind_value(t["id"]),
+                    "label": t["name"],
+                    "hint": t.get("hint") or "自訂範本",
+                    "features": sorted(t.get("features") or FEATURE_KEYS),
+                }
+                for t in mine
+            ],
+        }]
 
     @app.get("/api/meetings")
     def list_meetings():
@@ -906,7 +984,10 @@ def create_app(
                 status_code=400, detail=f"不允許修改的欄位：{'、'.join(sorted(unknown))}"
             )
         if "kind" in fields:
-            validate_kind(fields["kind"])
+            # 編輯時前端會把目前的 kind 原樣帶回來。範本已經被刪掉的話，
+            # 嚴格檢查會讓那場會議連標題都改不了——沒換種類就放行
+            current = store.get_meeting(meeting_id, user=current_user()) or {}
+            validate_kind(fields["kind"], existing=fields["kind"] == current.get("kind"))
         if "tags" in fields and not _is_str_list(fields["tags"]):
             raise HTTPException(status_code=400, detail="tags 必須是字串陣列")
         if "attendees" in fields and not _is_str_list(fields["attendees"]):
@@ -964,6 +1045,154 @@ def create_app(
                 except ValueError:
                     pass
         return {"meeting": updated, "replaced": count, "glossary_added": added}
+
+    # ---- 自訂會議範本：自己定義種類名稱、要哪些區塊、每個區塊抓什麼 ----
+
+    @app.get("/api/templates")
+    def list_templates():
+        mine = sorted(store.list_templates(current_user()), key=lambda t: t.get("name", ""))
+        return {"templates": mine}
+
+    @app.post("/api/templates")
+    def create_template(body: dict):
+        try:
+            fields = normalize_template(body)
+        except TemplateError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        template = {"id": uuid.uuid4().hex[:12], "user": current_user(), **fields}
+        store.save_template(template)
+        return {"template": template}
+
+    @app.patch("/api/templates/{tpl_id}")
+    def update_template(tpl_id: str, body: dict):
+        user = current_user()
+        if store.get_template(tpl_id, user) is None:
+            raise HTTPException(status_code=404, detail="找不到這個範本")
+        try:
+            fields = normalize_template(body)
+        except TemplateError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        template = {"id": tpl_id, "user": user, **fields}
+        store.save_template(template)
+        return {"template": template}
+
+    @app.delete("/api/templates/{tpl_id}")
+    def delete_template(tpl_id: str):
+        # 用它分析過的會議照舊存在，只是重新分析時退回通用格式（見 kind_spec_of）
+        store.delete_template(tpl_id, current_user())
+        return {"deleted": tpl_id}
+
+    # ---- 回報 AI 的錯誤：累積真實案例，換模型前拿來回歸測試 ----
+
+    @app.post("/api/feedback")
+    def add_feedback(req: FeedbackRequest):
+        if req.reason not in FEEDBACK_REASONS:
+            raise HTTPException(
+                status_code=400, detail=f"reason 只能是：{'、'.join(sorted(FEEDBACK_REASONS))}"
+            )
+        if req.target not in FEEDBACK_TARGETS:
+            raise HTTPException(
+                status_code=400, detail=f"target 只能是：{'、'.join(sorted(FEEDBACK_TARGETS))}"
+            )
+        user = current_user()
+        if store.get_meeting(req.meeting_id, user=user) is None:
+            raise HTTPException(status_code=404, detail=f"找不到會議：{req.meeting_id}")
+        item = {
+            "id": uuid.uuid4().hex[:12],
+            "user": user,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            **req.model_dump(),
+        }
+        store.save_feedback(item)
+        return {"feedback": item}
+
+    @app.get("/api/feedback")
+    def list_feedback():
+        items = sorted(
+            store.list_feedback(current_user()), key=lambda f: f.get("created_at", ""), reverse=True
+        )
+        return {"feedback": items, "reasons": FEEDBACK_REASONS}
+
+    @app.delete("/api/feedback/{feedback_id}")
+    def delete_feedback(feedback_id: str):
+        store.delete_feedback(feedback_id, current_user())
+        return {"deleted": feedback_id}
+
+    @app.get("/api/feedback/export.jsonl")
+    def export_feedback():
+        """匯出成一行一筆的 JSONL，格式比照 eval/dataset.jsonl，可直接拿去跑回歸測試。
+
+        逐字稿一定要帶：少了它就重現不了那次錯誤，回報也就沒用了。
+        """
+        user = current_user()
+        lines = []
+        for f in sorted(store.list_feedback(user), key=lambda x: x.get("created_at", "")):
+            record = store.get_meeting(f.get("meeting_id", ""), user=user)
+            if record is None:
+                continue  # 會議已刪除，沒有逐字稿可以重現
+            lines.append(json.dumps({
+                "id": f["id"],
+                "meeting_date": (record.get("meeting") or {}).get("date"),
+                "kind": record.get("kind"),
+                "transcript": record.get("transcript") or "",
+                "reported": {
+                    "target": f.get("target"),
+                    "target_text": f.get("target_text"),
+                    "reason": f.get("reason"),
+                    "reason_label": FEEDBACK_REASONS.get(f.get("reason"), ""),
+                    "note": f.get("note", ""),
+                },
+            }, ensure_ascii=False))
+        return Response(
+            content="\n".join(lines) + ("\n" if lines else ""),
+            media_type="application/x-ndjson",
+            headers={"Content-Disposition": 'attachment; filename="ai-feedback.jsonl"'},
+        )
+
+    @app.post("/api/meetings/{meeting_id}/refine")
+    def refine_meeting(meeting_id: str, req: RefineRequest):
+        """用一句話請 AI 修改分析結果。兩段式：
+
+        - 帶 request：問 AI 要改什麼，回傳 changes（給使用者看）與 patch（原樣送回來套用）。
+          **不寫資料庫**——AI 默默改掉摘要或負責人，使用者不會發現。
+        - 帶 patch：套用。這一步不打 AI，所以不佔 refine 額度，預覽完一定套得上。
+        """
+        user = current_user()
+        record = store.get_meeting(meeting_id, user=user)
+        if record is None:
+            raise HTTPException(status_code=404, detail=f"找不到會議：{meeting_id}")
+        tasks = store.list_tasks(meeting_id, user=user)
+
+        try:
+            if req.patch is not None:
+                # 前端送回來的 patch 一樣要驗：這一步沒有 AI，但有使用者
+                patch = parse_patch(json.dumps(req.patch, ensure_ascii=False))
+            elif (req.request or "").strip():
+                limit("refine")  # 只有這條路會打 AI
+                patch = refiner.propose(req.request, record, tasks)
+            else:
+                raise HTTPException(status_code=400, detail="請說明要修改什麼")
+            new_record, new_tasks, changes = apply_patch(record, tasks, patch)
+        except RefineError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+
+        if req.patch is None:
+            return {"changes": changes, "patch": patch}
+
+        if changes:
+            fields = {k: new_record[k] for k in ("meeting", "decisions", "pending_items", "tags", "sections")
+                      if k in new_record}
+            store.update_meeting(meeting_id, fields, user=user)
+            for before, after in zip(tasks, new_tasks):
+                changed = {k: v for k, v in after.items() if before.get(k) != v}
+                if changed:
+                    store.update_task(after["id"], user=user, **changed)
+            drop_from_rag(meeting_id)  # 摘要、決議變了，問答索引要重建
+        return {
+            "changes": changes,
+            "meeting": store.get_meeting(meeting_id, user=user),
+            "tasks": store.list_tasks(meeting_id, user=user),
+        }
 
     @app.post("/api/meetings/{meeting_id}/rename-speaker")
     def rename_speaker(meeting_id: str, req: RenameSpeakerRequest):

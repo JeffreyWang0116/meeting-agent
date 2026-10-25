@@ -131,6 +131,14 @@
             <hr class="set-sep">
             <div class="set-row">
               <span class="set-label">
+                <svg class="i-sm" aria-hidden="true"><use href="/static/icons.svg#clipboard-list"/></svg>
+                自訂會議範本
+              </span>
+              <button class="ghost" id="btnTemplates">管理</button>
+            </div>
+            <hr class="set-sep">
+            <div class="set-row">
+              <span class="set-label">
                 <svg class="i-sm" aria-hidden="true"><use href="/static/icons.svg#database"/></svg>
                 資料備份
               </span>
@@ -140,6 +148,17 @@
               </span>
             </div>
             <input type="file" id="restoreFile" accept="application/json,.json" style="display:none">
+            <hr class="set-sep">
+            <div class="set-row">
+              <span class="set-label">
+                <svg class="i-sm" aria-hidden="true"><use href="/static/icons.svg#circle-alert"/></svg>
+                AI 錯誤回報
+              </span>
+              <span style="display:flex; gap:6px; align-items:center">
+                <span class="set-count" id="feedbackCount">0 筆</span>
+                <a class="ghost btn-link" href="/api/feedback/export.jsonl" download>匯出</a>
+              </span>
+            </div>
             <hr class="set-sep">
             <div class="set-row">
               <span class="set-label">
@@ -457,6 +476,25 @@
               <span class="hint">講者（點擊改名，逐字稿與出席者跟著更新）</span>
               <div class="speaker-chips" id="rSpeakerChips"></div>
             </div>
+            <!-- 用一句話請 AI 修改這份結果。改完先預覽，按下套用才寫進去 -->
+            <div class="refine-box" id="rRefine" hidden>
+              <div class="refine-row">
+                <input id="refineInput" type="text" autocomplete="off"
+                  placeholder="請 AI 修改：把摘要改短一點、第二個任務的負責人是小明…">
+                <button class="ghost" id="btnRefine">
+                  <svg class="i-sm" aria-hidden="true"><use href="/static/icons.svg#send"/></svg>
+                  送出
+                </button>
+              </div>
+              <p class="refine-note">逐字稿不能用這種方式改——請用右邊逐字稿的「修正」。</p>
+              <div class="refine-preview" id="refinePreview" hidden>
+                <div class="refine-changes" id="refineChanges"></div>
+                <div class="refine-actions">
+                  <button class="ghost" id="btnRefineCancel">取消</button>
+                  <button class="primary" id="btnRefineApply">套用這些修改</button>
+                </div>
+              </div>
+            </div>
           </div>
 
           <div class="report-grid">
@@ -746,6 +784,47 @@
       <button class="primary" id="btnGlosAdd">新增</button>
     </div>
     <div id="glosList"><p class="empty-note">尚無詞彙</p></div>
+  </div>
+</div>
+
+<!-- 自訂會議範本：種類名稱、要哪些區塊、每個區塊抓什麼 -->
+<div class="modal-overlay" id="templateModal">
+  <div class="modal">
+    <div class="panel-head">
+      <h2>自訂會議範本</h2>
+      <button class="panel-x" id="btnTemplateClose" aria-label="關閉">
+        <svg class="i-sm" aria-hidden="true"><use href="/static/icons.svg#x"/></svg>
+      </button>
+    </div>
+    <p class="hint">內建的八種種類是通用的。自己開一種，AI 就會照你列的欄位整理這類會議。</p>
+
+    <div id="tplList"></div>
+
+    <div class="tpl-edit" id="tplEdit" hidden>
+      <div class="field">
+        <label class="lbl" for="tplName">種類名稱</label>
+        <input type="text" id="tplName" placeholder="例如：專題 meeting">
+      </div>
+      <div class="field">
+        <label class="lbl" for="tplHint">告訴 AI 這類會議的重點（選填）</label>
+        <textarea id="tplHint" rows="2" placeholder="例如：學校專題的每週進度會議，摘要聚焦這週做完什麼、下週要做什麼。"></textarea>
+      </div>
+      <div class="field">
+        <label class="lbl">要哪些欄位</label>
+        <div class="tpl-features" id="tplFeatures"></div>
+      </div>
+      <div class="field">
+        <label class="lbl">這個種類專屬的區塊（選填，最多 20 個）</label>
+        <div id="tplSections"></div>
+        <button class="ghost" id="btnTplAddSection">＋ 加一個區塊</button>
+      </div>
+      <div class="tpl-actions">
+        <button class="ghost" id="btnTplCancel">取消</button>
+        <button class="primary" id="btnTplSave">儲存範本</button>
+      </div>
+    </div>
+
+    <button class="primary" id="btnTplNew">＋ 新增範本</button>
   </div>
 </div>
 

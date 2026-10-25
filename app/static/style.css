@@ -275,6 +275,7 @@
   .quota-bar > span { display: block; height: 100%; background: var(--accent); }
   .quota-row.near .quota-bar > span { background: var(--medium); }
   .quota-row.full .quota-bar > span { background: var(--high); }
+  .set-count { font-size: .76rem; color: var(--faint); font-family: var(--mono); }
   .quota-site, .quota-hint { font-size: .72rem; color: var(--faint); margin: 2px 8px 8px; }
   .quota-hint { margin: 0 0 0 4px; align-self: center; }
 
@@ -667,6 +668,55 @@
     color: var(--faint); font-size: .82rem; margin-top: 3px; padding-top: 3px;
     border-top: 1px dashed var(--border);
   }
+  /* 回報 AI 弄錯了：平常很淡，滑過才明顯——它不該跟內容搶注意力 */
+  .bad-btn {
+    border: 0; background: none; cursor: pointer; opacity: .25;
+    font-size: .8rem; line-height: 1; padding: 2px 4px; margin-left: auto;
+    transition: opacity .15s;
+  }
+  .bad-btn:hover { opacity: 1; }
+
+  /* ---- 自訂會議範本 ---- */
+  .tpl-item {
+    display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; margin-bottom: 8px;
+    background: var(--card-2); border: 1px solid var(--border); border-radius: var(--radius-md);
+  }
+  .tpl-item .tpl-body { flex: 1; min-width: 0; }
+  .tpl-item b { font-size: .9rem; }
+  .tpl-item .tpl-meta { display: block; font-size: .76rem; color: var(--faint); margin-top: 3px; }
+  .tpl-edit {
+    display: grid; gap: 12px; margin: 12px 0; padding: 12px;
+    background: var(--card-2); border: 1px solid var(--accent-border); border-radius: var(--radius-md);
+  }
+  .tpl-edit input, .tpl-edit textarea {
+    width: 100%; font: inherit; font-size: .86rem; color: var(--ink); background: var(--card);
+    border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 7px 9px;
+  }
+  .tpl-features { display: flex; flex-wrap: wrap; gap: 12px; }
+  .tpl-section-row { display: flex; gap: 6px; margin-bottom: 6px; }
+  .tpl-section-row input:first-child { flex: 0 0 34%; }
+  .tpl-actions { display: flex; gap: 8px; justify-content: flex-end; }
+
+  /* ---- 請 AI 修改結果（先預覽再套用） ---- */
+  .refine-box {
+    margin-top: 12px; padding: 10px 12px; background: var(--card-2);
+    border: 1px solid var(--border); border-radius: var(--radius-md);
+  }
+  .refine-row { display: flex; gap: 8px; align-items: center; }
+  .refine-row input {
+    flex: 1; min-width: 0; font: inherit; font-size: .86rem; color: var(--ink);
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: var(--radius-sm); padding: 7px 10px;
+  }
+  .refine-note { font-size: .72rem; color: var(--faint); margin: 6px 0 0; }
+  .refine-preview { margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--border); }
+  .refine-changes { display: grid; gap: 8px; }
+  .refine-change { font-size: .82rem; line-height: 1.6; }
+  .refine-change b { color: var(--ink); }
+  .refine-change .before { color: var(--faint); text-decoration: line-through; }
+  .refine-change .after { color: var(--accent); }
+  .refine-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 10px; }
+
   /* ---- 聆聽中的標記與筆記 ---- */
   .mark-list { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 0; }
   .mark-chip {
@@ -1074,6 +1124,16 @@
     padding-left: 10px; margin: 0; line-height: 1.6;
   }
   .why { font-size: .8rem; color: var(--muted); margin: 0; }
+  /* 相對日期換算的原話：只看換算結果看不出對錯 */
+  .from-phrase { display: block; font-size: .7rem; color: var(--faint); font-family: var(--sans); }
+  /* 沒有逐字稿根據的產出，不該和有根據的長得一樣可信 */
+  .unverified {
+    font-size: .78rem; color: var(--medium); margin: 0;
+    border-left: 2px dashed var(--medium); padding-left: 10px; line-height: 1.6;
+  }
+  /* 轉錄缺漏的那幾段：本來和正常內容一個樣，看不出這裡原本有話沒聽到 */
+  .chat-line.gap .line-body { color: var(--medium); font-style: italic; }
+  .chat-line.gap { background: var(--medium-soft); }
 
   .pending-list, .event-list { display: flex; flex-direction: column; gap: 10px; }
   .pending-item, .event-item {

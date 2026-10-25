@@ -29,23 +29,31 @@ function applyKindDefaults() {
   for (const [key, id] of Object.entries(FEATURE_BOX)) $(id).checked = on.includes(key);
 }
 
-(async function initMeetingKinds() {
+// 種類下拉。自訂範本也在裡面，所以新增或刪除範本後要重抓一次
+async function loadKinds() {
   const sel = $("meetingKind");
   try {
     const r = await api.meetingKinds();
+    const previous = sel.value;
     sel.innerHTML = r.groups.map(g =>
       `<optgroup label="${esc(g.label)}">${g.kinds.map(k =>
-        `<option value="${esc(k.value)}">${esc(k.value)}</option>`).join("")}</optgroup>`).join("");
+        `<option value="${esc(k.value)}">${esc(k.label || k.value)}</option>`).join("")}</optgroup>`).join("");
     r.groups.forEach(g => g.kinds.forEach(k => {
       kindDefaults[k.value] = k.features;
       kindHints[k.value] = k.hint;
     }));
-    const saved = localStorage.getItem("meetingKind");
+    const saved = previous || localStorage.getItem("meetingKind");
+    // 選過的範本可能已被刪掉（或切到沒有它的工作區）→ 退回預設種類
     sel.value = saved && kindDefaults[saved] ? saved : r.default;
   } catch (e) {
     // 選單載不到就維持 HTML 裡那個「一般會議」，不擋住整個分析流程
   }
   applyKindDefaults();
+}
+
+(async function initMeetingKinds() {
+  const sel = $("meetingKind");
+  await loadKinds();
   sel.addEventListener("change", () => {
     localStorage.setItem("meetingKind", sel.value);
     featuresTouched = false;  // 換種類＝重新套用該種類的預設
@@ -255,4 +263,4 @@ async function loadHealth() {
 }
 loadHealth();
 
-export { FEATURE_BOX, LOOPBACK_RE, PLATFORM, applyKindDefaults, chunkSeconds, correctTypos, enrollMaxSpeakers, featuresTouched, kindDefaults, kindHints, loadHealth, maybePromoteTerms, meetingTerms, micConstraints, micDeviceId, populateMicDevices, populateSysSources, selectedFeatures, sysSourceValue, wantSystemAudio };
+export { FEATURE_BOX, LOOPBACK_RE, PLATFORM, applyKindDefaults, chunkSeconds, correctTypos, enrollMaxSpeakers, featuresTouched, kindDefaults, kindHints, loadHealth, loadKinds, maybePromoteTerms, meetingTerms, micConstraints, micDeviceId, populateMicDevices, populateSysSources, selectedFeatures, sysSourceValue, wantSystemAudio };

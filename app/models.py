@@ -27,6 +27,10 @@ class TodoItem(BaseModel):
     task: str
     owner: Optional[str] = None
     due_date: Optional[date] = None
+    # 期限在會議中的原話（「下禮拜三」「月底前」）。只有相對日期才填：
+    # 光看換算出來的 10/29 看不出對錯，會議日期差一天、或把「下週」當成「這週」，
+    # 結果都一樣合理。這個欄位是後來才加的，既有資料沒有它，所以可為 None
+    due_phrase: Optional[str] = None
     priority: Literal["high", "medium", "low"] = "medium"
     priority_reason: Optional[str] = None
     source_quote: Optional[str] = None

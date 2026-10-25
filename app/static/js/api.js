@@ -44,6 +44,13 @@ const api = {
   meetingNotifications: id => get(`/api/meetings/${q(id)}/notifications`),
   reanalyze: (id, options) => post(`/api/meetings/${q(id)}/reanalyze`, options),
   replaceTerm: (id, payload) => post(`/api/meetings/${q(id)}/replace-term`, payload),
+  refine: (id, payload) => post(`/api/meetings/${q(id)}/refine`, payload),
+  addFeedback: payload => post("/api/feedback", payload),
+  listTemplates: () => get("/api/templates"),
+  createTemplate: body => post("/api/templates", body),
+  updateTemplate: (id, body) => patch(`/api/templates/${q(id)}`, body),
+  deleteTemplate: id => remove(`/api/templates/${q(id)}`),
+  listFeedback: () => get("/api/feedback"),
   renameSpeaker: (id, oldName, newName) =>
     post(`/api/meetings/${q(id)}/rename-speaker`, { old: oldName, new: newName }),
   meetingKinds: () => get("/api/meeting-kinds"),

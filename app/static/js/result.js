@@ -7,6 +7,7 @@ import { WIDE, showView } from "./router.js";
 import { maybePromoteTerms } from "./setup.js";
 import { refreshTasks } from "./tasks.js";
 import { jumpToTranscript, renderChat } from "./transcript.js";
+import { bindRefine, wireRefine } from "./refine.js";
 import { bindTranscriptEditor, wireTranscriptEditor } from "./transcriptui.js";
 
 /* ==================================================================
@@ -126,14 +127,20 @@ function renderTodos(todos) {
   $("rTodos").innerHTML = todos.length
     ? todos.map(t => `
       <div class="todo-card p-${t.priority}">
-        <div class="todo-head"><span class="led"></span><span class="todo-task">${esc(t.task)}</span></div>
+        <div class="todo-head"><span class="led"></span><span class="todo-task">${esc(t.task)}</span>
+          ${badBtn("todo", t.task)}</div>
         <div class="badges">
           <span class="badge ${t.owner ? "" : "owner-none"}">負責人 <b>${esc(t.owner || "未指派")}</b></span>
-          <span class="badge">期限 <b>${esc(t.due_date || "未定")}</b></span>
+          <span class="badge">期限 <b>${esc(t.due_date || "未定")}</b>${
+            t.due_phrase ? `<span class="from-phrase">原話：${esc(t.due_phrase)}</span>` : ""}</span>
           <span class="badge pr-${t.priority}" ${t.priority_reason ? `title="${esc(t.priority_reason)}"` : ""}>優先級 <b>${PRIORITY_ZH[t.priority]}</b></span>
         </div>
         ${t.priority_reason ? `<p class="why">判斷依據：${esc(t.priority_reason)}</p>` : ""}
-        ${t.source_quote ? `<p class="quote clickable" data-quote="${esc(t.source_quote)}" title="點擊跳到逐字稿出處">${esc(t.source_quote)}</p>` : ""}
+        ${t.source_quote
+          ? `<p class="quote clickable" data-quote="${esc(t.source_quote)}" title="點擊跳到逐字稿出處">${esc(t.source_quote)}</p>`
+          // 每筆代辦都該附原句（提示詞第 4 條）。沒有＝這筆沒有逐字稿根據，
+          // 看起來卻和有根據的長得一樣可信，所以要標出來
+          : `<p class="unverified">⚠ 這筆沒有附上逐字稿原句，請自行核對</p>`}
       </div>`).join("")
     : `<p class="empty-note">未偵測到代辦事項</p>`;
 }
@@ -151,12 +158,20 @@ function renderHighlights(highlights) {
     : `<p class="empty-note">未擷取到會議重點</p>`;
 }
 
+// 回報 AI 弄錯了。不是為了改這一筆（改有「請 AI 修改」和就地編輯），
+// 而是累積真實錯誤案例——換模型前要能用自己的資料回歸測試
+function badBtn(target, text) {
+  return `<button class="bad-btn" data-target="${esc(target)}" data-text="${esc(text || "")}"` +
+    ` title="回報這裡 AI 弄錯了" aria-label="回報錯誤">👎</button>`;
+}
+
 function renderDecisions(decisions) {
   const show = decisions.length > 0;
   $("hDecisions").style.display = show ? "flex" : "none";
   $("rDecisions").style.display = show ? "flex" : "none";
   $("rDecisions").innerHTML = show
-    ? decisions.map(d => `<li>${esc(d.description)}${d.context ? ` <span class="ctx">（${esc(d.context)}）</span>` : ""}</li>`).join("")
+    ? decisions.map(d => `<li>${esc(d.description)}${d.context ? ` <span class="ctx">（${esc(d.context)}）</span>` : ""}`
+        + `${badBtn("decision", d.description)}</li>`).join("")
     : `<p class="empty-note">本次會議無正式決議</p>`;
 }
 
@@ -194,6 +209,11 @@ function renderResult(result, transcript, { kind = null, fromHistory = false } =
       ...(currentResult?.speaker_names || []).map(s => s.name),
     ],
     reanalyze: reanalyzeCurrent,
+  });
+  // 請 AI 修改結果：套用後把新的內容畫回去，不重跑整份 renderResult
+  bindRefine({
+    meetingId: () => currentResult?.meeting_id || null,
+    applied: applyRefinedMeeting,
   });
   renderCorrections(result.corrections || []);
   // 成效指標：這場會議 AI 幫你做了多少事、花了多久
@@ -404,6 +424,67 @@ async function reanalyzeCurrent() {
 }
 
 wireTranscriptEditor();
+wireRefine();
+
+// ---- 回報 AI 的錯誤 ----
+const FEEDBACK_REASONS = {
+  not_discussed: "會議中沒有這件事",
+  owner_wrong: "負責人錯了",
+  date_wrong: "日期錯了",
+  wrong_content: "內容理解錯誤",
+  missing: "漏掉了重要的事",
+  other: "其他",
+};
+
+async function reportMistake(target, text) {
+  const id = currentResult?.meeting_id;
+  if (!id) return;
+  const keys = Object.keys(FEEDBACK_REASONS);
+  const menu = keys.map((k, i) => `${i + 1}. ${FEEDBACK_REASONS[k]}`).join("\n");
+  const picked = prompt(`這裡哪裡錯了？輸入編號：\n\n${menu}`);
+  const reason = keys[Number(picked) - 1];
+  if (!reason) return;
+  // 正確答案選填：不想打字的人按確定就好，願意寫的人留下更有用的回歸測試素材
+  const note = prompt("正確的應該是什麼？（可留空）") || "";
+  try {
+    await api.addFeedback({ meeting_id: id, target, target_text: text, reason, note: note.trim() });
+    showNotice("已記錄這次回報，設定裡可以匯出給評估使用。謝謝！");
+  } catch (err) { showError("回報失敗：" + err.message); }
+}
+
+document.addEventListener("click", e => {
+  const btn = e.target.closest(".bad-btn");
+  if (btn) reportMistake(btn.dataset.target, btn.dataset.text);
+});
+
+// AI 修改套用後：只重畫受影響的區塊，與講者改名同一套作法
+function applyRefinedMeeting(meeting, tasks) {
+  if (!currentResult || !meeting) return;
+  const a = currentResult.analysis;
+  a.meeting.title = meeting.meeting.title;
+  a.meeting.summary = meeting.meeting.summary;
+  a.decisions = meeting.decisions || [];
+  a.pending_items = meeting.pending_items || [];
+  a.sections = meeting.sections || [];
+  a.tags = meeting.tags || [];
+  a.todos = (tasks || []).map(t => ({
+    task: t.task, owner: t.owner, due_date: t.due_date, due_phrase: t.due_phrase,
+    priority: t.priority, priority_reason: t.priority_reason, source_quote: t.source_quote,
+  }));
+  $("rTitle").textContent = a.meeting.title;
+  $("rSummary").textContent = a.meeting.summary || "";
+  // 摘要換過了，之前翻好的譯文已經過期
+  $("rSummaryTrans").textContent = "";
+  $("rSummaryTrans").style.display = "none";
+  renderMeta();
+  renderHighlights(a.highlights || []);
+  renderDecisions(a.decisions);
+  renderTodos(a.todos);
+  renderPending(a.pending_items);
+  renderSections(a.sections);
+  refreshTasks();
+  refreshMeetings();
+}
 
 // ---- 會議重點：點擊 → 展開逐字稿、跳到該時間節點（沒有時間就用原句比對） ----
 $("rHighlights").addEventListener("click", e => {

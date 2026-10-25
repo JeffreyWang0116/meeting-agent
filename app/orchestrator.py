@@ -52,6 +52,8 @@ class Orchestrator:
         # 聆聽時按的「標記這一刻」時間點，與會議中自己打的筆記
         marks: list[str] | None = None,
         notes: str | None = None,
+        # 自訂會議範本的區塊定義（見 app/templates.py）
+        kind_spec: dict | None = None,
     ) -> dict:
         text = self.parser.parse(raw_text)
         corrections: list[dict] = []
@@ -72,6 +74,7 @@ class Orchestrator:
             attendees=attendees,
             marks=marks,
             notes=notes,
+            kind_spec=kind_spec,
         )
         meeting_id = self.executor.execute(
             analysis, transcript=text, kind=kind, terms=terms, user=user
