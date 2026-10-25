@@ -208,7 +208,10 @@ class LocalJsonStore(TaskStore):
         doc = self._read_doc(self._rag_path())
         return {"dim": doc.get("dim"), "records": doc.get("records", [])}
 
-    def save_rag_records(self, dim: int | None, records: list[dict]) -> None:
+    def save_rag_records(
+        self, dim: int | None, records: list[dict], meeting_ids: set[str] | None = None
+    ) -> None:
+        # 本地是單一檔案，整份寫跟只寫幾場的成本一樣，meeting_ids 用不到
         atomic_write_text(
             self._rag_path(),
             json.dumps({"dim": dim, "records": records}, ensure_ascii=False),

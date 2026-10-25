@@ -572,3 +572,60 @@ def test_passages_point_at_their_focus_line(tmp_path):
     result = v2_agent(tmp_path, store, llm).ask("報價單什麼時候寄？")
     p = next(p for p in result["passages"] if p["source"] == "transcript")
     assert (p["time"], p["quote"]) == ("2:40", "王小明：報價單我們九月五號前寄出")
+
+
+class _SpyStore:
+    """包住真正的 store，記下每次 save_rag_records 收到的 meeting_ids。"""
+
+    def __init__(self, inner):
+        self._inner = inner
+        self.saved_ids = []
+
+    def __getattr__(self, name):
+        return getattr(self._inner, name)
+
+    def save_rag_records(self, dim, records, meeting_ids=None):
+        self.saved_ids.append(meeting_ids)
+        return self._inner.save_rag_records(dim, records, meeting_ids=meeting_ids)
+
+
+def test_index_writes_only_the_meetings_it_changed(tmp_path):
+    store = make_store_with_meeting(tmp_path)
+    spy = _SpyStore(rag_store(tmp_path))
+    index = RagIndex(spy, embedder=FakeEmbedder())
+    mid = store.list_meetings()[0]["id"]
+
+    index.sync(store)
+    index.drop_meeting(mid)
+
+    assert spy.saved_ids == [{mid}, {mid}]
+
+
+def test_reset_one_user_writes_only_that_users_meetings(tmp_path):
+    store, mine, theirs = make_two_user_store(tmp_path)
+    spy = _SpyStore(rag_store(tmp_path))
+    index = RagIndex(spy, embedder=FakeEmbedder())
+    index.sync(store, user="me")
+    index.sync(store, user="other")
+    spy.saved_ids.clear()
+
+    index.reset(user="me")
+
+    assert spy.saved_ids == [{mine}]
+
+
+def test_first_save_after_invalidation_rewrites_everything(tmp_path):
+    """索引因維度改變而作廢時，資料庫裡還留著舊向量；增量寫入不會碰到別場會議，
+    舊記錄就會一直留著，下次重啟又被讀回來跟新維度的向量混在一起。"""
+    store = make_store_with_meeting(tmp_path)
+    old = rag_store(tmp_path)
+    old.save_rag_records(3, [{"meeting_id": "gone", "user": "x", "text": "舊", "source": "summary", "vector": [1, 2, 3]}])
+    spy = _SpyStore(old)
+    embedder = FakeEmbedder()
+    embedder.dim = 5
+    index = RagIndex(spy, embedder=embedder)
+
+    index.sync(store)
+
+    assert spy.saved_ids == [None]
+    assert all(r["meeting_id"] != "gone" for r in old.get_rag_records()["records"])

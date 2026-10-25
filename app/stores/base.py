@@ -118,8 +118,13 @@ class TaskStore(ABC):
         """
 
     @abstractmethod
-    def save_rag_records(self, dim: int | None, records: list[dict]) -> None:
-        """整份取代索引內容。dim 一起存：向量維度改過時舊向量要整份作廢。"""
+    def save_rag_records(
+        self, dim: int | None, records: list[dict], meeting_ids: set[str] | None = None
+    ) -> None:
+        """存索引。records 永遠是完整的一份；dim 一起存：向量維度改過時舊向量要整份作廢。
+
+        meeting_ids：只有這幾場會議的片段有變動（新增、重建或移除），後端可以只
+        寫它們。None＝整份取代。"""
 
     # ---- 群組（工作區）：成員與邀請。會議與任務本身照舊用 user 欄位，群組的蓋 group:<id> ----
 

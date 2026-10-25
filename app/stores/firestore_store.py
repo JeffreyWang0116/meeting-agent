@@ -345,17 +345,32 @@ class FirestoreStore(TaskStore):
             records.append(data)
         return {"dim": self._meta_doc("rag").get("dim"), "records": records}
 
-    def save_rag_records(self, dim: int | None, records: list[dict]) -> None:
+    def save_rag_records(
+        self, dim: int | None, records: list[dict], meeting_ids: set[str] | None = None
+    ) -> None:
         with self._lock:
             col = self._db.collection(self._rag)
             wanted, seen = {}, {}
             for record in records:
                 meeting_id = record.get("meeting_id", "")
+                if meeting_ids is not None and meeting_id not in meeting_ids:
+                    continue
                 index = seen.get(meeting_id, 0)
                 seen[meeting_id] = index + 1
                 wanted[f"{meeting_id}_{index}"] = {**record, "_i": index}
 
-            existing = {snap.id for snap in col.stream()}
+            # 增量：只查這幾場的文件。整份 stream 是全站所有人的記錄，每次存檔都
+            # 讀寫一輪的話，索引一大 Firestore 免費額度很快就見底
+            if meeting_ids is None:
+                existing = {snap.id for snap in col.stream()}
+            else:
+                from google.cloud.firestore_v1.base_query import FieldFilter
+
+                existing = {
+                    snap.id
+                    for mid in meeting_ids
+                    for snap in col.where(filter=FieldFilter("meeting_id", "==", mid)).stream()
+                }
             for doc_id in existing - set(wanted):
                 col.document(doc_id).delete()
             # 全部重寫而不是只寫新的：會議編輯後會以同樣的 id 重新索引，
