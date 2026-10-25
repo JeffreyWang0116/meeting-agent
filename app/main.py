@@ -58,6 +58,7 @@ from app.speaker_rename import name_problem, rename_meeting_fields, rename_task_
 from app.stores import make_store
 from app.transcription import media
 from app.transcription.segments import parse_time_label, replace_term_in_range
+from app.refine import RefineError, Refiner, apply_patch, parse_patch
 from app.translate import TARGETS as TRANSLATE_TARGETS
 from app.translate import Translator
 from app.transcription.diarizer import build_diarizer
@@ -339,6 +340,12 @@ class FinishRequest(BaseModel):
     notes: Optional[str] = Field(default=None, max_length=20000)
 
 
+class RefineRequest(BaseModel):
+    # 預覽：使用者的修改要求（一句話）。套用：前端把預覽拿到的 patch 原樣送回
+    request: Optional[str] = Field(default=None, max_length=2000)
+    patch: Optional[dict] = None
+
+
 class ReanalyzeRequest(BaseModel):
     features: Optional[list[str]] = None
     correct_typos: bool = False
@@ -465,6 +472,7 @@ def create_app(
     verify_token=None,
     diarizer=None,
     delete_auth_user=None,
+    refine_generate=None,
 ) -> FastAPI:
     _configure_logging()
     settings = settings or get_settings()
@@ -570,6 +578,14 @@ def create_app(
         api_keys=settings.gemini_api_keys,
         on_call=record_call,
         model=settings.transcribe_model,
+    )
+    # 用一句話改分析結果。只回「要改哪些欄位」，所以用額度高的輕量模型就夠
+    refiner = Refiner(
+        api_key=settings.gemini_api_key,
+        api_keys=settings.gemini_api_keys,
+        on_call=record_call,
+        model=settings.gemini_model,
+        generate=refine_generate,
     )
     if live_manager is None:
         # 預錄聲音辨識人（選用）：沒設定人數上限就整個不建，等同功能不存在
@@ -964,6 +980,51 @@ def create_app(
                 except ValueError:
                     pass
         return {"meeting": updated, "replaced": count, "glossary_added": added}
+
+    @app.post("/api/meetings/{meeting_id}/refine")
+    def refine_meeting(meeting_id: str, req: RefineRequest):
+        """用一句話請 AI 修改分析結果。兩段式：
+
+        - 帶 request：問 AI 要改什麼，回傳 changes（給使用者看）與 patch（原樣送回來套用）。
+          **不寫資料庫**——AI 默默改掉摘要或負責人，使用者不會發現。
+        - 帶 patch：套用。這一步不打 AI，所以不佔 refine 額度，預覽完一定套得上。
+        """
+        user = current_user()
+        record = store.get_meeting(meeting_id, user=user)
+        if record is None:
+            raise HTTPException(status_code=404, detail=f"找不到會議：{meeting_id}")
+        tasks = store.list_tasks(meeting_id, user=user)
+
+        try:
+            if req.patch is not None:
+                # 前端送回來的 patch 一樣要驗：這一步沒有 AI，但有使用者
+                patch = parse_patch(json.dumps(req.patch, ensure_ascii=False))
+            elif (req.request or "").strip():
+                limit("refine")  # 只有這條路會打 AI
+                patch = refiner.propose(req.request, record, tasks)
+            else:
+                raise HTTPException(status_code=400, detail="請說明要修改什麼")
+            new_record, new_tasks, changes = apply_patch(record, tasks, patch)
+        except RefineError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+
+        if req.patch is None:
+            return {"changes": changes, "patch": patch}
+
+        if changes:
+            fields = {k: new_record[k] for k in ("meeting", "decisions", "pending_items", "tags", "sections")
+                      if k in new_record}
+            store.update_meeting(meeting_id, fields, user=user)
+            for before, after in zip(tasks, new_tasks):
+                changed = {k: v for k, v in after.items() if before.get(k) != v}
+                if changed:
+                    store.update_task(after["id"], user=user, **changed)
+            drop_from_rag(meeting_id)  # 摘要、決議變了，問答索引要重建
+        return {
+            "changes": changes,
+            "meeting": store.get_meeting(meeting_id, user=user),
+            "tasks": store.list_tasks(meeting_id, user=user),
+        }
 
     @app.post("/api/meetings/{meeting_id}/rename-speaker")
     def rename_speaker(meeting_id: str, req: RenameSpeakerRequest):
