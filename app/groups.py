@@ -161,7 +161,10 @@ def remove_member(store, group_id: str, uid: str, target_uid: str) -> dict:
 
 
 def purge_scope(store, scope: str, on_scope_deleted=None) -> int:
-    """刪掉一個資料範圍（群組、訪客）的會議、任務、詞彙表、講者名冊，回傳刪掉的會議數。"""
+    """刪掉一個資料範圍（群組、訪客、帳號）的所有資料，回傳刪掉的會議數。
+
+    之後新增存在工作區底下的資料，都要在這裡補一行：漏掉的就是「刪除所有資料」
+    之後還留在資料庫裡的東西。"""
     meetings = store.list_meetings(user=scope)
     for meeting in meetings:
         store.delete_meeting(meeting["id"], user=scope)
@@ -169,6 +172,12 @@ def purge_scope(store, scope: str, on_scope_deleted=None) -> int:
         store.delete_task(task["id"], user=scope)
     store.save_glossary([], user=scope)
     store.save_speaker_roster([], user=scope)
+    for template in store.list_templates(scope):
+        store.delete_template(template["id"], scope)
+    for item in store.list_feedback(scope):  # 含使用者寫的說明與被回報的原文
+        store.delete_feedback(item["id"], scope)
+    for job in store.list_jobs(scope):  # 含轉錄到一半的逐字稿
+        store.delete_job(job["id"])
     if on_scope_deleted:
         on_scope_deleted(scope)
     return len(meetings)
@@ -200,8 +209,6 @@ def delete_account(store, uid: str, email: str | None, on_scope_deleted=None) ->
             remove_member(store, g["id"], uid, uid)
         else:
             decline(store, g["id"], email)
-    for job in store.list_jobs(uid):
-        store.delete_job(job["id"])
     return purge_scope(store, uid, on_scope_deleted)
 
 

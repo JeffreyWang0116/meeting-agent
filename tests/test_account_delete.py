@@ -64,6 +64,39 @@ def test_deletes_all_personal_data_and_the_firebase_account(tmp_path):
     assert len(client.store.list_meetings(user="uid-bob")) == 1  # 別人的不受影響
 
 
+def test_also_deletes_templates_feedback_and_job_records(tmp_path):
+    """範本、AI 錯誤回報（含使用者寫的說明）、轉錄工作紀錄（含逐字稿）都是個人資料。"""
+    client = make_client(tmp_path, [])
+    mid = analyze(client, "amy").json()["meeting_id"]
+    client.post("/api/templates", json={"name": "我的範本"}, headers=h("amy"))
+    client.post("/api/feedback", json={
+        "meeting_id": mid, "target": "todo", "reason": "other", "note": "私人說明"}, headers=h("amy"))
+    client.store.save_job({"id": "j1", "user": "uid-amy", "transcript": "逐字稿"})
+    client.post("/api/templates", json={"name": "bob 的範本"}, headers=h("bob"))
+
+    assert client.delete("/api/account", headers=h("amy")).status_code == 200
+
+    assert client.store.list_templates("uid-amy") == []
+    assert client.store.list_feedback("uid-amy") == []
+    assert client.store.list_jobs("uid-amy") == []
+    assert len(client.store.list_templates("uid-bob")) == 1  # 別人的不受影響
+
+
+def test_guest_wipe_also_deletes_templates_feedback_and_job_records(tmp_path):
+    from app.groups import purge_scope
+
+    store = LocalJsonStore(tmp_path / "db.json")
+    store.save_template({"id": "t1", "user": "guest", "name": "x", "sections": []})
+    store.save_feedback({"id": "f1", "user": "guest", "note": "x"})
+    store.save_job({"id": "j1", "user": "guest", "transcript": "x"})
+
+    purge_scope(store, "guest")
+
+    assert store.list_templates("guest") == []
+    assert store.list_feedback("guest") == []
+    assert store.list_jobs("guest") == []
+
+
 def test_leaves_groups_and_declines_invites_but_keeps_group_data(tmp_path):
     client = make_client(tmp_path, [])
     joined = make_group(client, "bob", "已加入")
