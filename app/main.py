@@ -12,6 +12,7 @@ import sys
 import uuid
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
+from urllib.parse import quote
 from typing import Optional
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
@@ -53,6 +54,7 @@ from app.auth import (
 )
 from app.comments import CommentError, author_name, clean_text, normalize_target
 from app.config import Settings, get_settings
+from app.docexport import PdfFontMissing, meeting_to_docx, meeting_to_pdf
 from app.export import meeting_report_md, tasks_to_csv, tasks_to_ics
 from app.gemini_keys import is_quota_error
 from app.glossary import Glossary, clean_terms
@@ -72,6 +74,7 @@ from app.push import (
 from app.rag import AskAgent, GeminiEmbedder, RagIndex
 from app.speaker_rename import name_problem, rename_meeting_fields, rename_task_fields
 from app.stores import make_store
+from app.subtitles import to_srt, to_vtt
 from app.transcription import media
 from app.transcription.segments import parse_time_label, replace_term_in_range
 from app.refine import RefineError, Refiner, apply_patch, parse_patch
@@ -1877,11 +1880,67 @@ def create_app(
         record = store.get_meeting(meeting_id, user=current_user())
         if record is None:
             raise HTTPException(status_code=404, detail=f"找不到會議：{meeting_id}")
-        return Response(
-            content=meeting_report_md(record, store.list_tasks(meeting_id=meeting_id, user=current_user())),
-            media_type="text/markdown; charset=utf-8",
-            headers={"Content-Disposition": f'attachment; filename="meeting-{meeting_id}.md"'},
+        return download(
+            meeting_report_md(record, store.list_tasks(meeting_id=meeting_id, user=current_user())),
+            "text/markdown; charset=utf-8", (record.get("meeting") or {}).get("title"), "md",
         )
+
+    def download(content, media_type: str, title: str, ext: str) -> Response:
+        """帶上會議標題的下載回應。下載資料夾裡躺著五個 meeting-a1b2c3.pdf 的時候，
+        誰也認不出哪個是哪個——所以檔名用標題，並照 RFC 5987 編中文。"""
+        safe = re.sub(r'[\/:*?"<>|]', "_", (title or "會議紀錄")).strip() or "會議紀錄"
+        quoted = quote(f"{safe}.{ext}")
+        return Response(
+            content=content,
+            media_type=media_type,
+            headers={"Content-Disposition":
+                     f"attachment; filename=\"meeting.{ext}\"; filename*=UTF-8''{quoted}"},
+        )
+
+    def export_record(meeting_id: str) -> tuple[dict, list[dict]]:
+        user = current_user()
+        record = store.get_meeting(meeting_id, user=user)
+        if record is None:
+            raise HTTPException(status_code=404, detail=f"找不到會議：{meeting_id}")
+        return record, store.list_tasks(meeting_id=meeting_id, user=user)
+
+    @app.get("/api/meetings/{meeting_id}/report.docx")
+    def meeting_report_docx(meeting_id: str):
+        record, tasks = export_record(meeting_id)
+        return download(
+            meeting_to_docx(record, tasks),
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            (record.get("meeting") or {}).get("title"), "docx",
+        )
+
+    @app.get("/api/meetings/{meeting_id}/report.pdf")
+    def meeting_report_pdf(meeting_id: str):
+        record, tasks = export_record(meeting_id)
+        try:
+            blob = meeting_to_pdf(record, tasks)
+        except PdfFontMissing as exc:
+            # 產出亂碼 PDF 比產不出來更糟：使用者會把它寄出去才發現
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        return download(blob, "application/pdf", (record.get("meeting") or {}).get("title"), "pdf")
+
+    @app.get("/api/meetings/{meeting_id}/transcript.srt")
+    def meeting_srt(meeting_id: str):
+        return _subtitles(meeting_id, to_srt, "srt")
+
+    @app.get("/api/meetings/{meeting_id}/transcript.vtt")
+    def meeting_vtt(meeting_id: str):
+        return _subtitles(meeting_id, to_vtt, "vtt")
+
+    def _subtitles(meeting_id: str, render, ext: str) -> Response:
+        record, _ = export_record(meeting_id)
+        content = render(record.get("transcript") or "")
+        if not content:
+            raise HTTPException(
+                status_code=422, detail="這場會議的逐字稿沒有時間戳，做不出字幕檔"
+            )
+        media = "application/x-subrip" if ext == "srt" else "text/vtt"
+        return download(content.encode("utf-8"), f"{media}; charset=utf-8",
+                        (record.get("meeting") or {}).get("title"), ext)
 
     @app.get("/api/meetings/{meeting_id}/notifications")
     def meeting_notifications(meeting_id: str):
@@ -1906,11 +1965,8 @@ def create_app(
             record.get("meeting", {}).get("title", ""),
             store.list_tasks(meeting_id=meeting_id, user=current_user()),
         )
-        return Response(
-            content=content,
-            media_type="text/calendar; charset=utf-8",
-            headers={"Content-Disposition": f'attachment; filename="meeting-{meeting_id}.ics"'},
-        )
+        return download(content, "text/calendar; charset=utf-8",
+                        record.get("meeting", {}).get("title"), "ics")
 
     # ---- 輸入路徑 2：音檔 / 影片上傳（背景轉錄） ----
 

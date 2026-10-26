@@ -268,6 +268,25 @@ repo 已附 `Dockerfile`（含 ffmpeg）、`requirements-cloud.txt`（依賴宣�
 - 目前狀態看 `/api/health` 的 `rate_limit`
 - **訪客**（匿名登入）另有一組較緊的上限，照**連線 IP** 算（清掉瀏覽器資料就能換一個新的匿名帳號，照帳號算等於沒有上限）：分析 5/20、上傳 2/5、開始聆聽 2/5、聆聽錄音段 20/200、問答 5/30、翻譯 10/100。用 `GUEST_RATE_LIMITS`（格式同 `RATE_LIMITS`）覆寫。IP 取 `X-Forwarded-For` 的**最後一段**：前段是用戶端自己填的、可以偽造
 
+#### （選填）存成 Google 文件
+
+「分享／匯出」裡的 **存成 Google 文件** 是把產出的 .docx 上傳到使用者自己的雲端硬碟，
+請雲端硬碟轉成 Google 文件（不是呼叫 Docs API 逐段組出來——同一份輸出同時服務
+「下載 Word」與這個功能，排版只要維護一套）。
+
+要讓它能用，到 [Google Cloud Console](https://console.cloud.google.com) 的**同一個**
+Firebase 專案裡：
+
+1. **API 和服務 → 程式庫 → Google Drive API → 啟用**
+2. **OAuth 同意畫面 → 範圍**加入 `.../auth/drive.file`
+
+`drive.file` 只看得到這個 App 自己建立的檔案，拿不到使用者既有的任何東西——
+匯出一份會議紀錄不該換來整個雲端硬碟的鑰匙。沒設定的話按下去會回 403，
+畫面上會直接說要去開哪一個設定。
+
+PDF 與 Word 不需要任何設定。PDF 的中文字型由映像裡的 `fonts-noto-cjk` 提供
+（見 `Dockerfile`）——少了它產出的 PDF 版面正確但每個字都是別的字。
+
 #### （選填）手機推播提醒：App 關著也收得到
 
 設定裡的「每日提醒通知」預設只在這台裝置的瀏覽器裡跳，而且 **iPhone 完全收不到**——

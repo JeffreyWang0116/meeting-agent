@@ -189,8 +189,13 @@ function renderMeetings() {
               <button class="ghost export-toggle" aria-haspopup="menu" aria-expanded="false">分享／匯出</button>
               <span class="export-menu" role="menu" hidden>
                 <button class="ws-item share-detail" data-id="${esc(m.id)}" role="menuitem">${icon("share-2", "i-sm")}分享摘要與逐字稿</button>
-                <a class="ws-item" href="/api/meetings/${esc(m.id)}/report.md" download role="menuitem">${icon("download", "i-sm")}下載 Markdown</a>
-                <a class="ws-item" href="/api/meetings/${esc(m.id)}/events.ics" download role="menuitem">${icon("calendar", "i-sm")}代辦加入行事曆（.ics）</a>
+                <a class="ws-item" href="/api/meetings/${esc(m.id)}/report.md" role="menuitem">${icon("download", "i-sm")}下載 Markdown</a>
+                <a class="ws-item" href="/api/meetings/${esc(m.id)}/report.pdf" role="menuitem">${icon("file-text", "i-sm")}下載 PDF</a>
+                <a class="ws-item" href="/api/meetings/${esc(m.id)}/report.docx" role="menuitem">${icon("file-text", "i-sm")}下載 Word（.docx）</a>
+                <button class="ws-item to-gdocs" data-id="${esc(m.id)}" data-title="${esc(m.meeting.title)}" role="menuitem">${icon("external-link", "i-sm")}存成 Google 文件</button>
+                <a class="ws-item" href="/api/meetings/${esc(m.id)}/transcript.srt" role="menuitem">${icon("download", "i-sm")}字幕檔 .srt</a>
+                <a class="ws-item" href="/api/meetings/${esc(m.id)}/transcript.vtt" role="menuitem">${icon("download", "i-sm")}字幕檔 .vtt</a>
+                <a class="ws-item" href="/api/meetings/${esc(m.id)}/events.ics" role="menuitem">${icon("calendar", "i-sm")}代辦加入行事曆（.ics）</a>
               </span>
             </span>
             <button class="del-btn del-meeting" data-id="${esc(m.id)}" title="刪除此會議與其任務" aria-label="刪除">${icon("x", "i-sm")}</button>
