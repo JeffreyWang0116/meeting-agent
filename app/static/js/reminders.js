@@ -1,5 +1,5 @@
 import { api } from "./api.js";
-import { $, esc, icon, loadFail, pageNo, paginate, registerPager, registerRefresher, renderPager, showError } from "./core.js";
+import { $, esc, icon, loadFail, pageNo, paginate, registerPager, registerRefresher, renderPager } from "./core.js";
 import { renderHome } from "./home.js";
 import { allMeetings, meetingLabel } from "./meetings.js";
 
@@ -114,7 +114,6 @@ async function refreshReminders() {
     remindersLoaded = true;
     renderReminders();
     renderHome();
-    maybeNotifyReminders(false);
   } catch (e) {
     remindersLoaded = true;
     $("reminderBody").innerHTML = loadFail("reminders");
@@ -124,39 +123,9 @@ async function refreshReminders() {
   }
 }
 
-// ---- 每日提醒通知（Notification API）----
+// 提醒掃描結果（首頁徽章與推播摘要都讀這一份）。手機推播的開關在 pushui.js——
+// 原本這裡用頁面端的 new Notification()，iOS 不支援、而且要 App 開著才跳得出來
 let lastReminders = null;
-const NOTIFY_KEY = "dailyNotify", NOTIFY_DATE_KEY = "dailyNotifyDate";
-const notifyEnabled = () => localStorage.getItem(NOTIFY_KEY) === "1";
-function updateNotifyBtn() {
-  $("btnNotifyToggle").textContent = notifyEnabled() ? "已開啟" : "開啟";
-}
-function maybeNotifyReminders(force) {
-  if (!notifyEnabled() || !("Notification" in window) || Notification.permission !== "granted") return;
-  if (!lastReminders) return;
-  const urgent = lastReminders.reminders.filter(x => x.kind === "overdue" || x.kind === "due_soon");
-  if (!urgent.length) return;
-  const today = new Date().toLocaleDateString("sv");
-  if (!force && localStorage.getItem(NOTIFY_DATE_KEY) === today) return;  // 一天最多一次
-  localStorage.setItem(NOTIFY_DATE_KEY, today);
-  const overdue = urgent.filter(x => x.kind === "overdue").length;
-  const soon = urgent.length - overdue;
-  const parts = [overdue ? `${overdue} 項逾期` : "", soon ? `${soon} 項即將到期` : ""].filter(Boolean);
-  try {
-    new Notification("會議 Agent 待辦提醒", { body: parts.join("、") + "，點開看看吧。", icon: "/static/icon.svg" });
-  } catch (e) { /* 部分瀏覽器需由 service worker 發送，失敗就略過 */ }
-}
-$("btnNotifyToggle").addEventListener("click", async () => {
-  if (notifyEnabled()) { localStorage.setItem(NOTIFY_KEY, "0"); updateNotifyBtn(); return; }
-  if (!("Notification" in window)) { showError("此瀏覽器不支援通知功能"); return; }
-  let perm = Notification.permission;
-  if (perm !== "granted") perm = await Notification.requestPermission();
-  if (perm !== "granted") { showError("尚未允許通知權限，請到瀏覽器網站設定開啟"); return; }
-  localStorage.setItem(NOTIFY_KEY, "1");
-  updateNotifyBtn();
-  maybeNotifyReminders(true);  // 開啟當下先示範一次
-});
-updateNotifyBtn();
 
 // 記住群組展開／收合，重繪後才能還原（原生 <details> 撐不過 innerHTML 重設）
 $("reminderBody").addEventListener("toggle", e => {
@@ -193,4 +162,4 @@ window.addEventListener("workspacechange", () => {
   refreshReminders();
 });
 
-export { ALERT_LABEL, NOTIFY_KEY, activeAlerts, dismissedAlerts, lastReminders, maybeNotifyReminders, notifyEnabled, refreshReminders, remindersLoaded, renderReminders, updateAlertCount, updateNotifyBtn };
+export { ALERT_LABEL, activeAlerts, dismissedAlerts, lastReminders, refreshReminders, remindersLoaded, renderReminders, updateAlertCount };

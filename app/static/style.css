@@ -263,6 +263,11 @@
   .set-row .set-label { display: flex; align-items: center; gap: 8px; }
   .set-row .set-label .i-sm { color: var(--faint); }
   .set-sep { border: none; border-top: 1px solid var(--border); margin: 4px 0; }
+  .set-row .set-actions { display: flex; align-items: center; gap: 6px; }
+  /* 設定項目底下的說明（如「iPhone 要先加到主畫面」）：整段可換行，不壓縮按鈕 */
+  .set-hint {
+    margin: -2px 8px 6px; font-size: .76rem; line-height: 1.5; color: var(--faint);
+  }
   /* 今日用量：數字磚（大數字 + 小標籤，取代擠成一行的純文字） */
   .set-select {
     background: var(--card-2); color: var(--ink); border: 1px solid var(--border);

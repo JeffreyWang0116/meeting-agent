@@ -126,13 +126,18 @@ function setTabProgress(pct) {
   document.title = pct === null ? BASE_TITLE : `(${pct}%) ${BASE_TITLE}`;
 }
 
-// 轉錄完成時通知。只在頁面不在前景時發——正看著畫面還跳通知只是吵
-function notifyDone(body) {
+// 轉錄完成時通知。只在頁面不在前景時發——正看著畫面還跳通知只是吵。
+// 走 service worker 而不是 new Notification()：iOS 完全不支援後者，
+// 而「切去別的 App 等轉錄跑完」正是手機上最常見的情形
+async function notifyDone(body) {
   if (document.visibilityState === "visible") return;
   if (!("Notification" in window) || Notification.permission !== "granted") return;
   try {
-    new Notification("會議 Agent", { body, icon: "/static/icon.svg" });
-  } catch { /* 部分瀏覽器要由 service worker 發，失敗就算了 */ }
+    const reg = "serviceWorker" in navigator ? await navigator.serviceWorker.getRegistration() : null;
+    const options = { body, icon: "/static/icon.svg", tag: "meeting-agent-done" };
+    if (reg) await reg.showNotification("會議助手", options);
+    else new Notification("會議助手", options);
+  } catch { /* 通知失敗不該影響轉錄結果的呈現 */ }
 }
 
 async function pollMediaJob(job_id, options) {

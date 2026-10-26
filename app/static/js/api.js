@@ -55,6 +55,12 @@ const api = {
     post(`/api/meetings/${q(id)}/rename-speaker`, { old: oldName, new: newName }),
   meetingKinds: () => get("/api/meeting-kinds"),
 
+  // ---- 手機推播 ----
+  pushKey: () => get("/api/push/key"),
+  pushSubscribe: body => post("/api/push/subscribe", body),
+  pushUnsubscribe: body => post("/api/push/unsubscribe", body),
+  pushTest: () => post("/api/push/test", {}),
+
   // ---- 訪客 ----
   wipeGuestData: () => remove("/api/guest/data"),
 
