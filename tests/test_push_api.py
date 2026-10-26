@@ -53,7 +53,7 @@ def make(tmp_path, *, sender=None, now=None, keys=True):
     app = create_app(
         settings, store=store, orchestrator=orchestrator,
         push_send=sender if keys else None,
-        push_now=(lambda: now) if now else None,
+        clock=(lambda: now) if now else None,
     )
     client = TestClient(app)
     client.store = store

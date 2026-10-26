@@ -99,7 +99,8 @@ class LocalJsonStore(TaskStore):
     def get_meeting(self, meeting_id: str, *, user: str = DEFAULT_USER) -> dict | None:
         with self._lock:
             return next(
-                (m for m in self._data["meetings"] if m["id"] == meeting_id and owns(m, user)),
+                (m for m in self._data["meetings"]
+                 if m["id"] == meeting_id and owns(m, user) and not m.get("deleted_at")),
                 None,
             )
 
@@ -111,13 +112,13 @@ class LocalJsonStore(TaskStore):
             return [
                 {k: v for k, v in m.items() if include_transcript or k != "transcript"}
                 for m in reversed(self._data["meetings"])
-                if owns(m, user)
+                if owns(m, user) and not m.get("deleted_at")
             ]
 
     def update_meeting(self, meeting_id: str, fields: dict, *, user: str = DEFAULT_USER) -> dict | None:
         with self._lock:
             for m in self._data["meetings"]:
-                if m["id"] == meeting_id and owns(m, user):
+                if m["id"] == meeting_id and owns(m, user) and not m.get("deleted_at"):
                     f = dict(fields)
                     nested = f.pop("meeting", None)
                     if nested:
@@ -126,6 +127,40 @@ class LocalJsonStore(TaskStore):
                     self._flush()
                     return dict(m)
         return None
+
+    # ---- 垃圾桶：刪除先進回收區，30 天內救得回來（見 app/main.py 的 /api/trash）----
+
+    def _mark_deleted(self, meeting_id: str, user: str, at: str | None) -> bool:
+        """在會議與它的任務上蓋（或清掉）deleted_at。回傳有沒有動到東西。"""
+        with self._lock:
+            target = next(
+                (m for m in self._data["meetings"]
+                 if m["id"] == meeting_id and owns(m, user) and bool(m.get("deleted_at")) != bool(at)),
+                None,
+            )
+            if target is None:
+                return False
+            for record in [target, *(t for t in self._data["tasks"] if t["meeting_id"] == meeting_id)]:
+                if at:
+                    record["deleted_at"] = at
+                else:
+                    record.pop("deleted_at", None)
+            self._flush()
+            return True
+
+    def trash_meeting(self, meeting_id: str, at: str, *, user: str = DEFAULT_USER) -> bool:
+        return self._mark_deleted(meeting_id, user, at)
+
+    def restore_meeting(self, meeting_id: str, *, user: str = DEFAULT_USER) -> bool:
+        return self._mark_deleted(meeting_id, user, None)
+
+    def list_trash(self, user: str = DEFAULT_USER) -> list[dict]:
+        with self._lock:
+            return [
+                {k: v for k, v in m.items() if k != "transcript"}
+                for m in reversed(self._data["meetings"])
+                if owns(m, user) and m.get("deleted_at")
+            ]
 
     def delete_meeting(self, meeting_id: str, *, user: str = DEFAULT_USER) -> bool:
         with self._lock:
@@ -142,7 +177,8 @@ class LocalJsonStore(TaskStore):
 
     def list_tasks(self, meeting_id: str | None = None, *, user: str = DEFAULT_USER) -> list[dict]:
         with self._lock:
-            tasks = [t for t in self._data["tasks"] if owns(t, user)]
+            # 垃圾桶裡的會議的任務也要跟著消失，不然提醒還是會叫你去做已刪會議裡的事
+            tasks = [t for t in self._data["tasks"] if owns(t, user) and not t.get("deleted_at")]
             if meeting_id is not None:
                 tasks = [t for t in tasks if t["meeting_id"] == meeting_id]
             return list(tasks)
@@ -219,9 +255,12 @@ class LocalJsonStore(TaskStore):
 
     def export_all(self, *, user: str = DEFAULT_USER) -> dict:
         with self._lock:
+            # 垃圾桶裡的不進備份：備份是「我的資料」，不是「我刪掉的東西」
             return {
-                "meetings": [dict(m) for m in self._data["meetings"] if owns(m, user)],
-                "tasks": [dict(t) for t in self._data["tasks"] if owns(t, user)],
+                "meetings": [dict(m) for m in self._data["meetings"]
+                             if owns(m, user) and not m.get("deleted_at")],
+                "tasks": [dict(t) for t in self._data["tasks"]
+                          if owns(t, user) and not t.get("deleted_at")],
                 "glossary": self.get_glossary(user=user),
                 }
 
@@ -403,6 +442,54 @@ class LocalJsonStore(TaskStore):
 
     def _read_doc(self, path) -> dict:
         return json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+
+    # ---- 留言（同目錄的 comments.json）。理由同群組：不跟著備份還原 ----
+
+    def _comments_path(self):
+        return self._path.with_name("comments.json")
+
+    def _comments(self) -> dict:
+        return self._read_doc(self._comments_path()).get("comments", {})
+
+    def _write_comments(self, items: dict) -> None:
+        atomic_write_text(
+            self._comments_path(), json.dumps({"comments": items}, ensure_ascii=False, indent=2)
+        )
+
+    def save_comment(self, comment: dict) -> None:
+        with self._lock:
+            items = self._comments()
+            items[comment["id"]] = dict(comment)
+            self._write_comments(items)
+
+    def list_comments(self, user: str, meeting_id: str | None = None) -> list[dict]:
+        items = [dict(c) for c in self._comments().values() if c.get("user") == user]
+        if meeting_id is not None:
+            items = [c for c in items if c.get("meeting_id") == meeting_id]
+        return sorted(items, key=lambda c: c.get("at", ""))
+
+    def delete_comment(self, comment_id: str, user: str) -> None:
+        with self._lock:
+            items = self._comments()
+            if items.get(comment_id, {}).get("user") == user and items.pop(comment_id, None):
+                self._write_comments(items)
+
+    # ---- 群組活動紀錄（同目錄的 activity.json）。理由同群組：不跟著備份還原 ----
+
+    def _activity_path(self):
+        return self._path.with_name("activity.json")
+
+    def get_activity(self, user: str) -> list[dict]:
+        return scoped_read(self._read_doc(self._activity_path()), user, "entries")
+
+    def save_activity(self, user: str, entries: list[dict]) -> None:
+        with self._lock:
+            path = self._activity_path()
+            atomic_write_text(
+                path,
+                json.dumps(scoped_write(self._read_doc(path), user, "entries", entries),
+                           ensure_ascii=False, indent=2),
+            )
 
     def get_glossary(self, *, user: str = DEFAULT_USER) -> list[dict]:
         return scoped_read(self._read_doc(self._glossary_path()), user, "terms")

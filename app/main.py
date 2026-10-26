@@ -6,10 +6,11 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import re
 import sys
 import uuid
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -37,6 +38,7 @@ from app.agents.notifier_agent import (
     notifications_from_record,
 )
 from app.agents.reminder_agent import scan as scan_reminders
+from app import activity as activity_log
 from app import groups as group_svc
 from app.auth import (
     CURRENT_ACCOUNT,
@@ -49,6 +51,7 @@ from app.auth import (
     identity_of,
     verify_firebase_id_token,
 )
+from app.comments import CommentError, author_name, clean_text, normalize_target
 from app.config import Settings, get_settings
 from app.export import meeting_report_md, tasks_to_csv, tasks_to_ics
 from app.gemini_keys import is_quota_error
@@ -120,11 +123,26 @@ class NoCacheStatic(StaticFiles):
 # 不需要登入的 API：健康檢查（外部監控要打得到）與登入設定本身
 # （還沒登入的人正是要靠它才知道怎麼登入）
 # /api/push/run 沒有登入者：它是排程（GitHub Actions）打進來的，改用共用密語把關
+# 垃圾桶保留幾天。再長就只是讓誤刪的資料在資料庫裡堆著
+TRASH_DAYS = 30
+
 PUBLIC_API_PATHS = {"/api/health", "/api/auth/config", "/api/push/run"}
 
 # 群組裡「只能看」的成員還是可以用的 POST：問答、翻譯只讀資料、不改資料
 VIEWER_ALLOWED_POSTS = {"/api/ask", "/api/translate"}
+# 留言是例外中的例外：「只能看」是不能改資料，不是不能說話——
+# 討論本來就是看的人最需要的。自己的留言也要刪得掉，所以 DELETE 一併放行
+VIEWER_ALLOWED_SUFFIXES = ("/comments",)
+VIEWER_ALLOWED_PREFIXES = ("/api/comments/",)
 SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
+
+
+def viewer_may(path: str) -> bool:
+    return (
+        path in VIEWER_ALLOWED_POSTS
+        or path.endswith(VIEWER_ALLOWED_SUFFIXES)
+        or path.startswith(VIEWER_ALLOWED_PREFIXES)
+    )
 
 
 class RequireFirebaseLogin:
@@ -176,7 +194,7 @@ class RequireFirebaseLogin:
                     scope, receive, send, "你不是這個群組的成員（可能已被移出或群組已解散）",
                     status=403, workspace_denied=True,
                 )
-            if role == "viewer" and scope.get("method") not in SAFE_METHODS and path not in VIEWER_ALLOWED_POSTS:
+            if role == "viewer" and scope.get("method") not in SAFE_METHODS and not viewer_may(path):
                 return await self._deny(
                     scope, receive, send, "你在這個群組的角色是「只能看」，無法新增或修改資料", status=403,
                 )
@@ -437,6 +455,20 @@ class TranslateRequest(BaseModel):
     target: str
 
 
+def _title_of(record: dict) -> str:
+    return (record.get("meeting") or {}).get("title") or "（未命名會議）"
+
+
+def _task_action(before: dict | None, after: dict) -> str:
+    """任務怎麼變的。「完成」與「改回未完成」在紀錄上長得一樣就沒有意義了。"""
+    was, now = (before or {}).get("status"), after.get("status")
+    if was == now:
+        return "task.edit"
+    if now == "done":
+        return "task.done"
+    return "task.reopen" if was == "done" else "task.edit"
+
+
 def current_user(request: Request | None = None) -> str:
     """這個請求屬於誰。
 
@@ -508,7 +540,7 @@ def create_app(
     delete_auth_user=None,
     refine_generate=None,
     push_send=None,
-    push_now=None,
+    clock=None,
 ) -> FastAPI:
     _configure_logging()
     settings = settings or get_settings()
@@ -644,6 +676,17 @@ def create_app(
             on_call=record_call,
             model=settings.gemini_model,
             kinds=[k for _, kinds in KIND_GROUPS for k in kinds],
+        )
+
+    # 「現在幾點」的唯一入口。垃圾桶的 30 天、推播的當地時間都讀它，
+    # 測試才有辦法把時間推到 31 天後而不用等
+    now_utc = clock or (lambda: datetime.now(timezone.utc))
+
+    def log_activity(action: str, label: str, target_id: str | None = None) -> None:
+        """記一筆群組活動。個人工作區會被 activity.record 自己擋掉。"""
+        activity_log.record(
+            store, current_user(), action=action, target_label=label, target_id=target_id,
+            actor_uid=current_account(), actor_email=CURRENT_EMAIL.get(), at=now_utc().isoformat(),
         )
 
     def drop_from_rag(meeting_id: str) -> None:
@@ -804,7 +847,7 @@ def create_app(
         if correct_typos:
             usage.record("correct")  # 校正是額外一次請求，用量面板要分開看得到
         try:
-            return orchestrator.process_transcript(
+            result = orchestrator.process_transcript(
                 text,
                 meeting_date=meeting_date,
                 kind=kind,
@@ -818,6 +861,8 @@ def create_app(
                 notes=notes,
                 kind_spec=spec,
             )
+            log_activity("meeting.create", _title_of(result), result.get("meeting_id"))
+            return result
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc))
         except DecisionAgentError as exc:
@@ -990,6 +1035,7 @@ def create_app(
         updated = store.update_meeting(meeting_id, update, user=current_user())
         if updated is None:
             raise HTTPException(status_code=404, detail=f"找不到會議：{meeting_id}")
+        log_activity("meeting.edit", _title_of(updated), meeting_id)
         drop_from_rag(meeting_id)
         return updated
 
@@ -1137,12 +1183,67 @@ def create_app(
             headers={"Content-Disposition": 'attachment; filename="ai-feedback.jsonl"'},
         )
 
+    # ---- 留言：對摘要、決議、任務的討論 ----
+
+    def with_author(comment: dict) -> dict:
+        return {**comment, "author_name": author_name(comment)}
+
+    @app.post("/api/meetings/{meeting_id}/comments")
+    def add_comment(meeting_id: str, req: dict):
+        user = current_user()
+        record = store.get_meeting(meeting_id, user=user)
+        if record is None:
+            raise HTTPException(status_code=404, detail=f"找不到會議：{meeting_id}")
+        try:
+            target, text = normalize_target(req.get("target")), clean_text(req.get("text"))
+        except CommentError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        comment = {
+            "id": uuid.uuid4().hex[:12],
+            "user": user,
+            "meeting_id": meeting_id,
+            "target": target,
+            "text": text,
+            "author_uid": current_account(),
+            "author_email": CURRENT_EMAIL.get(),
+            "at": now_utc().isoformat(),
+        }
+        store.save_comment(comment)
+        log_activity("comment.add", _title_of(record), meeting_id)
+        return {"comment": with_author(comment)}
+
+    @app.get("/api/meetings/{meeting_id}/comments")
+    def list_meeting_comments(meeting_id: str):
+        comments = store.list_comments(current_user(), meeting_id=meeting_id)
+        counts: dict[str, int] = {}
+        for c in comments:
+            counts[c["target"]] = counts.get(c["target"], 0) + 1
+        # counts 讓前端一次畫出「摘要旁 2 則、第 3 條決議旁 1 則」，不必自己再掃一遍
+        return {"comments": [with_author(c) for c in comments], "counts": counts}
+
+    @app.delete("/api/comments/{comment_id}")
+    def delete_comment(comment_id: str):
+        user = current_user()
+        comment = next((c for c in store.list_comments(user) if c["id"] == comment_id), None)
+        if comment is None:
+            raise HTTPException(status_code=404, detail="找不到這則留言")
+        if comment.get("author_uid") != current_account():
+            # 群組裡可編輯的人很多，但別人說過的話不該被默默抹掉
+            raise HTTPException(status_code=403, detail="只能刪除自己的留言")
+        store.delete_comment(comment_id, user)
+        return {"deleted": comment_id}
+
+    @app.get("/api/activity")
+    def list_activity():
+        """誰在什麼時候改了什麼。個人工作區一律是空的（見 app/activity.py）。"""
+        entries = store.get_activity(current_user())
+        return {"activity": [{**e, "text": activity_log.describe(e)} for e in entries]}
+
     # ---- 手機推播提醒：App 關著、手機鎖著也跳得出來（見 docs/plans/2026-10-26-phase4-push.md）----
 
     push_sender = push_send if push_send is not None else make_sender(
         settings.vapid_public_key, settings.vapid_private_key, settings.vapid_subject
     )
-    push_clock = push_now or (lambda: datetime.now(timezone.utc))
 
     def require_push() -> None:
         if push_sender is None:
@@ -1217,7 +1318,7 @@ def create_app(
         if push_sender is None:
             return {"enabled": False, "checked": 0, "sent": 0, "quiet": 0, "dropped": 0}
 
-        now = push_clock()
+        now = now_utc()
         payloads: dict[str, dict | None] = {}  # 同一個工作區的多支手機只掃一次
         checked = sent = quiet = dropped = 0
         for sub in store.all_push_subscriptions():
@@ -1319,8 +1420,61 @@ def create_app(
 
     @app.delete("/api/meetings/{meeting_id}")
     def delete_meeting(meeting_id: str):
-        if not store.delete_meeting(meeting_id, user=current_user()):
+        """刪除＝丟進垃圾桶。群組裡一個人誤刪會影響所有人，而這在以前是不可逆的。"""
+        title = _title_of(store.get_meeting(meeting_id, user=current_user()) or {})
+        if not store.trash_meeting(meeting_id, now_utc().isoformat(), user=current_user()):
             raise HTTPException(status_code=404, detail=f"找不到會議：{meeting_id}")
+        log_activity("meeting.trash", title, meeting_id)
+        drop_from_rag(meeting_id)
+        return {"deleted": meeting_id, "trashed": True, "days_to_recover": TRASH_DAYS}
+
+    # ---- 垃圾桶 ----
+
+    def sweep_trash(user: str) -> None:
+        """清掉超過 30 天的。排程已經有一支了（推播），不值得再加一支——
+        開垃圾桶的時候順手清，反正沒人看的時候清不清都一樣。"""
+        cutoff = (now_utc() - timedelta(days=TRASH_DAYS)).isoformat()
+        for item in store.list_trash(user):
+            if (item.get("deleted_at") or "") <= cutoff:
+                store.delete_meeting(item["id"], user=user)
+
+    def days_left(item: dict) -> int:
+        """還剩幾天可以救。無條件進位：剩 10 小時要說「1 天」，不是「0 天」。"""
+        try:
+            gone = datetime.fromisoformat(item["deleted_at"])
+        except (KeyError, TypeError, ValueError):
+            return TRASH_DAYS
+        used = (now_utc() - gone).total_seconds() / 86400
+        return max(0, math.ceil(TRASH_DAYS - used))
+
+    @app.get("/api/trash")
+    def list_trash():
+        user = current_user()
+        sweep_trash(user)
+        return {
+            "trash": [{**item, "days_left": days_left(item)} for item in store.list_trash(user)],
+            "days": TRASH_DAYS,
+        }
+
+    @app.post("/api/trash/{meeting_id}/restore")
+    def restore_meeting(meeting_id: str):
+        if not store.restore_meeting(meeting_id, user=current_user()):
+            raise HTTPException(status_code=404, detail="垃圾桶裡沒有這場會議")
+        log_activity("meeting.restore", _title_of(store.get_meeting(meeting_id, user=current_user()) or {}), meeting_id)
+        drop_from_rag(meeting_id)  # 內容回來了，索引要重建
+        return {"restored": meeting_id}
+
+    @app.delete("/api/trash/{meeting_id}")
+    def purge_meeting(meeting_id: str):
+        """永久刪除。這一步才是真的沒有了。"""
+        user = current_user()
+        item = next((m for m in store.list_trash(user) if m["id"] == meeting_id), None)
+        if item is None:
+            raise HTTPException(status_code=404, detail="垃圾桶裡沒有這場會議")
+        store.delete_meeting(meeting_id, user=user)
+        for c in store.list_comments(user, meeting_id=meeting_id):
+            store.delete_comment(c["id"], user)
+        log_activity("meeting.purge", _title_of(item), meeting_id)
         drop_from_rag(meeting_id)
         return {"deleted": meeting_id}
 
@@ -1527,13 +1681,15 @@ def create_app(
             raise HTTPException(status_code=400, detail="priority 只能是 high / medium / low")
         if req.due_date not in (None, "") and not _is_iso_date(req.due_date):
             raise HTTPException(status_code=400, detail="due_date 必須是 YYYY-MM-DD 格式或留空")
-        return store.add_task({
+        created = store.add_task({
             "task": task,
             "owner": (req.owner or "").strip() or None,
             "due_date": req.due_date or None,
             "priority": req.priority,
             "meeting_id": None,
         }, user=current_user())
+        log_activity("task.add", task, created.get("id"))
+        return created
 
     @app.patch("/api/tasks/{task_id}")
     def patch_task(task_id: str, fields: dict):
@@ -1550,15 +1706,23 @@ def create_app(
             and not _is_iso_date(fields["due_date"])
         ):
             raise HTTPException(status_code=400, detail="due_date 必須是 YYYY-MM-DD 格式或留空")
+        # 複製一份：LocalJsonStore 回的是儲存層裡同一個 dict，update_task 會就地改掉它，
+        # 直接留著參照的話前後比對永遠相等
+        before = next(
+            (dict(t) for t in store.list_tasks(user=current_user()) if t["id"] == task_id), None
+        )
         updated = store.update_task(task_id, user=current_user(), **fields)
         if updated is None:
             raise HTTPException(status_code=404, detail=f"找不到任務：{task_id}")
+        log_activity(_task_action(before, updated), updated.get("task") or "", task_id)
         return updated
 
     @app.delete("/api/tasks/{task_id}")
     def delete_task(task_id: str):
+        before = next((t for t in store.list_tasks(user=current_user()) if t["id"] == task_id), None)
         if not store.delete_task(task_id, user=current_user()):
             raise HTTPException(status_code=404, detail=f"找不到任務：{task_id}")
+        log_activity("task.delete", (before or {}).get("task") or "", task_id)
         return {"deleted": task_id}
 
     # ---- 群組工作區（需要 Google 登入：沒有帳號就沒有「誰」可以邀請） ----

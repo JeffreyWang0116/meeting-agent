@@ -165,8 +165,9 @@ def purge_scope(store, scope: str, on_scope_deleted=None) -> int:
 
     之後新增存在工作區底下的資料，都要在這裡補一行：漏掉的就是「刪除所有資料」
     之後還留在資料庫裡的東西。"""
+    # 垃圾桶裡的也要一起清掉：list_meetings 看不到它們，漏掉就變成刪不掉的孤兒資料
     meetings = store.list_meetings(user=scope)
-    for meeting in meetings:
+    for meeting in [*meetings, *store.list_trash(scope)]:
         store.delete_meeting(meeting["id"], user=scope)
     for task in store.list_tasks(user=scope):  # 手動新增、不屬於任何會議的任務
         store.delete_task(task["id"], user=scope)
@@ -179,6 +180,9 @@ def purge_scope(store, scope: str, on_scope_deleted=None) -> int:
         store.delete_job(job["id"])
     for sub in store.list_push_subscriptions(scope):  # 不刪的話手機每天還是會響
         store.delete_push_subscription(sub["id"])
+    for comment in store.list_comments(scope):  # 討論內容也是個人資料
+        store.delete_comment(comment["id"], scope)
+    store.save_activity(scope, [])  # 活動紀錄裡有誰做了什麼
     if on_scope_deleted:
         on_scope_deleted(scope)
     return len(meetings)

@@ -70,7 +70,22 @@ class TaskStore(ABC):
 
     @abstractmethod
     def delete_meeting(self, meeting_id: str, *, user: str = DEFAULT_USER) -> bool:
-        """刪除會議與其所有任務，回傳是否有刪到。"""
+        """永久刪除會議與其所有任務，回傳是否有刪到。垃圾桶裡的也刪得掉。"""
+
+    @abstractmethod
+    def trash_meeting(self, meeting_id: str, at: str, *, user: str = DEFAULT_USER) -> bool:
+        """丟進垃圾桶（蓋上 deleted_at，連同它的任務），回傳是否有動到。
+
+        垃圾桶裡的會議對 get_meeting／list_meetings／list_tasks／export_all 一律
+        視為不存在——只有 list_trash 看得到。"""
+
+    @abstractmethod
+    def restore_meeting(self, meeting_id: str, *, user: str = DEFAULT_USER) -> bool:
+        """從垃圾桶救回來，回傳是否有動到。"""
+
+    @abstractmethod
+    def list_trash(self, user: str = DEFAULT_USER) -> list[dict]:
+        """垃圾桶裡的會議（晚刪的在前），不含逐字稿。"""
 
     @abstractmethod
     def list_tasks(self, meeting_id: str | None = None, *, user: str = DEFAULT_USER) -> list[dict]:
@@ -163,6 +178,30 @@ class TaskStore(ABC):
     @abstractmethod
     def delete_feedback(self, feedback_id: str, user: str) -> None:
         """只刪得掉自己的。"""
+
+    # ---- 留言：對摘要／決議／任務的討論（見 app/comments.py）。不進備份 ----
+
+    @abstractmethod
+    def save_comment(self, comment: dict) -> None:
+        """新增或整份覆蓋一筆留言（comment 自帶 id 與 user）。"""
+
+    @abstractmethod
+    def list_comments(self, user: str, meeting_id: str | None = None) -> list[dict]:
+        """照時間由舊到新——一串討論要從上往下讀得通。"""
+
+    @abstractmethod
+    def delete_comment(self, comment_id: str, user: str) -> None:
+        """只刪得掉自己工作區的。"""
+
+    # ---- 群組活動紀錄：整份存成工作區底下的一個文件（見 app/activity.py）。不進備份 ----
+
+    @abstractmethod
+    def get_activity(self, user: str) -> list[dict]:
+        """活動紀錄（新到舊），沒有回傳空清單。"""
+
+    @abstractmethod
+    def save_activity(self, user: str, entries: list[dict]) -> None:
+        """整份儲存。長度上限由 app/activity.py 決定，不是儲存層的事。"""
 
     # ---- 手機推播訂閱：存在工作區底下，排程掃全站。不進備份 ----
 
