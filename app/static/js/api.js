@@ -44,36 +44,15 @@ const api = {
   meetingNotifications: id => get(`/api/meetings/${q(id)}/notifications`),
   reanalyze: (id, options) => post(`/api/meetings/${q(id)}/reanalyze`, options),
   replaceTerm: (id, payload) => post(`/api/meetings/${q(id)}/replace-term`, payload),
-  refine: (id, payload) => post(`/api/meetings/${q(id)}/refine`, payload),
-  addFeedback: payload => post("/api/feedback", payload),
-  listTemplates: () => get("/api/templates"),
-  createTemplate: body => post("/api/templates", body),
-  updateTemplate: (id, body) => patch(`/api/templates/${q(id)}`, body),
-  deleteTemplate: id => remove(`/api/templates/${q(id)}`),
-  listFeedback: () => get("/api/feedback"),
   renameSpeaker: (id, oldName, newName) =>
     post(`/api/meetings/${q(id)}/rename-speaker`, { old: oldName, new: newName }),
   meetingKinds: () => get("/api/meeting-kinds"),
-
-  owners: () => get("/api/owners"),
-
-  // ---- 跨會議追蹤 ----
-  openItems: () => get("/api/insights/open-items"),
-  people: () => get("/api/insights/people"),
-  report: days => get(`/api/insights/report?days=${days}`),
-
-  // ---- 會議前準備 ----
-  listSeries: () => get("/api/series"),
-  seriesCarryover: name => get(`/api/series/${q(name)}/carryover`),
 
   // ---- 垃圾桶、活動紀錄、留言 ----
   listTrash: () => get("/api/trash"),
   restoreMeeting: id => post(`/api/trash/${q(id)}/restore`, {}),
   purgeMeeting: id => remove(`/api/trash/${q(id)}`),
   listActivity: () => get("/api/activity"),
-  listComments: id => get(`/api/meetings/${q(id)}/comments`),
-  addComment: (id, body) => post(`/api/meetings/${q(id)}/comments`, body),
-  deleteComment: id => remove(`/api/comments/${q(id)}`),
 
   // ---- 手機推播 ----
   pushKey: () => get("/api/push/key"),

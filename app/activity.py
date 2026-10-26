@@ -24,7 +24,6 @@ ACTIONS = {
     "task.done": "完成了任務",
     "task.reopen": "把任務改回未完成",
     "task.delete": "刪除了任務",
-    "comment.add": "留言在",
 }
 
 

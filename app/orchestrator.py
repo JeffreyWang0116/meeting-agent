@@ -57,12 +57,6 @@ class Orchestrator:
         # 聆聽時按的「標記這一刻」時間點，與會議中自己打的筆記
         marks: list[str] | None = None,
         notes: str | None = None,
-        # 自訂會議範本的區塊定義（見 app/templates.py）
-        kind_spec: dict | None = None,
-        # 會前準備（見 app/agenda.py）：議程、所屬系列、上次沒做完的事
-        agenda: list[str] | None = None,
-        series: str | None = None,
-        carry_over: list[str] | None = None,
     ) -> dict:
         text = normalize_text(raw_text)
         corrections: list[dict] = []
@@ -83,13 +77,9 @@ class Orchestrator:
             attendees=attendees,
             marks=marks,
             notes=notes,
-            kind_spec=kind_spec,
-            agenda=agenda,
-            carry_over=carry_over,
         )
         meeting_id = self.store.save_meeting(
-            analysis, transcript=text, kind=kind, terms=terms, user=user,
-            agenda=agenda, series=series,
+            analysis, transcript=text, kind=kind, terms=terms, user=user
         )
         notifications = build_notifications(analysis, meeting_id)
         return {

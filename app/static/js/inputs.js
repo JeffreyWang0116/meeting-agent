@@ -1,7 +1,6 @@
 import { api } from "./api.js";
 import { createSilenceWatch, shouldFallbackToDefaultMic, silenceWarning, systemAudioGuide } from "./audioguide.js";
 import { $, clearError, currentWorkspace, esc, showError, showNotice } from "./core.js";
-import { prepFields } from "./prep.js";
 import { hideResultSkeleton, markAnalysisStart, renderResult, showResultSkeleton } from "./result.js";
 import { showAppNotification } from "./notify.js";
 import { createEta, formatEta } from "./progress.js";
@@ -28,8 +27,7 @@ $("btnAnalyzeText").addEventListener("click", async () => {
         features: selectedFeatures(),
         correct_typos: correctTypos(),
         terms: meetingTerms(),
-        ...prepFields(),
-    });
+        });
     renderResult(result, $("textInput").value);
   } catch (e) { hideResultSkeleton(); showError(e.message); }
   finally { btn.disabled = false; btn.innerHTML = original; }
@@ -69,7 +67,6 @@ $("btnUpload").addEventListener("click", async () => {
     features: selectedFeatures(),
     correct_typos: correctTypos(),
     terms: meetingTerms(),
-    ...prepFields(),
   };
 
   try {
@@ -81,10 +78,6 @@ $("btnUpload").addEventListener("click", async () => {
     const features = selectedFeatures();
     if (features !== null) form.append("features", features.join(","));
     if (correctTypos()) form.append("correct_typos", "true");
-    const prep = prepFields();
-    if (prep.agenda) form.append("agenda", prep.agenda);
-    if (prep.series) form.append("series", prep.series);
-    if (prep.carry_over) form.append("carry_over", "true");
     const { job_id } = await api.uploadMedia(form);
     refreshQuota();
     savePendingJob({ job_id, options, workspace: currentWorkspace() });
@@ -1256,7 +1249,6 @@ async function finishLiveSession() {
     features: selectedFeatures(),
     correct_typos: correctTypos(),
     terms: meetingTerms(),
-    ...prepFields(),
   };
   // 標記與筆記只有聆聽這條路徑有。救援用的純文字分析不吃這兩個欄位，
   // 所以放在另一個物件，不混進 options

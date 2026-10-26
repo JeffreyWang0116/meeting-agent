@@ -18,7 +18,7 @@ function trashRowHtml(m) {
         <span class="trash-title">${title}</span>
         <span class="trash-meta">${date}${date ? " · " : ""}${esc(left)}</span>
       </div>
-      <button class="ghost act-restore">救回來</button>
+      <button class="ghost act-restore">復原</button>
       <button class="ghost danger act-purge" title="永久刪除，不能復原">永久刪除</button>
     </div>`;
 }
@@ -47,7 +47,7 @@ $("trashRows").addEventListener("click", async e => {
   try {
     if (e.target.closest(".act-restore")) {
       await api.restoreMeeting(id);
-      showNotice("已救回這場會議");
+      showNotice("已復原這場會議");
     } else if (e.target.closest(".act-purge")) {
       // 這一步真的沒有了，問一次
       if (!confirm("永久刪除這場會議？逐字稿、任務與討論都會一起消失，無法復原。")) return;

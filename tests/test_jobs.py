@@ -173,15 +173,6 @@ def test_kind_passed_through(tmp_path, audio_file):
     assert orch.received[0][2] == "講座"
 
 
-def test_kind_spec_passed_through(tmp_path, audio_file):
-    orch = FakeOrchestrator()
-    mgr = MediaJobManager(FakeTranscriber(), orch, tmp_path)
-    spec = {"label": "專題", "hint": "專題", "sections": {"本週進度": "做完的事"}}
-    job_id = mgr.submit(audio_file, kind="custom:abc", kind_spec=spec)
-    mgr.wait(job_id, timeout=5)
-    assert orch.kind_spec == spec
-
-
 def test_features_passed_through(tmp_path, audio_file):
     orch = FakeOrchestrator()
     mgr = MediaJobManager(FakeTranscriber(), orch, tmp_path)

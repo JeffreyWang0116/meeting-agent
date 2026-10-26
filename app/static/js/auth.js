@@ -160,7 +160,6 @@ async function start() {
   gate.hidden = false;
   showLoginOptions(false);
   $("guestBtn").hidden = !cfg.guestEnabled;
-  $("guestNote").hidden = !cfg.guestEnabled;
 
   try {
     const [app, authMod] = await Promise.all([
@@ -220,7 +219,7 @@ async function start() {
         ? "網站管理者還沒在 Firebase 開啟匿名登入，暫時只能用 Google 登入。"
         : `訪客登入失敗：${err.message}`;
       // 沒開就不會自己好，留著按鈕只會讓下一個人再踩一次
-      if (disabled) $("guestBtn").hidden = $("guestNote").hidden = true;
+      if (disabled) $("guestBtn").hidden = true;
     }
   };
 }
