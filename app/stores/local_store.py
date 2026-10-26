@@ -340,6 +340,37 @@ class LocalJsonStore(TaskStore):
             if items.get(feedback_id, {}).get("user") == user and items.pop(feedback_id, None):
                 self._write_feedback(items)
 
+    # ---- 推播訂閱（同目錄的 push.json）。理由同群組：不跟著備份還原 ----
+
+    def _push_path(self):
+        return self._path.with_name("push.json")
+
+    def _push(self) -> dict:
+        return self._read_doc(self._push_path()).get("subscriptions", {})
+
+    def _write_push(self, items: dict) -> None:
+        atomic_write_text(
+            self._push_path(), json.dumps({"subscriptions": items}, ensure_ascii=False, indent=2)
+        )
+
+    def save_push_subscription(self, sub: dict) -> None:
+        with self._lock:
+            items = self._push()
+            items[sub["id"]] = dict(sub)
+            self._write_push(items)
+
+    def list_push_subscriptions(self, user: str) -> list[dict]:
+        return [dict(s) for s in self._push().values() if s.get("user") == user]
+
+    def all_push_subscriptions(self) -> list[dict]:
+        return [dict(s) for s in self._push().values()]
+
+    def delete_push_subscription(self, sub_id: str) -> None:
+        with self._lock:
+            items = self._push()
+            if items.pop(sub_id, None):
+                self._write_push(items)
+
     # ---- 轉錄工作紀錄（同目錄的 jobs.json）。理由同群組：不跟著備份還原 ----
 
     def _jobs_path(self):
