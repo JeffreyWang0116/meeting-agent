@@ -7,24 +7,21 @@ import { refreshTasks } from "./tasks.js";
 /* ==================================================================
    10. 介面與資料工具：主題、設定選單、自訂詞彙、備份還原、PWA、觸覺回饋
    ================================================================== */
-// ---- 深淺色主題：跟隨系統／淺色／深色（記住偏好） ----
-// 沒選過＝跟隨系統：手機設成淺色模式的人，一打開就是一整片深色很突兀
+// ---- 深淺色主題：淺色／深色（記住偏好，沒選過是深色） ----
 (function () {
-  const sysLight = window.matchMedia("(prefers-color-scheme: light)");
   let chosen = null;  // localStorage 不能用（無痕）時，至少這一頁記得住
   const pref = () => {
-    try { return localStorage.getItem("theme") || chosen || "system"; } catch { return chosen || "system"; }
+    // 舊的偏好可能存著 system（那個選項已移除），一律當成深色
+    try { return localStorage.getItem("theme") || chosen || "dark"; } catch { return chosen || "dark"; }
   };
   function apply() {
-    const p = pref();
-    const light = p === "light" || (p === "system" && sysLight.matches);
-    document.body.classList.toggle("light", light);
+    const p = pref() === "light" ? "light" : "dark";
+    document.body.classList.toggle("light", p === "light");
     // 手機狀態列／網址列的顏色跟著換，不然淺色頁面頂上會有一條黑邊
     $("themeColor").setAttribute("content", getComputedStyle(document.body).getPropertyValue("--bg").trim());
     $("themeSelect").value = p;
   }
   apply();
-  sysLight.addEventListener("change", apply);
   $("themeSelect").addEventListener("change", e => {
     chosen = e.target.value;
     try { localStorage.setItem("theme", chosen); } catch { /* 用 chosen */ }
@@ -70,14 +67,6 @@ window.addEventListener("accountchange", refreshQuota);
     btn.setAttribute("aria-expanded", open);
     if (open) {  // 打開時順便更新額度
       refreshQuota();
-      try {
-        const n = (await api.listFeedback()).feedback.length;
-        $("feedbackCount").textContent = `${n} 筆`;
-      } catch { $("feedbackCount").textContent = "—"; }
-      try {
-        const u = await api.usage();
-        $("usageSite").textContent = `全站今日 AI 呼叫 ${u.today?.gemini_call || 0} 次`;
-      } catch { $("usageSite").textContent = ""; }
     }
   });
   document.addEventListener("click", e => {

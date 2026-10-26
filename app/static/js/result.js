@@ -1,14 +1,12 @@
 import { api } from "./api.js";
 import { setCalendarEvents } from "./calendar.js";
 import { $, PRIORITY_ZH, esc, icon, showError, showNotice, skelBlocks, skelLine } from "./core.js";
-import { commentBtn, loadComments } from "./commentsui.js";
 import { askSpeakerName, detectSpeakers, refreshMeetings, renameSpeaker } from "./meetings.js";
 import { refreshReminders } from "./reminders.js";
 import { WIDE, showView } from "./router.js";
 import { maybePromoteTerms } from "./setup.js";
 import { refreshTasks } from "./tasks.js";
 import { jumpToTranscript, renderChat } from "./transcript.js";
-import { bindRefine, wireRefine } from "./refine.js";
 import { bindTranscriptEditor, wireTranscriptEditor } from "./transcriptui.js";
 
 /* ==================================================================
@@ -53,7 +51,6 @@ function showResultSkeleton() {
   $("rEvents").innerHTML = skelBlocks(1);
   $("rDraft").innerHTML = lines(4);
   ["hSummary", "hHighlights", "hDecisions", "hTodos"].forEach(id => ($(id).style.display = "flex"));
-  $("hAgenda").style.display = "none";  // 有沒有議程要等結果回來才知道
   $("rSummary").style.display = "block";
   $("rHighlights").style.display = "flex";
   $("rDecisions").style.display = "flex";
@@ -127,10 +124,9 @@ function renderTodos(todos) {
   $("hTodos").style.display = showTodos ? "flex" : "none";
   $("rTodos").style.display = showTodos ? "flex" : "none";
   $("rTodos").innerHTML = todos.length
-    ? todos.map((t, i) => `
+    ? todos.map(t => `
       <div class="todo-card p-${t.priority}">
-        <div class="todo-head"><span class="led"></span><span class="todo-task">${esc(t.task)}</span>
-          ${badBtn("todo", t.task)}${commentBtn(`task:${t.id || i}`, t.task)}</div>
+        <div class="todo-head"><span class="led"></span><span class="todo-task">${esc(t.task)}</span></div>
         <div class="badges">
           <span class="badge ${t.owner ? "" : "owner-none"}">負責人 <b>${esc(t.owner || "未指派")}</b></span>
           <span class="badge">期限 <b>${esc(t.due_date || "未定")}</b>${
@@ -160,69 +156,19 @@ function renderHighlights(highlights) {
     : `<p class="empty-note">未擷取到會議重點</p>`;
 }
 
-// 回報 AI 弄錯了。不是為了改這一筆（改有「請 AI 修改」和就地編輯），
-// 而是累積真實錯誤案例——換模型前要能用自己的資料回歸測試
-function badBtn(target, text) {
-  return `<button class="bad-btn" data-target="${esc(target)}" data-text="${esc(text || "")}"` +
-    ` title="回報這裡 AI 弄錯了" aria-label="回報錯誤">👎</button>`;
-}
-
-const AGENDA_STATUS = {
-  covered: { label: "討論過", mark: "✓" },
-  partial: { label: "帶過", mark: "◐" },
-  missed: { label: "沒談到", mark: "✗" },
-};
-
-// 議程對照：會前貼的每一項，這場到底講了沒。「每一項都討論過了」是最舒服
-// 也最沒用的答案，所以 missed 要看得出來，不是藏在清單裡的一行灰字
-function renderAgenda(review, offAgenda) {
-  const items = review || [];
-  const show = items.length > 0;
-  $("hAgenda").style.display = show ? "flex" : "none";
-  $("rAgenda").style.display = show ? "flex" : "none";
-  if (!show) { $("rAgenda").innerHTML = ""; return; }
-
-  const counts = { covered: 0, partial: 0, missed: 0 };
-  for (const r of items) counts[AGENDA_STATUS[r.status] ? r.status : "missed"]++;
-  $("agendaCoverage").textContent =
-    `${counts.covered} 項討論過・${counts.partial} 項帶過・${counts.missed} 項沒談到`;
-
-  const extra = (offAgenda || []).length
-    ? `<div class="agenda-extra">${icon("circle-help", "i-sm")}<span>議程外也談了：`
-      + `${offAgenda.map(esc).join("、")}</span></div>`
-    : "";
-  $("rAgenda").innerHTML = items.map((r, i) => {
-    const st = AGENDA_STATUS[r.status] || AGENDA_STATUS.missed;
-    const key = AGENDA_STATUS[r.status] ? r.status : "missed";
-    return `<div class="agenda-item ag-${key}">
-        <span class="ag-mark" title="${esc(st.label)}">${st.mark}</span>
-        <span class="ag-text">${esc(r.item)}${r.note ? `<span class="ag-note">${esc(r.note)}</span>` : ""}</span>
-        <span class="ag-status">${esc(st.label)}</span>
-        ${commentBtn(`agenda:${i}`, r.item)}
-      </div>`;
-  }).join("") + extra;
-}
-
-// 摘要沒有自己的容器可以塞按鈕，掛在標題列上（翻譯鈕旁邊）
-function paintSummaryComment(summary) {
-  const head = $("hSummary");
-  head.querySelector(".cmt-btn")?.remove();
-  head.insertAdjacentHTML("beforeend", commentBtn("summary", summary));
-}
-
 function renderDecisions(decisions) {
   const show = decisions.length > 0;
   $("hDecisions").style.display = show ? "flex" : "none";
   $("rDecisions").style.display = show ? "flex" : "none";
   $("rDecisions").innerHTML = show
-    ? decisions.map((d, i) => `<li>${esc(d.description)}${d.context ? ` <span class="ctx">（${esc(d.context)}）</span>` : ""}`
-        + `${badBtn("decision", d.description)}${commentBtn(`decision:${i}`, d.description)}</li>`).join("")
+    ? decisions.map(d => `<li>${esc(d.description)}${d.context ? ` <span class="ctx">（${esc(d.context)}）</span>` : ""}`
+        + `</li>`).join("")
     : `<p class="empty-note">本次會議無正式決議</p>`;
 }
 
 function renderPending(items) {
   $("rPending").innerHTML = items.length
-    ? items.map((p, i) => `<div class="pending-item">${icon("circle-help")}<span>${esc(p.topic)}${p.reason ? `<span class="reason">${esc(p.reason)}</span>` : ""}</span>${commentBtn(`pending:${i}`, p.topic)}</div>`).join("")
+    ? items.map(p => `<div class="pending-item">${icon("circle-help")}<span>${esc(p.topic)}${p.reason ? `<span class="reason">${esc(p.reason)}</span>` : ""}</span></div>`).join("")
     : `<p class="empty-note">無</p>`;
 }
 
@@ -255,11 +201,6 @@ function renderResult(result, transcript, { kind = null, fromHistory = false } =
     ],
     reanalyze: reanalyzeCurrent,
   });
-  // 請 AI 修改結果：套用後把新的內容畫回去，不重跑整份 renderResult
-  bindRefine({
-    meetingId: () => currentResult?.meeting_id || null,
-    applied: applyRefinedMeeting,
-  });
   renderCorrections(result.corrections || []);
   // 成效指標：這場會議 AI 幫你做了多少事、花了多久
   const elapsed = analysisStartTime ? ((Date.now() - analysisStartTime) / 1000).toFixed(1) : null;
@@ -274,7 +215,6 @@ function renderResult(result, transcript, { kind = null, fromHistory = false } =
   // 改版後每種類都有自己的預設區塊，所以一律改成「有內容才顯示」，
   // 不再把某一個種類寫死在前端
   $("hSummary").style.display = m.summary ? "flex" : "none";
-  paintSummaryComment(m.summary || "");
   $("rSummary").style.display = m.summary ? "block" : "none";
   $("rSummary").textContent = m.summary || "";
   // 摘要翻譯：中文摘要→譯成英文，外文摘要→譯成中文
@@ -285,20 +225,10 @@ function renderResult(result, transcript, { kind = null, fromHistory = false } =
   $("sectionsTitle").textContent = metaKind ? `${metaKind}重點` : "重點欄位";
   renderSections(a.sections);
 
-  renderAgenda(a.agenda_review, a.off_agenda);
   renderHighlights(a.highlights || []);
   renderDecisions(a.decisions);
   renderTodos(a.todos);
   renderPending(a.pending_items);
-  // 留言數是另一次請求。先畫出沒有數字的按鈕，拿到之後再補上去——
-  // 等它回來才畫整份結果的話，結果頁會因為一個附屬功能而變慢
-  loadComments(result.meeting_id).then(() => {
-    renderAgenda(a.agenda_review, a.off_agenda);
-    renderDecisions(a.decisions);
-    renderTodos(a.todos);
-    renderPending(a.pending_items);
-    paintSummaryComment(m.summary || "");
-  });
 
   $("icsLink").href = `/api/meetings/${encodeURIComponent(result.meeting_id)}/events.ics`;
   const events = result.notifications.calendar_events || [];
@@ -480,67 +410,6 @@ async function reanalyzeCurrent() {
 }
 
 wireTranscriptEditor();
-wireRefine();
-
-// ---- 回報 AI 的錯誤 ----
-const FEEDBACK_REASONS = {
-  not_discussed: "會議中沒有這件事",
-  owner_wrong: "負責人錯了",
-  date_wrong: "日期錯了",
-  wrong_content: "內容理解錯誤",
-  missing: "漏掉了重要的事",
-  other: "其他",
-};
-
-async function reportMistake(target, text) {
-  const id = currentResult?.meeting_id;
-  if (!id) return;
-  const keys = Object.keys(FEEDBACK_REASONS);
-  const menu = keys.map((k, i) => `${i + 1}. ${FEEDBACK_REASONS[k]}`).join("\n");
-  const picked = prompt(`這裡哪裡錯了？輸入編號：\n\n${menu}`);
-  const reason = keys[Number(picked) - 1];
-  if (!reason) return;
-  // 正確答案選填：不想打字的人按確定就好，願意寫的人留下更有用的回歸測試素材
-  const note = prompt("正確的應該是什麼？（可留空）") || "";
-  try {
-    await api.addFeedback({ meeting_id: id, target, target_text: text, reason, note: note.trim() });
-    showNotice("已記錄這次回報，設定裡可以匯出給評估使用。謝謝！");
-  } catch (err) { showError("回報失敗：" + err.message); }
-}
-
-document.addEventListener("click", e => {
-  const btn = e.target.closest(".bad-btn");
-  if (btn) reportMistake(btn.dataset.target, btn.dataset.text);
-});
-
-// AI 修改套用後：只重畫受影響的區塊，與講者改名同一套作法
-function applyRefinedMeeting(meeting, tasks) {
-  if (!currentResult || !meeting) return;
-  const a = currentResult.analysis;
-  a.meeting.title = meeting.meeting.title;
-  a.meeting.summary = meeting.meeting.summary;
-  a.decisions = meeting.decisions || [];
-  a.pending_items = meeting.pending_items || [];
-  a.sections = meeting.sections || [];
-  a.tags = meeting.tags || [];
-  a.todos = (tasks || []).map(t => ({
-    task: t.task, owner: t.owner, due_date: t.due_date, due_phrase: t.due_phrase,
-    priority: t.priority, priority_reason: t.priority_reason, source_quote: t.source_quote,
-  }));
-  $("rTitle").textContent = a.meeting.title;
-  $("rSummary").textContent = a.meeting.summary || "";
-  // 摘要換過了，之前翻好的譯文已經過期
-  $("rSummaryTrans").textContent = "";
-  $("rSummaryTrans").style.display = "none";
-  renderMeta();
-  renderHighlights(a.highlights || []);
-  renderDecisions(a.decisions);
-  renderTodos(a.todos);
-  renderPending(a.pending_items);
-  renderSections(a.sections);
-  refreshTasks();
-  refreshMeetings();
-}
 
 // ---- 會議重點：點擊 → 展開逐字稿、跳到該時間節點（沒有時間就用原句比對） ----
 $("rHighlights").addEventListener("click", e => {

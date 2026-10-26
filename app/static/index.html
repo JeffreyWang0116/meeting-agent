@@ -29,13 +29,11 @@
          直接亮出登入按鈕會讓已經登入的人以為被登出了 -->
     <p class="login-hint" id="loginLoading">載入中…</p>
     <div class="login-options" id="loginOptions" hidden>
-      <p class="login-hint">用 Google 帳號登入，會議紀錄跟著帳號走；或先以訪客身分試用。</p>
       <button class="primary" id="loginBtn">
         <svg class="i-sm" aria-hidden="true"><use href="/static/icons.svg#user"/></svg>
         用 Google 登入
       </button>
       <button class="ghost" id="guestBtn" hidden>以訪客身分使用</button>
-      <p class="login-note" id="guestNote" hidden>訪客的會議與任務會在你選「離開訪客」時刪除，也不能使用群組。</p>
     </div>
     <p class="login-error" id="loginError" role="alert"></p>
   </div>
@@ -115,7 +113,6 @@
                 深淺色主題
               </span>
               <select id="themeSelect" class="set-select" aria-label="深淺色主題">
-                <option value="system">跟隨系統</option>
                 <option value="light">淺色</option>
                 <option value="dark">深色</option>
               </select>
@@ -127,14 +124,6 @@
                 自訂詞彙
               </span>
               <button class="ghost" id="btnGlossary">管理</button>
-            </div>
-            <hr class="set-sep">
-            <div class="set-row">
-              <span class="set-label">
-                <svg class="i-sm" aria-hidden="true"><use href="/static/icons.svg#clipboard-list"/></svg>
-                自訂會議範本
-              </span>
-              <button class="ghost" id="btnTemplates">管理</button>
             </div>
             <hr class="set-sep">
             <div class="set-row">
@@ -151,17 +140,6 @@
             <hr class="set-sep">
             <div class="set-row">
               <span class="set-label">
-                <svg class="i-sm" aria-hidden="true"><use href="/static/icons.svg#circle-alert"/></svg>
-                AI 錯誤回報
-              </span>
-              <span style="display:flex; gap:6px; align-items:center">
-                <span class="set-count" id="feedbackCount">0 筆</span>
-                <a class="ghost btn-link" href="/api/feedback/export.jsonl" download>匯出</a>
-              </span>
-            </div>
-            <hr class="set-sep">
-            <div class="set-row">
-              <span class="set-label">
                 <svg class="i-sm" aria-hidden="true"><use href="/static/icons.svg#bell"/></svg>
                 每日提醒通知
               </span>
@@ -175,11 +153,10 @@
             <div class="set-row">
               <span class="set-label">
                 <svg class="i-sm" aria-hidden="true"><use href="/static/icons.svg#clock"/></svg>
-                我今天的額度
+                今日額度
               </span>
             </div>
             <div class="quota-list" id="quotaList"></div>
-            <p class="quota-site" id="usageSite"></p>
           </div>
         </div>
       </div>
@@ -215,10 +192,6 @@
             <span class="stat-num alarm" id="statOverdue"><span class="skel skel-num"></span></span>
             <span class="stat-lbl">逾期／即將到期</span>
           </button>
-          <div class="stat-tile static">
-            <span class="stat-num" id="statUsage"><span class="skel skel-num"></span></span>
-            <span class="stat-lbl">全站今日 AI 呼叫</span>
-          </div>
         </div>
 
         <div class="home-grid">
@@ -242,7 +215,7 @@
             <div class="panel-head">
               <h2>
                 <svg class="i" aria-hidden="true"><use href="/static/icons.svg#bell"/></svg>
-                需要注意
+                注意事項
               </h2>
               <button class="ghost" data-view="reminder">看全部</button>
             </div>
@@ -256,45 +229,6 @@
           </div>
         </div>
 
-        <!-- 跨會議追蹤：一場一場翻會議紀錄回答不了的三個問題 -->
-        <details class="panel side-panel" id="openItemsPanel">
-          <summary class="panel-head">
-            <h2>
-              <svg class="i" aria-hidden="true"><use href="/static/icons.svg#circle-help"/></svg>
-              未決事項
-              <span class="aux">跨會議追蹤：這件事提了幾次、後來誰回答了它</span>
-            </h2>
-            <span class="nav-badge" id="openItemsCount" hidden></span>
-          </summary>
-          <div id="openItemsRows"></div>
-        </details>
-
-        <details class="panel side-panel" id="peoplePanel">
-          <summary class="panel-head">
-            <h2>
-              <svg class="i" aria-hidden="true"><use href="/static/icons.svg#users"/></svg>
-              成員概況
-              <span class="aux">出席場次、手上的事、完成率</span>
-            </h2>
-          </summary>
-          <div id="peopleRows"></div>
-        </details>
-
-        <details class="panel side-panel" id="reportPanel">
-          <summary class="panel-head">
-            <h2>
-              <svg class="i" aria-hidden="true"><use href="/static/icons.svg#clipboard-list"/></svg>
-              週報／月報
-              <span class="aux">這段期間開了幾場、決定了什麼、誰最忙</span>
-            </h2>
-          </summary>
-          <div class="report-switch">
-            <button class="ghost active" data-days="7">最近 7 天</button>
-            <button class="ghost" data-days="30">最近 30 天</button>
-            <button class="ghost" id="btnCopyReport" style="margin-left:auto">複製純文字</button>
-          </div>
-          <div id="reportBody"></div>
-        </details>
       </section>
 
       <!-- ============ 新會議：三種輸入路徑 ============ -->
@@ -341,36 +275,6 @@
               <input type="checkbox" id="termsToGlossary"> 一併加入全域詞彙表
             </label>
           </div>
-
-          <!-- 會議前準備：貼議程讓 AI 逐項對照，並把同系列上一場沒做完的帶過來 -->
-          <details class="prep-box" id="prepBox">
-            <summary class="prep-head">
-              <svg class="i-sm" aria-hidden="true"><use href="/static/icons.svg#clipboard-list"/></svg>
-              會議前準備
-              <span class="lbl-aux">貼議程讓 AI 逐項對照、把上次沒做完的帶過來</span>
-            </summary>
-            <div class="field">
-              <label class="lbl" for="prepAgenda">
-                議程
-                <span class="lbl-aux">一行一項。分析完會逐項告訴你討論過、帶過，還是完全沒談到</span>
-              </label>
-              <textarea id="prepAgenda" rows="4" placeholder="1. 預算審查&#10;2. 期程確認&#10;3. 場地"></textarea>
-            </div>
-            <div class="field-row">
-              <div class="field">
-                <label class="lbl" for="prepSeries">
-                  會議系列
-                  <span class="lbl-aux">同一個名字的會議會串成一條線</span>
-                </label>
-                <input type="text" id="prepSeries" list="prepSeriesList" placeholder="例：專題週會">
-                <datalist id="prepSeriesList"></datalist>
-              </div>
-            </div>
-            <label class="chk" id="prepCarryRow" hidden>
-              <input type="checkbox" id="prepCarry"> 把上次沒做完的一起交給 AI
-            </label>
-            <div class="prep-carry" id="prepCarryList" hidden></div>
-          </details>
 
           <!-- 每個種類都有自己的預設區塊，所以這列一律顯示，讓使用者可以自己調 -->
           <div class="field-row feature-row" id="featureRow">
@@ -550,25 +454,6 @@
               <span class="hint">講者（點擊改名，逐字稿與出席者跟著更新）</span>
               <div class="speaker-chips" id="rSpeakerChips"></div>
             </div>
-            <!-- 用一句話請 AI 修改這份結果。改完先預覽，按下套用才寫進去 -->
-            <div class="refine-box" id="rRefine" hidden>
-              <div class="refine-row">
-                <input id="refineInput" type="text" autocomplete="off"
-                  placeholder="請 AI 修改：把摘要改短一點、第二個任務的負責人是小明…">
-                <button class="ghost" id="btnRefine">
-                  <svg class="i-sm" aria-hidden="true"><use href="/static/icons.svg#send"/></svg>
-                  送出
-                </button>
-              </div>
-              <p class="refine-note">逐字稿不能用這種方式改——請用右邊逐字稿的「修正」。</p>
-              <div class="refine-preview" id="refinePreview" hidden>
-                <div class="refine-changes" id="refineChanges"></div>
-                <div class="refine-actions">
-                  <button class="ghost" id="btnRefineCancel">取消</button>
-                  <button class="primary" id="btnRefineApply">套用這些修改</button>
-                </div>
-              </div>
-            </div>
           </div>
 
           <div class="report-grid">
@@ -598,13 +483,6 @@
                 <span class="aux">點擊跳到右側逐字稿</span>
               </h3>
               <ol class="highlight-list" id="rHighlights"></ol>
-
-              <h3 class="sub" id="hAgenda" style="display:none">
-                <svg class="i-sm" aria-hidden="true"><use href="/static/icons.svg#clipboard-list"/></svg>
-                議程對照
-                <span class="aux" id="agendaCoverage"></span>
-              </h3>
-              <div class="agenda-review" id="rAgenda"></div>
 
               <h3 class="sub" id="hDecisions">
                 <svg class="i-sm" aria-hidden="true"><use href="/static/icons.svg#circle-check-big"/></svg>
@@ -751,10 +629,6 @@
               任務庫
             </h2>
             <div class="panel-actions">
-              <span class="view-switch" role="group" aria-label="檢視方式">
-                <button class="ghost active" id="btnViewList" data-taskview="list">清單</button>
-                <button class="ghost" id="btnViewBoard" data-taskview="board">看板</button>
-              </span>
               <button class="ghost" id="btnAddTask">
                 <svg class="i-sm" aria-hidden="true"><use href="/static/icons.svg#plus"/></svg>
                 新增任務
@@ -778,8 +652,7 @@
           </div>
           <div class="task-add" id="taskAddRow" style="display:none">
             <input type="text" id="newTaskName" placeholder="任務名稱">
-            <input type="text" id="newTaskOwner" list="ownerList" placeholder="負責人（選填）">
-            <datalist id="ownerList"></datalist>
+            <input type="text" id="newTaskOwner" placeholder="負責人（選填）">
             <input type="date" id="newTaskDue" title="期限（選填）">
             <select id="newTaskPriority" class="status-sel">
               <option value="high">高</option>
@@ -789,7 +662,6 @@
             <button class="primary" id="btnAddTaskSave">新增</button>
             <button class="ghost" id="btnAddTaskCancel">取消</button>
           </div>
-          <div class="kanban" id="kanban" hidden></div>
           <div class="mtg-groups" id="taskGroups">
             <div class="skel-list">
               <div class="skel-block"><span class="skel" style="width:44%"></span><span class="skel" style="width:22%"></span></div>
@@ -840,7 +712,6 @@
             <h2>
               <svg class="i" aria-hidden="true"><use href="/static/icons.svg#clock"/></svg>
               群組活動紀錄
-              <span class="aux">誰在什麼時候改了什麼</span>
             </h2>
           </summary>
           <div id="activityRows"></div>
@@ -852,11 +723,10 @@
         <details>
           <summary>隱私與資料處理說明</summary>
           <ul>
-            <li><b>送去哪裡處理</b>：貼上的文字與錄音會傳送給 Google Gemini API 做轉錄與分析。本站使用 Gemini 的免費方案，依 Google 條款，免費方案的內容可能被 Google 用於改進其產品、並可能經人工審閱——<b>請勿上傳機密或敏感內容</b>。</li>
+            <li>貼上的文字與錄音會傳送給 Google Gemini API 做轉錄與分析。本站使用 Gemini 的方案，依 Google 條款，方案的內容可能被 Google 用於改進其產品、並可能經人工審閱——<b>請勿上傳機密或敏感內容</b>。</li>
             <li>若伺服器啟用了講者分離，錄音也會上傳給 pyannoteAI 處理，對方會在 24～48 小時內自動刪除。</li>
-            <li><b>保存什麼</b>：逐字稿、分析結果與任務存在 Google Firebase（Firestore）資料庫，只有你（或你所在群組的成員）看得到。上傳的音檔與錄音在轉錄完成後即刪除，不會保存。</li>
+            <li><b>保存內容</b>：逐字稿、分析結果與任務存在 Google Firebase 資料庫，只有你（或你所在群組的成員）看得到。上傳的音檔與錄音在轉錄完成後即刪除，不會保存。</li>
             <li>預錄聲音辨識人的聲音樣本只用在該場會議的比對，會議結束就刪除，不進資料庫。</li>
-            <li><b>怎麼刪除</b>：單場會議可在歷史會議刪除；右上角頭像選單可「刪除帳號與所有資料」。設定裡的「資料備份」可下載你的全部資料。</li>
           </ul>
         </details>
       </footer>
@@ -898,65 +768,6 @@
     <div id="glosList"><p class="empty-note">尚無詞彙</p></div>
   </div>
 </div>
-
-<!-- 自訂會議範本：種類名稱、要哪些區塊、每個區塊抓什麼 -->
-<div class="modal-overlay" id="commentModal">
-  <div class="modal">
-    <div class="panel-head">
-      <h2 id="cmtWhere">留言</h2>
-      <button class="panel-x" id="btnCmtClose" aria-label="關閉">
-        <svg class="i-sm" aria-hidden="true"><use href="/static/icons.svg#x"/></svg>
-      </button>
-    </div>
-    <p class="hint" id="cmtQuote"></p>
-    <div class="cmt-thread" id="cmtThread"></div>
-    <div class="cmt-compose">
-      <textarea id="cmtInput" rows="2" placeholder="說點什麼…（群組成員都看得到）"></textarea>
-      <button class="primary" id="btnCmtSend">送出</button>
-    </div>
-  </div>
-</div>
-
-<div class="modal-overlay" id="templateModal">
-  <div class="modal">
-    <div class="panel-head">
-      <h2>自訂會議範本</h2>
-      <button class="panel-x" id="btnTemplateClose" aria-label="關閉">
-        <svg class="i-sm" aria-hidden="true"><use href="/static/icons.svg#x"/></svg>
-      </button>
-    </div>
-    <p class="hint">內建的八種種類是通用的。自己開一種，AI 就會照你列的欄位整理這類會議。</p>
-
-    <div id="tplList"></div>
-
-    <div class="tpl-edit" id="tplEdit" hidden>
-      <div class="field">
-        <label class="lbl" for="tplName">種類名稱</label>
-        <input type="text" id="tplName" placeholder="例如：專題 meeting">
-      </div>
-      <div class="field">
-        <label class="lbl" for="tplHint">告訴 AI 這類會議的重點（選填）</label>
-        <textarea id="tplHint" rows="2" placeholder="例如：學校專題的每週進度會議，摘要聚焦這週做完什麼、下週要做什麼。"></textarea>
-      </div>
-      <div class="field">
-        <label class="lbl">要哪些欄位</label>
-        <div class="tpl-features" id="tplFeatures"></div>
-      </div>
-      <div class="field">
-        <label class="lbl">這個種類專屬的區塊（選填，最多 20 個）</label>
-        <div id="tplSections"></div>
-        <button class="ghost" id="btnTplAddSection">＋ 加一個區塊</button>
-      </div>
-      <div class="tpl-actions">
-        <button class="ghost" id="btnTplCancel">取消</button>
-        <button class="primary" id="btnTplSave">儲存範本</button>
-      </div>
-    </div>
-
-    <button class="primary" id="btnTplNew">＋ 新增範本</button>
-  </div>
-</div>
-
 
 <!-- 即時聆聽的沉浸畫面：聆聽期間蓋滿螢幕，顯示聲控光球、計時與即時字幕。
      裡面的逐字稿是把 #liveTranscript 整個節點搬進來，不是另一份複本，

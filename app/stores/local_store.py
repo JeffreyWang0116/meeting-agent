@@ -325,66 +325,6 @@ class LocalJsonStore(TaskStore):
             if uid in g.get("member_uids", []) or (email and email in g.get("invite_emails", []))
         ]
 
-    # ---- 自訂會議範本（同目錄的 templates.json）。理由同群組：不跟著備份還原 ----
-
-    def _templates_path(self):
-        return self._path.with_name("templates.json")
-
-    def _templates(self) -> dict:
-        return self._read_doc(self._templates_path()).get("templates", {})
-
-    def _write_templates(self, items: dict) -> None:
-        atomic_write_text(
-            self._templates_path(), json.dumps({"templates": items}, ensure_ascii=False, indent=2)
-        )
-
-    def save_template(self, template: dict) -> None:
-        with self._lock:
-            items = self._templates()
-            items[template["id"]] = dict(template)
-            self._write_templates(items)
-
-    def get_template(self, template_id: str, user: str) -> dict | None:
-        item = self._templates().get(template_id)
-        return dict(item) if item and item.get("user") == user else None
-
-    def list_templates(self, user: str) -> list[dict]:
-        return [dict(t) for t in self._templates().values() if t.get("user") == user]
-
-    def delete_template(self, template_id: str, user: str) -> None:
-        with self._lock:
-            items = self._templates()
-            if items.get(template_id, {}).get("user") == user and items.pop(template_id, None):
-                self._write_templates(items)
-
-    # ---- AI 錯誤回報（同目錄的 feedback.json）。理由同群組：不跟著備份還原 ----
-
-    def _feedback_path(self):
-        return self._path.with_name("feedback.json")
-
-    def _feedback(self) -> dict:
-        return self._read_doc(self._feedback_path()).get("feedback", {})
-
-    def _write_feedback(self, items: dict) -> None:
-        atomic_write_text(
-            self._feedback_path(), json.dumps({"feedback": items}, ensure_ascii=False, indent=2)
-        )
-
-    def save_feedback(self, item: dict) -> None:
-        with self._lock:
-            items = self._feedback()
-            items[item["id"]] = dict(item)
-            self._write_feedback(items)
-
-    def list_feedback(self, user: str) -> list[dict]:
-        return [dict(f) for f in self._feedback().values() if f.get("user") == user]
-
-    def delete_feedback(self, feedback_id: str, user: str) -> None:
-        with self._lock:
-            items = self._feedback()
-            if items.get(feedback_id, {}).get("user") == user and items.pop(feedback_id, None):
-                self._write_feedback(items)
-
     # ---- 推播訂閱（同目錄的 push.json）。理由同群組：不跟著備份還原 ----
 
     def _push_path(self):
@@ -451,37 +391,6 @@ class LocalJsonStore(TaskStore):
 
     def _read_doc(self, path) -> dict:
         return json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
-
-    # ---- 留言（同目錄的 comments.json）。理由同群組：不跟著備份還原 ----
-
-    def _comments_path(self):
-        return self._path.with_name("comments.json")
-
-    def _comments(self) -> dict:
-        return self._read_doc(self._comments_path()).get("comments", {})
-
-    def _write_comments(self, items: dict) -> None:
-        atomic_write_text(
-            self._comments_path(), json.dumps({"comments": items}, ensure_ascii=False, indent=2)
-        )
-
-    def save_comment(self, comment: dict) -> None:
-        with self._lock:
-            items = self._comments()
-            items[comment["id"]] = dict(comment)
-            self._write_comments(items)
-
-    def list_comments(self, user: str, meeting_id: str | None = None) -> list[dict]:
-        items = [dict(c) for c in self._comments().values() if c.get("user") == user]
-        if meeting_id is not None:
-            items = [c for c in items if c.get("meeting_id") == meeting_id]
-        return sorted(items, key=lambda c: c.get("at", ""))
-
-    def delete_comment(self, comment_id: str, user: str) -> None:
-        with self._lock:
-            items = self._comments()
-            if items.get(comment_id, {}).get("user") == user and items.pop(comment_id, None):
-                self._write_comments(items)
 
     # ---- 群組活動紀錄（同目錄的 activity.json）。理由同群組：不跟著備份還原 ----
 

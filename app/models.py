@@ -7,7 +7,7 @@ from __future__ import annotations
 from datetime import date
 from typing import Literal, Optional
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field
 
 
 class MeetingInfo(BaseModel):
@@ -62,21 +62,6 @@ class Section(BaseModel):
     items: list[str] = Field(default_factory=list)
 
 
-class AgendaReviewItem(BaseModel):
-    """會前貼的議程逐項對照：這一項到底討論了沒。"""
-
-    item: str
-    status: str = "missed"
-    note: Optional[str] = None
-
-    @field_validator("status")
-    @classmethod
-    def _known_status(cls, value: str) -> str:
-        # 模型偶爾會回規定以外的字（「不確定」「skipped」）。整份分析不該因此
-        # 作廢；但也不能當成「討論過」——那會讓人以為事情辦完了
-        return value if value in {"covered", "partial", "missed"} else "missed"
-
-
 class MeetingAnalysis(BaseModel):
     meeting: MeetingInfo
     decisions: list[Decision] = Field(default_factory=list)
@@ -88,6 +73,3 @@ class MeetingAnalysis(BaseModel):
     sections: list[Section] = Field(default_factory=list)
     # AI 建議的分類標籤（供歷史會議篩選），使用者可再自訂修改
     tags: list[str] = Field(default_factory=list)
-    # 會前有貼議程時才有：逐項對照，以及議程外實際討論到的主題
-    agenda_review: list[AgendaReviewItem] = Field(default_factory=list)
-    off_agenda: list[str] = Field(default_factory=list)

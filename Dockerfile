@@ -1,13 +1,9 @@
 # 雲端部署映像：Python + ffmpeg（把影片/webm/m4a 轉成 wav 再交給 Gemini 轉錄）
 FROM python:3.12-slim
 
-# ffmpeg：正規化各種音訊/影片格式，Gemini 只吃標準音訊
-# fonts-arphic-uming：匯出 PDF 要有中文字型可以「內嵌」。少了它，產出的 PDF
-#   版面完全正確但每一個字都是別的字，而且在有系統字型的開發機上看起來正常。
-#   用 arphic 而不是 noto-cjk：noto-cjk 是 OpenType/CFF 外框，reportlab 讀不了
-#   （見 app/docexport.py 的 CJK_FONT_PATHS）
+# ffmpeg 用來正規化各種音訊/影片格式；Gemini 只吃標準音訊
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ffmpeg fonts-arphic-uming \
+    && apt-get install -y --no-install-recommends ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

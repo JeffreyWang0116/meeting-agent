@@ -172,16 +172,10 @@ def purge_scope(store, scope: str, on_scope_deleted=None) -> int:
     for task in store.list_tasks(user=scope):  # 手動新增、不屬於任何會議的任務
         store.delete_task(task["id"], user=scope)
     store.save_glossary([], user=scope)
-    for template in store.list_templates(scope):
-        store.delete_template(template["id"], scope)
-    for item in store.list_feedback(scope):  # 含使用者寫的說明與被回報的原文
-        store.delete_feedback(item["id"], scope)
     for job in store.list_jobs(scope):  # 含轉錄到一半的逐字稿
         store.delete_job(job["id"])
     for sub in store.list_push_subscriptions(scope):  # 不刪的話手機每天還是會響
         store.delete_push_subscription(sub["id"])
-    for comment in store.list_comments(scope):  # 討論內容也是個人資料
-        store.delete_comment(comment["id"], scope)
     store.save_activity(scope, [])  # 活動紀錄裡有誰做了什麼
     if on_scope_deleted:
         on_scope_deleted(scope)
