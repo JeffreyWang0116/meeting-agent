@@ -126,11 +126,6 @@ function meetingDetailHtml(id) {
           ${icon("refresh-cw", "i-sm")}
           重新分析
         </button>
-        <button class="ghost share-detail" data-id="${esc(id)}">
-          ${icon("share-2", "i-sm")}
-          分享
-        </button>
-        <a class="ghost btn-link" href="/api/meetings/${esc(id)}/events.ics" download>加入行事曆</a>
       </div>
     </div>`;
 }
@@ -190,7 +185,14 @@ function renderMeetings() {
           <span class="meeting-ops">
             <button class="ghost view-meeting" data-id="${esc(m.id)}">${m.id === expandedMeetingId ? "收合" : "查閱"}</button>
             <button class="ghost view-full" data-id="${esc(m.id)}" title="用分析結果的版面開啟：代辦卡片、行事曆、確認信、雙欄逐字稿">完整檢視</button>
-            <a class="ghost btn-link" href="/api/meetings/${esc(m.id)}/report.md" download>下載</a>
+            <span class="export-wrap">
+              <button class="ghost export-toggle" aria-haspopup="menu" aria-expanded="false">分享／匯出</button>
+              <span class="export-menu" role="menu" hidden>
+                <button class="ws-item share-detail" data-id="${esc(m.id)}" role="menuitem">${icon("share-2", "i-sm")}分享摘要與逐字稿</button>
+                <a class="ws-item" href="/api/meetings/${esc(m.id)}/report.md" download role="menuitem">${icon("download", "i-sm")}下載 Markdown</a>
+                <a class="ws-item" href="/api/meetings/${esc(m.id)}/events.ics" download role="menuitem">${icon("calendar", "i-sm")}代辦加入行事曆（.ics）</a>
+              </span>
+            </span>
             <button class="del-btn del-meeting" data-id="${esc(m.id)}" title="刪除此會議與其任務" aria-label="刪除">${icon("x", "i-sm")}</button>
           </span>
         </div>` + (m.id === expandedMeetingId ? meetingDetailHtml(m.id) : "")).join("")
@@ -277,6 +279,15 @@ function meetingShareText(d) {
   return parts.join("\n\n");
 }
 
+function closeExportMenus() {
+  document.querySelectorAll(".export-menu").forEach(m => { m.hidden = true; });
+  document.querySelectorAll(".export-toggle").forEach(b => b.setAttribute("aria-expanded", "false"));
+}
+document.addEventListener("click", e => {
+  if (!e.target.closest(".export-wrap")) closeExportMenus();
+});
+document.addEventListener("keydown", e => { if (e.key === "Escape") closeExportMenus(); });
+
 $("meetingRows").addEventListener("click", async e => {
   const full = e.target.closest(".view-full");
   if (full) { openMeetingFull(full.dataset.id); return; }
@@ -357,10 +368,26 @@ $("meetingRows").addEventListener("click", async e => {
     return;
   }
 
+  const toggle = e.target.closest(".export-toggle");
+  if (toggle) {
+    const menu = toggle.nextElementSibling;
+    const open = menu.hidden;
+    closeExportMenus();
+    menu.hidden = !open;
+    toggle.setAttribute("aria-expanded", String(open));
+    return;
+  }
+  if (e.target.closest(".export-menu")) closeExportMenus();  // 選了任一項就收起來
+
   const share = e.target.closest(".share-detail");
   if (share) {
-    const d = meetingDetailCache[share.dataset.id];
-    if (!d) return;
+    const id = share.dataset.id;
+    // 選單在列上，這場會議可能還沒展開過，快取裡沒有內容
+    if (!meetingDetailCache[id]) {
+      try { meetingDetailCache[id] = await api.getMeeting(id); }
+      catch (err) { showError("讀取會議失敗：" + err.message); return; }
+    }
+    const d = meetingDetailCache[id];
     const text = meetingShareText(d);
     if (navigator.share) {
       try { await navigator.share({ title: d.meeting.title, text }); } catch (err) { /* 使用者取消 */ }

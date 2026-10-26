@@ -843,6 +843,15 @@
   .meeting-info { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
   .meeting-meta { color: var(--faint); font-size: .78rem; }
   .meeting-ops { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .export-wrap { position: relative; display: inline-flex; }
+  .export-menu {
+    position: absolute; right: 0; top: calc(100% + 6px); z-index: 60;
+    display: flex; flex-direction: column; gap: 2px; width: max-content; max-width: calc(100vw - 24px); padding: 6px;
+    background: var(--card-2); border: 1px solid var(--border-strong); border-radius: var(--radius-md);
+    box-shadow: 0 12px 32px rgba(0, 0, 0, .35);
+  }
+  .export-menu[hidden] { display: none; }
+  a.ws-item { text-decoration: none; }
   .meeting-tags { display: flex; gap: 5px; flex-wrap: wrap; margin-top: 4px; }
   .mtag {
     font-size: .72rem; padding: 1px 9px; border-radius: 999px;
