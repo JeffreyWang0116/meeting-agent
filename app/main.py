@@ -565,19 +565,11 @@ def create_app(
             label_retries=settings.transcribe_label_retries,
             overlap_seconds=settings.transcribe_overlap_seconds,
             max_retry_calls=settings.transcribe_max_retry_calls,
-            # 聲紋跨段接力：分段轉錄時把已確立的講者聲音樣本接力餵給後續
-            # 分段，讓模型靠嗓音沿用同一代號，而不是靠純文字提示憑空猜。
-            # 只影響長檔分段轉錄——即時聆聽每段是獨立的短檔，走 _transcribe_whole
-            # 不經過接力。代價是每段都要重傳全部樣本（重試也會重傳），一支
-            # 77 分鐘的檔約多 240~400 次上傳往返、多花數分鐘。要關掉設
-            # VOICE_RELAY_MAX_SPEAKERS=0。
-            # 有 pyannote 時跳過：講者會被整份重標，接力標出的代號最後都被蓋掉，
-            # 那幾百次上傳往返就白付了。沒金鑰時照原本的設定
-            voice_relay_max_speakers=(
-                0 if diarizer else settings.voice_relay_max_speakers
-            ),
-            # 同理：講者標籤標得再差也會被重標，只為整段放棄轉錄重跑
-            speaker_labels_needed=diarizer is None,
+            # 聲紋跨段接力（長檔分段轉錄用，見 GeminiTranscriber）。要關掉設
+            # VOICE_RELAY_MAX_SPEAKERS=0
+            voice_relay_max_speakers=settings.voice_relay_max_speakers,
+            # 有 pyannote 時講者會被整份重標；只為講者標籤服務的機制由轉錄器自己關掉
+            relabeled_later=diarizer is not None,
         )
     # 翻譯與轉錄同樣高頻（即時聆聽逐段翻），用高額度的轉錄模型
     translator = translator or Translator(

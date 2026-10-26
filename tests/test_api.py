@@ -1308,9 +1308,9 @@ def test_voice_relay_is_skipped_when_pyannote_relabels_speakers(tmp_path, monkey
     monkeypatch.setattr("app.main.GeminiTranscriber", RecordingGeminiTranscriber)
     create_app(_gemini_settings(tmp_path, pyannote_api_key="pk"))
     (transcriber,) = RecordingGeminiTranscriber.instances
-    assert transcriber.kwargs["voice_relay_max_speakers"] == 0
-    # 講者標籤同理：標得再差也會被重標，不值得為它重跑整段轉錄
-    assert transcriber.kwargs["speaker_labels_needed"] is False
+    # 「之後會被重標」只講一次，關掉哪些機制由轉錄器自己決定；設定值照原樣傳
+    assert transcriber.kwargs["relabeled_later"] is True
+    assert transcriber.kwargs["voice_relay_max_speakers"] == 20
 
 
 def test_voice_relay_unchanged_without_pyannote(tmp_path, monkeypatch):
@@ -1319,7 +1319,7 @@ def test_voice_relay_unchanged_without_pyannote(tmp_path, monkeypatch):
     create_app(_gemini_settings(tmp_path, pyannote_api_key=None))
     (transcriber,) = RecordingGeminiTranscriber.instances
     assert transcriber.kwargs["voice_relay_max_speakers"] == 20
-    assert transcriber.kwargs["speaker_labels_needed"] is True
+    assert transcriber.kwargs["relabeled_later"] is False
 
 
 def test_health_reports_whether_pyannote_is_active(tmp_path, monkeypatch):

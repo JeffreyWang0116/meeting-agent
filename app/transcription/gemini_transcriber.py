@@ -49,7 +49,7 @@ DEFAULT_CHUNK_THRESHOLD_SECONDS = 360  # 6 分鐘
 # 舊值 0.5 是配合當時會灌水的標註率計算訂的——句中冒號（「重點：…」）被誤判
 # 成講者，真實標註率再低都能衝過 0.5，重試等於從來沒有真正生效過。
 MIN_SPEAKER_LABEL_RATIO = 0.8
-# speaker_labels_needed=False（有 pyannote 重標講者）時改看「有時間戳且有內容」的比例，
+# relabeled_later=True（有 pyannote 重標講者）時改看「有時間戳且有內容」的比例，
 # 門檻沿用同一個值：prompt 要求每一行都帶時間戳，兩成以上沒有就是模型沒照做
 # 聲紋樣本短於這個秒數就不值得剪：太短的音訊比對不出嗓音，還要多付一次上傳
 _MIN_VOICE_SAMPLE_SECONDS = 1.0
@@ -128,7 +128,7 @@ class GeminiTranscriber:
         overlap_seconds: int = 20,
         max_retry_calls: int = 10,
         voice_relay_max_speakers: int = 0,
-        speaker_labels_needed: bool = True,
+        relabeled_later: bool = False,
     ):
         # 多把 key 輪替（429 換下一把）；單把 api_key 為向後相容寫法
         self._pool = KeyPool(api_keys if api_keys else [api_key])
@@ -156,11 +156,14 @@ class GeminiTranscriber:
         # 參考音訊（approach A：見 voice_relay_parts）。0＝停用，不剪任何樣本、
         # 不產生額外的 ffmpeg／上傳成本——這是會加成本的功能，class 層級預設關，
         # 「預設開」由 Settings 層的預設值負責
-        self.voice_relay_max_speakers = voice_relay_max_speakers
-        # 講者標籤要不要靠 Gemini 標好。有 pyannote 時講者會依時間戳整份重標，
-        # 為標籤重跑整段純屬浪費（實測 10.5 分鐘檔 9 次呼叫裡有 6 次是這種重跑）；
-        # 重試只留給「整段放棄轉錄」——沒時間戳或沒內容
-        self.speaker_labels_needed = speaker_labels_needed
+        #
+        # relabeled_later：講者之後會被 pyannote 依時間戳整份重標。Gemini 標的代號
+        # 最後都會被蓋掉，所以兩件只為講者標籤服務的事都不做：
+        # - 聲紋接力：剪樣本、每段重傳樣本的幾百次上傳往返都白付
+        # - 為講者標籤重跑整段：實測 10.5 分鐘檔 9 次呼叫裡有 6 次是這種重跑；
+        #   重試只留給「整段放棄轉錄」——沒時間戳或沒內容
+        self.voice_relay_max_speakers = 0 if relabeled_later else voice_relay_max_speakers
+        self.speaker_labels_needed = not relabeled_later
 
     def build_prompt(self, hint: str | None = None, user: str = DEFAULT_USER) -> str:
         # 詞彙表含人名，措辭要明講它只管內文用字，否則模型會拿它當講者標籤用；

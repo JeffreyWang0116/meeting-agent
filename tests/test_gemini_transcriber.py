@@ -544,7 +544,7 @@ def test_missing_labels_are_not_retried_when_diarizer_relabels(monkeypatch, tmp_
     src.write_bytes(b"RIFF-fake")
     setup = RetryingSetup(monkeypatch, tmp_path, duration=600, chunk_texts=["", ""])
     t = setup.transcriber_with_sequence(
-        ["[0:00] 沒標\n[0:05] 也沒標"], label_retries=2, speaker_labels_needed=False
+        ["[0:00] 沒標\n[0:05] 也沒標"], label_retries=2, relabeled_later=True
     )
     assert "也沒標" in t.transcribe(src)
     assert setup.calls["n"] == 2  # 兩段各一次
@@ -556,7 +556,7 @@ def test_abandoned_content_is_still_retried_when_diarizer_relabels(monkeypatch, 
     setup = RetryingSetup(monkeypatch, tmp_path, duration=600, chunk_texts=["", ""])
     t = setup.transcriber_with_sequence(
         ["[0:00] 講者A：\n[0:05] 講者A：。", "[0:00] 有內容\n[0:05] 沒標也沒關係"],
-        label_retries=2, speaker_labels_needed=False,
+        label_retries=2, relabeled_later=True,
     )
     assert "有內容" in t.transcribe(src)
     assert setup.calls["n"] == 3  # 第一段重跑一次，第二段一次
@@ -569,7 +569,7 @@ def test_missing_timestamps_are_still_retried_when_diarizer_relabels(monkeypatch
     setup = RetryingSetup(monkeypatch, tmp_path, duration=600, chunk_texts=["", ""])
     t = setup.transcriber_with_sequence(
         ["講者A：整段沒時間\n講者B：也沒有", "[0:00] 有時間\n[0:05] 也有"],
-        label_retries=2, speaker_labels_needed=False,
+        label_retries=2, relabeled_later=True,
     )
     assert "有時間" in t.transcribe(src)
     assert setup.calls["n"] == 3  # 第一段重跑一次，第二段一次
@@ -851,6 +851,39 @@ def test_voice_relay_disabled_by_default_never_cuts_clips(monkeypatch, tmp_path)
             return setup.texts[str(audio_path)]
 
     Recording(api_key="k", chunk_seconds=240).transcribe(src)  # 預設值，未指定
+
+    assert cut_calls == []
+    assert all(refs is None for refs in captured_refs)
+
+
+def test_voice_relay_skipped_when_speakers_are_relabeled_later(monkeypatch, tmp_path):
+    """有 pyannote 時接力標出的代號最後會被整份重標蓋掉，剪樣本、重傳樣本都白付。
+    即使設定開著也不剪——判斷集中在轉錄器，呼叫端只講「之後會重標」。"""
+    from app.transcription import media
+
+    src = tmp_path / "long.wav"
+    src.write_bytes(b"RIFF-fake")
+    setup = FakeChunkedSetup(monkeypatch, tmp_path, duration=600, chunk_texts=[
+        "[0:00] 講者A：第一段開頭發言內容比較長一點才挑得到樣本",
+        "[0:00] 講者B：後段",
+    ])
+    cut_calls = []
+    monkeypatch.setattr(
+        media, "cut_clip",
+        lambda *a, **k: cut_calls.append(1) or Path("unused.wav"),
+    )
+    captured_refs = []
+
+    class Recording(GeminiTranscriber):
+        def _transcribe_one(self, audio_path, hint, on_partial=None,
+                            voice_refs=None, user=None):
+            captured_refs.append(voice_refs)
+            return setup.texts[str(audio_path)]
+
+    Recording(
+        api_key="k", chunk_seconds=240, voice_relay_max_speakers=20,
+        overlap_seconds=0, relabeled_later=True,
+    ).transcribe(src)
 
     assert cut_calls == []
     assert all(refs is None for refs in captured_refs)
