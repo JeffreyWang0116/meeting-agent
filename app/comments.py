@@ -14,7 +14,7 @@ MAX_TEXT = 2000
 
 # 可以留言的位置。section 的標籤由使用者自訂，所以只檢查前綴
 SIMPLE_TARGETS = {"summary", "transcript"}
-INDEXED_TARGETS = {"decision", "pending", "highlight"}
+INDEXED_TARGETS = {"decision", "pending", "highlight", "agenda"}
 ID_TARGETS = {"task"}
 LABEL_TARGETS = {"section"}
 

@@ -26,6 +26,7 @@
     reminders   主動提醒
     home        首頁儀表板
     ask         跨會議問答
+    prep        會議前準備：議程、會議系列、帶入上次沒做完的
     inputs      三條輸入路徑：文字貼上／檔案上傳／即時聆聽
     settings    主題、設定選單、詞彙表、備份、PWA
     push        推播的純函式（支援判斷、公鑰轉換）
@@ -56,6 +57,7 @@ import "./meetings.js";
 import "./reminders.js";
 import "./home.js";
 import "./ask.js";
+import "./prep.js";
 import "./inputs.js";
 import "./settings.js";
 import "./push.js";

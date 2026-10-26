@@ -40,6 +40,7 @@ from app.agents.notifier_agent import (
 )
 from app.agents.reminder_agent import scan as scan_reminders
 from app import activity as activity_log
+from app.agenda import carry_over_lines, clean_agenda, coverage_summary
 from app import groups as group_svc
 from app.auth import (
     CURRENT_ACCOUNT,
@@ -361,6 +362,11 @@ class MeetingRequest(BaseModel):
     # 聆聽 session 遺失時會改走這支端點救援，標記與筆記不該跟著不見
     marks: Optional[list[str]] = None
     notes: Optional[str] = Field(default=None, max_length=20000)
+    # 會前準備（見 app/agenda.py）：貼進來的議程（一行一項）、這場屬於哪個系列、
+    # 以及要不要把同系列上一場沒做完的事一起餵給模型
+    agenda: Optional[str] = Field(default=None, max_length=5000)
+    series: Optional[str] = Field(default=None, max_length=60)
+    carry_over: bool = False
 
 
 class FinishRequest(BaseModel):
@@ -369,6 +375,10 @@ class FinishRequest(BaseModel):
     features: Optional[list[str]] = None
     correct_typos: bool = False
     terms: Optional[list[dict]] = None
+    # 會前準備（見 app/agenda.py）
+    agenda: Optional[str] = Field(default=None, max_length=5000)
+    series: Optional[str] = Field(default=None, max_length=60)
+    carry_over: bool = False
     # 聆聽中按「標記這一刻」的時間點（"5:23"）。不是時間格式的會在提示詞那層丟掉
     marks: Optional[list[str]] = None
     # 會議中自己打的筆記。直接進提示詞，所以要有長度上限
@@ -844,6 +854,9 @@ def create_app(
         attendees: list[str] | None = None,
         marks: list[str] | None = None,
         notes: str | None = None,
+        agenda: list[str] | None = None,
+        series: str | None = None,
+        carry_over: list[str] | None = None,
     ) -> dict:
         usage.record("analysis")
         spec = kind_spec_of(kind)
@@ -863,8 +876,16 @@ def create_app(
                 marks=marks,
                 notes=notes,
                 kind_spec=spec,
+                agenda=agenda,
+                series=series,
+                carry_over=carry_over,
             )
             log_activity("meeting.create", _title_of(result), result.get("meeting_id"))
+            if agenda:
+                # 前端要畫「3 項討論過、1 項沒談到」的那一列，不必自己再掃一遍
+                result["agenda_coverage"] = coverage_summary(
+                    result.get("analysis", {}).get("agenda_review")
+                )
             return result
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc))
@@ -942,6 +963,7 @@ def create_app(
     def analyze_meeting(req: MeetingRequest):
         kind = validate_kind(req.kind)
         limit("analyze")
+        series = (req.series or "").strip() or None
         return run_analysis(
             req.text,
             req.meeting_date,
@@ -951,6 +973,10 @@ def create_app(
             terms=validate_terms(req.terms),
             marks=req.marks,
             notes=req.notes,
+            agenda=clean_agenda(req.agenda),
+            series=series,
+            # 帶上次沒做完的是選配：沒有系列可參照時，勾了也沒東西可帶
+            carry_over=carryover_for(series)["lines"] if (req.carry_over and series) else None,
         )
 
     @app.get("/api/meeting-kinds")
@@ -1185,6 +1211,41 @@ def create_app(
             media_type="application/x-ndjson",
             headers={"Content-Disposition": 'attachment; filename="ai-feedback.jsonl"'},
         )
+
+    # ---- 會議前準備：系列與「上次沒做完的」（見 app/agenda.py）----
+
+    def carryover_for(series: str) -> dict:
+        """同系列上一場會議留下來的事。第一次開這個系列的會時也會被呼叫到，
+        所以沒有歷史不是錯誤，是空清單。"""
+        user = current_user()
+        previous = next(
+            (m for m in store.list_meetings(user=user) if (m.get("series") or "") == series), None
+        )
+        if previous is None:
+            return {"from": None, "lines": []}
+        return {
+            "from": {"id": previous["id"],
+                     "title": (previous.get("meeting") or {}).get("title"),
+                     "date": (previous.get("meeting") or {}).get("date")},
+            "lines": carry_over_lines(
+                store.list_tasks(meeting_id=previous["id"], user=user),
+                previous.get("pending_items") or [],
+            ),
+        }
+
+    @app.get("/api/series")
+    def list_series():
+        """已經用過的系列名稱（新到舊）。新會議表單的下拉選單用這個。"""
+        names: list[str] = []
+        for m in store.list_meetings(user=current_user()):
+            name = (m.get("series") or "").strip()
+            if name and name not in names:
+                names.append(name)
+        return {"series": names}
+
+    @app.get("/api/series/{series}/carryover")
+    def series_carryover(series: str):
+        return carryover_for(series)
 
     # ---- 留言：對摘要、決議、任務的討論 ----
 
@@ -1518,6 +1579,8 @@ def create_app(
                 features=features,
                 extra_terms=stored_terms,
                 kind_spec=kind_spec_of(kind),
+                # 當初貼的議程跟著會議存著。不帶的話重新分析會把對照結果整個弄丟
+                agenda=record.get("agenda") or None,
             )
         except DecisionAgentError as exc:
             raise HTTPException(status_code=502, detail=str(exc))
@@ -1529,6 +1592,8 @@ def create_app(
 
         dumped = analysis.model_dump(mode="json")
         updates = {
+            "agenda_review": dumped.get("agenda_review", []),
+            "off_agenda": dumped.get("off_agenda", []),
             "meeting": dumped["meeting"],
             "decisions": dumped["decisions"],
             "pending_items": dumped["pending_items"],
@@ -1978,6 +2043,9 @@ def create_app(
         features: Optional[str] = Form(None),
         correct_typos: Optional[str] = Form(None),
         terms: Optional[str] = Form(None),
+        agenda: Optional[str] = Form(None),
+        series: Optional[str] = Form(None),
+        carry_over: Optional[str] = Form(None),
     ):
         limit("media")  # 在存檔之前擋：被擋下的上傳不佔暫存磁碟
         try:
@@ -2010,6 +2078,12 @@ def create_app(
                 correct_typos=correct,
                 terms=resolved_terms,
                 kind_spec=kind_spec_of(kind),
+                agenda=clean_agenda(agenda),
+                series=(series or "").strip() or None,
+                # 背景執行緒沒有請求上下文，上次沒做完的事現在就查好
+                carry_over=(carryover_for(series.strip())["lines"]
+                            if (str(carry_over or "").lower() in _truthy and series
+                                and series.strip()) else None),
             )
         }
 
@@ -2114,6 +2188,7 @@ def create_app(
             )
         kind = validate_kind(req.kind if req else None)
         features = resolve_features(req.features if req else None, kind)
+        live_series = ((req.series if req else None) or "").strip() or None
         result = run_analysis(
             transcript,
             req.meeting_date if req else None,
@@ -2127,6 +2202,10 @@ def create_app(
             # 會議當下才有的資訊：按下的標記時間點、手打的筆記
             marks=req.marks if req else None,
             notes=req.notes if req else None,
+            agenda=clean_agenda(req.agenda if req else None),
+            series=live_series,
+            carry_over=(carryover_for(live_series)["lines"]
+                        if (req and req.carry_over and live_series) else None),
         )
         # result 帶著校正後的 transcript，放在後面覆蓋原始版本。
         # speakers_matched/unmatched 讓前端說得出「預錄的 4 位認出了哪 2 位」——

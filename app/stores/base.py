@@ -47,6 +47,9 @@ class TaskStore(ABC):
         kind: str | None = None,
         terms: list[dict] | None = None,
         user: str = DEFAULT_USER,
+        # 會前準備（見 app/agenda.py）：貼的議程、這場屬於哪個系列
+        agenda: list[str] | None = None,
+        series: str | None = None,
     ) -> str:
         """儲存一場會議的分析結果（可附逐字稿原文供 RAG 檢索、會議種類、本次專用詞彙），回傳 meeting_id。"""
 

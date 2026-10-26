@@ -1410,3 +1410,47 @@
 .act-row .i-sm { color: var(--faint); flex: none; }
 .act-text { flex: 1; min-width: 0; }
 .act-time { color: var(--faint); font-size: .72rem; white-space: nowrap; }
+
+/* ---- 會議前準備（prep.js）---- */
+.prep-box {
+  margin: 10px 0; padding: 0 10px; background: var(--card-2);
+  border: 1px solid var(--border); border-radius: var(--radius-md);
+}
+.prep-head {
+  display: flex; align-items: center; gap: 8px; padding: 10px 0;
+  cursor: pointer; font-size: .86rem; list-style: none;
+}
+.prep-head::-webkit-details-marker { display: none; }
+.prep-head .i-sm { color: var(--faint); }
+.prep-box[open] .prep-head { border-bottom: 1px solid var(--border); margin-bottom: 10px; }
+.prep-box > .field, .prep-box > .field-row, .prep-box > .chk { margin-bottom: 10px; }
+.prep-carry {
+  margin-bottom: 10px; padding: 8px 10px; border-radius: var(--radius-sm);
+  background: var(--card-3, var(--card)); font-size: .8rem; color: var(--muted);
+}
+.prep-carry ul { margin: 4px 0 0; padding-left: 18px; }
+.prep-carry li { margin: 2px 0; }
+.prep-from { margin: 0; color: var(--faint); font-size: .76rem; }
+
+/* ---- 議程對照（result.js）---- */
+.agenda-review { display: flex; flex-direction: column; gap: 6px; }
+.agenda-item {
+  display: flex; align-items: flex-start; gap: 10px; padding: 8px 10px;
+  background: var(--card-2); border-left: 3px solid var(--border-strong);
+  border-radius: var(--radius-sm); font-size: .86rem;
+}
+.agenda-item.ag-covered { border-left-color: #4caf7d; }
+.agenda-item.ag-partial { border-left-color: #d9a441; }
+/* 「沒談到」才是使用者打開這一區要找的東西，不能跟其他兩種長得一樣 */
+.agenda-item.ag-missed { border-left-color: #e0685f; }
+.ag-mark { font-family: var(--mono); width: 1em; text-align: center; flex: none; }
+.ag-covered .ag-mark { color: #4caf7d; }
+.ag-partial .ag-mark { color: #d9a441; }
+.ag-missed .ag-mark { color: #e0685f; }
+.ag-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.ag-note { color: var(--faint); font-size: .78rem; }
+.ag-status { color: var(--faint); font-size: .74rem; white-space: nowrap; }
+.agenda-extra {
+  display: flex; align-items: flex-start; gap: 8px; padding: 6px 10px;
+  color: var(--faint); font-size: .78rem;
+}

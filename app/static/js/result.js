@@ -53,6 +53,7 @@ function showResultSkeleton() {
   $("rEvents").innerHTML = skelBlocks(1);
   $("rDraft").innerHTML = lines(4);
   ["hSummary", "hHighlights", "hDecisions", "hTodos"].forEach(id => ($(id).style.display = "flex"));
+  $("hAgenda").style.display = "none";  // 有沒有議程要等結果回來才知道
   $("rSummary").style.display = "block";
   $("rHighlights").style.display = "flex";
   $("rDecisions").style.display = "flex";
@@ -166,6 +167,42 @@ function badBtn(target, text) {
     ` title="回報這裡 AI 弄錯了" aria-label="回報錯誤">👎</button>`;
 }
 
+const AGENDA_STATUS = {
+  covered: { label: "討論過", mark: "✓" },
+  partial: { label: "帶過", mark: "◐" },
+  missed: { label: "沒談到", mark: "✗" },
+};
+
+// 議程對照：會前貼的每一項，這場到底講了沒。「每一項都討論過了」是最舒服
+// 也最沒用的答案，所以 missed 要看得出來，不是藏在清單裡的一行灰字
+function renderAgenda(review, offAgenda) {
+  const items = review || [];
+  const show = items.length > 0;
+  $("hAgenda").style.display = show ? "flex" : "none";
+  $("rAgenda").style.display = show ? "flex" : "none";
+  if (!show) { $("rAgenda").innerHTML = ""; return; }
+
+  const counts = { covered: 0, partial: 0, missed: 0 };
+  for (const r of items) counts[AGENDA_STATUS[r.status] ? r.status : "missed"]++;
+  $("agendaCoverage").textContent =
+    `${counts.covered} 項討論過・${counts.partial} 項帶過・${counts.missed} 項沒談到`;
+
+  const extra = (offAgenda || []).length
+    ? `<div class="agenda-extra">${icon("circle-help", "i-sm")}<span>議程外也談了：`
+      + `${offAgenda.map(esc).join("、")}</span></div>`
+    : "";
+  $("rAgenda").innerHTML = items.map((r, i) => {
+    const st = AGENDA_STATUS[r.status] || AGENDA_STATUS.missed;
+    const key = AGENDA_STATUS[r.status] ? r.status : "missed";
+    return `<div class="agenda-item ag-${key}">
+        <span class="ag-mark" title="${esc(st.label)}">${st.mark}</span>
+        <span class="ag-text">${esc(r.item)}${r.note ? `<span class="ag-note">${esc(r.note)}</span>` : ""}</span>
+        <span class="ag-status">${esc(st.label)}</span>
+        ${commentBtn(`agenda:${i}`, r.item)}
+      </div>`;
+  }).join("") + extra;
+}
+
 // 摘要沒有自己的容器可以塞按鈕，掛在標題列上（翻譯鈕旁邊）
 function paintSummaryComment(summary) {
   const head = $("hSummary");
@@ -248,6 +285,7 @@ function renderResult(result, transcript, { kind = null, fromHistory = false } =
   $("sectionsTitle").textContent = metaKind ? `${metaKind}重點` : "重點欄位";
   renderSections(a.sections);
 
+  renderAgenda(a.agenda_review, a.off_agenda);
   renderHighlights(a.highlights || []);
   renderDecisions(a.decisions);
   renderTodos(a.todos);
@@ -255,6 +293,7 @@ function renderResult(result, transcript, { kind = null, fromHistory = false } =
   // 留言數是另一次請求。先畫出沒有數字的按鈕，拿到之後再補上去——
   // 等它回來才畫整份結果的話，結果頁會因為一個附屬功能而變慢
   loadComments(result.meeting_id).then(() => {
+    renderAgenda(a.agenda_review, a.off_agenda);
     renderDecisions(a.decisions);
     renderTodos(a.todos);
     renderPending(a.pending_items);

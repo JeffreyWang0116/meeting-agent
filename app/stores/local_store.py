@@ -58,6 +58,9 @@ class LocalJsonStore(TaskStore):
         kind: str | None = None,
         terms: list[dict] | None = None,
         user: str = DEFAULT_USER,
+        # 會前準備（見 app/agenda.py）：貼的議程、這場屬於哪個系列
+        agenda: list[str] | None = None,
+        series: str | None = None,
     ) -> str:
         meeting_id = uuid.uuid4().hex[:12]
         created_at = datetime.now(timezone.utc).isoformat()
@@ -77,6 +80,10 @@ class LocalJsonStore(TaskStore):
             # 本次專用詞彙：存起來「重新分析」才不會把使用者會前打的詞弄丟
             "terms": terms or [],
             "tags": dumped.get("tags", []),
+            "agenda": agenda or [],
+            "agenda_review": dumped.get("agenda_review", []),
+            "off_agenda": dumped.get("off_agenda", []),
+            "series": series,
         }
         task_records = [
             {

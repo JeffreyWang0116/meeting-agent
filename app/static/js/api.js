@@ -55,6 +55,10 @@ const api = {
     post(`/api/meetings/${q(id)}/rename-speaker`, { old: oldName, new: newName }),
   meetingKinds: () => get("/api/meeting-kinds"),
 
+  // ---- 會議前準備 ----
+  listSeries: () => get("/api/series"),
+  seriesCarryover: name => get(`/api/series/${q(name)}/carryover`),
+
   // ---- 垃圾桶、活動紀錄、留言 ----
   listTrash: () => get("/api/trash"),
   restoreMeeting: id => post(`/api/trash/${q(id)}/restore`, {}),

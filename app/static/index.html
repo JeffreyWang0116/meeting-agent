@@ -302,6 +302,36 @@
             </label>
           </div>
 
+          <!-- 會議前準備：貼議程讓 AI 逐項對照，並把同系列上一場沒做完的帶過來 -->
+          <details class="prep-box" id="prepBox">
+            <summary class="prep-head">
+              <svg class="i-sm" aria-hidden="true"><use href="/static/icons.svg#clipboard-list"/></svg>
+              會議前準備
+              <span class="lbl-aux">貼議程讓 AI 逐項對照、把上次沒做完的帶過來</span>
+            </summary>
+            <div class="field">
+              <label class="lbl" for="prepAgenda">
+                議程
+                <span class="lbl-aux">一行一項。分析完會逐項告訴你討論過、帶過，還是完全沒談到</span>
+              </label>
+              <textarea id="prepAgenda" rows="4" placeholder="1. 預算審查&#10;2. 期程確認&#10;3. 場地"></textarea>
+            </div>
+            <div class="field-row">
+              <div class="field">
+                <label class="lbl" for="prepSeries">
+                  會議系列
+                  <span class="lbl-aux">同一個名字的會議會串成一條線</span>
+                </label>
+                <input type="text" id="prepSeries" list="prepSeriesList" placeholder="例：專題週會">
+                <datalist id="prepSeriesList"></datalist>
+              </div>
+            </div>
+            <label class="chk" id="prepCarryRow" hidden>
+              <input type="checkbox" id="prepCarry"> 把上次沒做完的一起交給 AI
+            </label>
+            <div class="prep-carry" id="prepCarryList" hidden></div>
+          </details>
+
           <!-- 每個種類都有自己的預設區塊，所以這列一律顯示，讓使用者可以自己調 -->
           <div class="field-row feature-row" id="featureRow">
             <label class="chk"><input type="checkbox" id="featSummary" checked> 會議摘要</label>
@@ -528,6 +558,13 @@
                 <span class="aux">點擊跳到右側逐字稿</span>
               </h3>
               <ol class="highlight-list" id="rHighlights"></ol>
+
+              <h3 class="sub" id="hAgenda" style="display:none">
+                <svg class="i-sm" aria-hidden="true"><use href="/static/icons.svg#clipboard-list"/></svg>
+                議程對照
+                <span class="aux" id="agendaCoverage"></span>
+              </h3>
+              <div class="agenda-review" id="rAgenda"></div>
 
               <h3 class="sub" id="hDecisions">
                 <svg class="i-sm" aria-hidden="true"><use href="/static/icons.svg#circle-check-big"/></svg>

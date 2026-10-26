@@ -33,7 +33,9 @@ _MARK_RE = re.compile(r"\d{1,2}(:\d{1,2}){1,2}")
 FEATURE_KEYS = {"summary", "decisions", "todos", "highlights"}
 
 
-def _schema_example(features: set[str], section_labels: list[str] | None = None) -> str:
+def _schema_example(
+    features: set[str], section_labels: list[str] | None = None, with_agenda: bool = False
+) -> str:
     meeting: dict = {"title": "會議標題（從內容歸納）", "date": "YYYY-MM-DD"}
     if "summary" in features:
         meeting["summary"] = "3~5 句繁體中文摘要"
@@ -71,6 +73,15 @@ def _schema_example(features: set[str], section_labels: list[str] | None = None)
             {"label": label, "items": ["這個區塊的內容，一條一句；沒有就給空陣列"]}
             for label in section_labels
         ]
+    if with_agenda:
+        schema["agenda_review"] = [
+            {
+                "item": "照抄議程上的那一項，一字不改",
+                "status": "covered（有結論）/ partial（提到但沒講完）/ missed（完全沒談到）",
+                "note": "一句話說明；missed 就填 null",
+            }
+        ]
+        schema["off_agenda"] = ["議程上沒有、但這場實際討論了的主題；沒有就給空陣列"]
     return json.dumps(schema, ensure_ascii=False, indent=2)
 
 
@@ -254,6 +265,10 @@ def build_prompt(
     attendees: list[str] | None = None,
     marks: list[str] | None = None,
     notes: str | None = None,
+    # 會前貼的議程（一項一個字串）與上次沒做完的事（一行一句）。
+    # 兩者都是「會前就知道的事」，放進提示詞才問得出「哪一項沒討論到」
+    agenda: list[str] | None = None,
+    carry_over: list[str] | None = None,
     # 自訂範本：{"label": 種類名稱, "hint": 說明, "sections": {區塊: 說明}}。
     # 有值時取代內建種類的查表，其餘流程完全一樣
     kind_spec: dict | None = None,
@@ -324,6 +339,26 @@ def build_prompt(
             f"\n{n}. sections 只能有下列這幾個 label，依這個順序全部輸出"
             "（內容沒談到就給空陣列，不要自己新增或漏掉）：\n" + detail
         )
+    agenda_items = [a.strip() for a in (agenda or []) if str(a).strip()]
+    if agenda_items:
+        n += 1
+        listed = "\n".join(f"   - {item}" for item in agenda_items)
+        rules.append(
+            f"\n{n}. 這場會議事先有議程。agenda_review 必須照下列順序、一項一筆全部回覆"
+            f"（item 照抄，不要改寫、不要合併、不要增減）：\n{listed}\n"
+            "   status 只能是 covered（有討論且有結論）、partial（提到但沒講完或沒結論）、"
+            "missed（完全沒談到）。沒談到就是 missed，不要為了好看而寫成 partial。"
+            "另外把議程上沒有、但這場實際討論了的主題列進 off_agenda。"
+        )
+    lines = [c.strip() for c in (carry_over or []) if str(c).strip()]
+    if lines:
+        n += 1
+        listed = "\n".join(f"   - {line}" for line in lines)
+        rules.append(
+            f"\n{n}. 上次會議留下來、還沒完成的事項如下：\n{listed}\n"
+            "   如果這場會議談到其中某一項，把後續寫進對應的 decisions 或 todos；"
+            "完全沒談到的就留在 pending_items，不要憑空宣告它完成了。"
+        )
     feature_note = "".join(rules)
     return PROMPT_TEMPLATE.format(
         meeting_date=meeting_date.isoformat(),
@@ -332,7 +367,7 @@ def build_prompt(
         glossary_line=glossary_line,
         attendee_line=attendee_line + mark_line + note_line,
         feature_note=feature_note,
-        schema=_schema_example(features, list(spec)),
+        schema=_schema_example(features, list(spec), with_agenda=bool(agenda_items)),
         transcript=transcript,
     )
 
@@ -401,6 +436,8 @@ class DecisionAgent:
         marks: list[str] | None = None,
         notes: str | None = None,
         kind_spec: dict | None = None,
+        agenda: list[str] | None = None,
+        carry_over: list[str] | None = None,
     ) -> MeetingAnalysis:
         meeting_date = meeting_date or date.today()
         # features=None：向後相容，等同全部功能都開
@@ -416,6 +453,8 @@ class DecisionAgent:
             marks=marks,
             notes=notes,
             kind_spec=kind_spec,
+            agenda=agenda,
+            carry_over=carry_over,
         )
 
         prompt = base_prompt
@@ -424,7 +463,7 @@ class DecisionAgent:
             raw = self._generate(prompt)
             try:
                 analysis = MeetingAnalysis.model_validate_json(strip_code_fence(raw))
-                return self._enforce_features(analysis, features, kind, kind_spec)
+                return self._enforce_features(analysis, features, kind, kind_spec, agenda)
             except (ValidationError, ValueError) as exc:
                 last_error = exc
                 prompt = base_prompt + _RETRY_SUFFIX.format(error=exc)
@@ -436,9 +475,13 @@ class DecisionAgent:
     @staticmethod
     def _enforce_features(
         analysis: MeetingAnalysis, features: set[str], kind: str | None = None,
-        kind_spec: dict | None = None,
+        kind_spec: dict | None = None, agenda: list[str] | None = None,
     ) -> MeetingAnalysis:
         """防禦性保護：不管 LLM 有沒有聽話，沒開的功能一律強制清空。"""
+        if not agenda:
+            # 沒有議程卻回了議程對照，那份對照是憑空生出來的
+            analysis.agenda_review = []
+            analysis.off_agenda = []
         # 區塊同理：只留這個種類真的定義過的 label，並照定義的順序排好，
         # 前端才不用防模型自己發明的欄位
         allowed = kind_spec.get("sections", {}) if kind_spec else sections_for_kind(kind)
