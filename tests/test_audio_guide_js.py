@@ -72,8 +72,9 @@ def test_phones_are_told_it_does_not_work_there(platform):
 
 
 def test_loopback_hint_per_platform():
-    assert "立體聲混音" in call("loopbackSetupHint", "windows")
-    assert "VB-CABLE" in call("loopbackSetupHint", "windows")
+    """Windows 的那段（立體聲混音 / VB-CABLE）刻意拿掉了：步驟太長，
+    而且做不做都還有「分享畫面」那條路可以走。"""
+    assert call("loopbackSetupHint", "windows") == ""
     assert "BlackHole" in call("loopbackSetupHint", "mac")
     assert call("loopbackSetupHint", "ios") == ""
 

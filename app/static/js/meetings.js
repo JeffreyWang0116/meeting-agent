@@ -101,19 +101,11 @@ function meetingDetailHtml(id) {
       <h4>詞彙統一替換</h4>
       <div class="term-tool">
         <div class="term-replace">
-          <input type="text" class="term-from" placeholder="原詞（聽錯的，如：涵式）">
+          <input type="text" class="term-from" placeholder="原詞">
           <span class="term-arrow">→</span>
-          <input type="text" class="term-to" placeholder="改成（如：函式）">
+          <input type="text" class="term-to" placeholder="改成">
           <button class="ghost term-apply" data-id="${esc(id)}">替換</button>
         </div>
-        <div class="term-replace">
-          <span class="term-range-lbl">限定時間段（選填）</span>
-          <input type="text" class="term-start" placeholder="起 如 12:30">
-          <span class="term-arrow">–</span>
-          <input type="text" class="term-end" placeholder="迄 如 15:00">
-          <span class="glos-note">留空＝整份逐字稿</span>
-        </div>
-        <label class="chk term-glos"><input type="checkbox" checked> 一併加入詞彙表，之後轉錄不再聽錯</label>
       </div>
       <h4>完整逐字稿 <button class="ghost copy-detail" data-id="${esc(id)}">複製全文</button></h4>
       <div class="detail-transcript" id="dTranscriptView"></div>
@@ -130,50 +122,16 @@ function meetingDetailHtml(id) {
     </div>`;
 }
 
-let activeTag = "";  // 歷史會議標籤篩選（"" = 全部）
-let tagsExpanded = false;  // AI 每場會議都自己取標籤，久了會很雜——預設只顯示最常用的幾個
-const TAG_FILTER_LIMIT = 12;
+const filteredMeetings = () => allMeetings;
 
-function renderTagFilter() {
-  const counts = new Map();
-  allMeetings.forEach(m => {
-    if (m.kind) counts.set(m.kind, (counts.get(m.kind) || 0) + 1);
-    (m.tags || []).forEach(t => counts.set(t, (counts.get(t) || 0) + 1));
-  });
-  const bar = $("tagFilter");
-  if (!counts.size) { bar.style.display = "none"; return; }
-  if (activeTag && !counts.has(activeTag)) activeTag = "";
-  bar.style.display = "flex";
-
-  const sorted = [...counts.entries()].sort((a, b) => b[1] - a[1]).map(([t]) => t);
-  const overflow = sorted.length - TAG_FILTER_LIMIT;
-  let visible = overflow <= 0 || tagsExpanded ? sorted : sorted.slice(0, TAG_FILTER_LIMIT);
-  // 目前選中的標籤若被截掉了也要顯示，不然使用者會看不到自己選的是哪個
-  if (activeTag && !visible.includes(activeTag)) visible = [...visible, activeTag];
-
-  bar.innerHTML = [`<span class="tag-chip ${activeTag ? "" : "active"}" data-tag="">全部</span>`]
-    .concat(visible.map(t =>
-      `<span class="tag-chip ${t === activeTag ? "active" : ""}" data-tag="${esc(t)}">${esc(t)}</span>`))
-    .concat(overflow > 0
-      ? [`<span class="tag-chip tag-more" data-more="1">${tagsExpanded ? "收合" : `更多 +${overflow}`}</span>`]
-      : [])
-    .join("");
-}
-
-const filteredMeetings = () => allMeetings.filter(m =>
-  !activeTag || m.kind === activeTag || (m.tags || []).includes(activeTag));
-
-// 從首頁或跨會議搜尋跳過來的會議，可能不在目前這一頁，甚至被標籤篩掉了。
+// 從首頁或跨會議搜尋跳過來的會議，可能不在目前這一頁。
 // 展開之前先把畫面帶到它所在的位置，不然點了會像沒反應。
 function focusMeetingPage(id) {
-  if (!allMeetings.some(m => m.id === id)) return;
-  if (!filteredMeetings().some(m => m.id === id)) activeTag = "";
-  const at = filteredMeetings().findIndex(m => m.id === id);
+  const at = allMeetings.findIndex(m => m.id === id);
   if (at >= 0) pageNo.meetings = Math.floor(at / PAGE_SIZE.meetings) + 1;
 }
 
 function renderMeetings() {
-  renderTagFilter();
   const p = paginate("meetings", filteredMeetings());
   $("meetingRows").innerHTML = p.items.length
     ? p.items.map(m => `<div class="meeting-item ${m.id === expandedMeetingId ? "expanded" : ""}">
@@ -433,23 +391,18 @@ $("meetingRows").addEventListener("click", async e => {
     const wrap = termBtn.closest(".term-tool");
     const from = wrap.querySelector(".term-from").value.trim();
     const to = wrap.querySelector(".term-to").value;  // 不 trim：允許留空＝把該詞刪掉
-    const start = wrap.querySelector(".term-start").value.trim();
-    const end = wrap.querySelector(".term-end").value.trim();
-    const addGlos = wrap.querySelector(".term-glos input").checked;
     if (!from) { showError("請先輸入要替換的原詞"); return; }
     if (from === to.trim()) { showError("原詞與新詞相同，無需替換"); return; }
-    const rangeNote = (start || end) ? `（時間段 ${start || "開頭"}–${end || "結尾"}）` : "";
     termBtn.disabled = true; termBtn.textContent = "替換中…";
     try {
-      const r = await api.replaceTerm(id, { old: from, new: to, add_to_glossary: addGlos, start: start || null, end: end || null });
+      const r = await api.replaceTerm(id, { old: from, new: to, add_to_glossary: false });
       if (r.replaced === 0) {
-        showNotice(`${rangeNote ? "指定時間段裡" : "逐字稿裡"}找不到「${from}」，沒有任何替換。`);
+        showNotice(`逐字稿裡找不到「${from}」，沒有任何替換。`);
         termBtn.disabled = false; termBtn.textContent = "替換";
         return;
       }
       meetingDetailCache[id] = r.meeting;
-      showNotice(`已把「${from}」替換成「${to || "（刪除）"}」共 ${r.replaced} 處${rangeNote}` +
-        (r.glossary_added ? "，並已加入詞彙表" : "") + "。");
+      showNotice(`已把「${from}」替換成「${to || "（刪除）"}」共 ${r.replaced} 處。`);
       renderMeetings();
     } catch (err) {
       showError("詞彙替換失敗：" + err.message);
@@ -479,16 +432,6 @@ $("meetingRows").addEventListener("click", async e => {
 refreshTasks();
 refreshMeetings();
 
-// 標籤篩選
-$("tagFilter").addEventListener("click", e => {
-  if (e.target.closest("[data-more]")) { tagsExpanded = !tagsExpanded; renderTagFilter(); return; }
-  const chip = e.target.closest(".tag-chip");
-  if (!chip) return;
-  activeTag = chip.dataset.tag;
-  pageNo.meetings = 1;  // 換標籤等於換一份清單，從第一頁看起
-  renderMeetings();
-});
-
 registerRefresher("meetings", refreshMeetings);
 registerPager("meetings", renderMeetings);  // 讓 core 的翻頁按鈕知道要重繪誰
 
@@ -498,10 +441,8 @@ window.addEventListener("workspacechange", () => {
   allMeetings = [];
   expandedMeetingId = null;
   detailEditing = false;
-  activeTag = "";
-  tagsExpanded = false;
   pageNo.meetings = 1;
   refreshMeetings();
 });
 
-export { TAG_FILTER_LIMIT, activeTag, allMeetings, askSpeakerName, detailEditing, detectSpeakers, expandedMeetingId, filteredMeetings, focusMeetingPage, meetingDetailCache, meetingDetailHtml, meetingLabel, meetingShareText, meetingsLoaded, openMeetingDetail, refreshMeetings, renameSpeaker, renderMeetings, renderTagFilter, tagsExpanded };
+export { allMeetings, askSpeakerName, detailEditing, detectSpeakers, expandedMeetingId, filteredMeetings, focusMeetingPage, meetingDetailCache, meetingDetailHtml, meetingLabel, meetingShareText, meetingsLoaded, openMeetingDetail, refreshMeetings, renameSpeaker, renderMeetings };

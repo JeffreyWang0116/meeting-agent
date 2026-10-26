@@ -33,9 +33,6 @@ import { refreshTasks } from "./tasks.js";
 async function refreshQuota() {
   try {
     const q = await api.quota();
-    const b = q.buckets.media;
-    $("uploadQuota").textContent = q.enabled && b?.per_day
-      ? `今天還能上傳 ${Math.max(0, b.per_day - b.used)} 次` : "";
     if (!q.enabled) {
       $("quotaList").innerHTML = `<p class="empty-note">這個伺服器沒有啟用額度限制</p>`;
       return;

@@ -170,7 +170,6 @@
         <div class="home-hero">
           <div class="hero-copy">
             <h2>今天要處理哪一場會議？</h2>
-            <p class="hint">貼上文字、上傳錄音，或直接開始即時聆聽，AI 會產出摘要、決議與待辦。</p>
           </div>
           <button class="primary" data-view="new">
             <svg class="i" aria-hidden="true"><use href="/static/icons.svg#plus"/></svg>
@@ -268,12 +267,9 @@
           <div class="field">
             <label class="lbl" for="meetingTerms">
               本次專用詞彙
-              <span class="lbl-aux">本場會議會出現的專案代號、人名、產品名，用頓號或逗號分隔</span>
+              <span class="lbl-aux">本場會議會出現的人名、代號、產品名等…，用頓號分隔</span>
             </label>
-            <input type="text" id="meetingTerms" placeholder="例：TaskHub、王霖翔、Kessel 專案">
-            <label class="chk" title="勾選後這些詞會同時存進設定裡的全域詞彙表，之後每場會議都適用">
-              <input type="checkbox" id="termsToGlossary"> 一併加入全域詞彙表
-            </label>
+            <input type="text" id="meetingTerms" placeholder="人名、代號、產品名…">
           </div>
 
           <!-- 每個種類都有自己的預設區塊，所以這列一律顯示，讓使用者可以自己調 -->
@@ -320,7 +316,6 @@
                 <svg class="i" aria-hidden="true"><use href="/static/icons.svg#upload"/></svg>
                 上傳並轉錄
               </button>
-              <span class="quota-hint" id="uploadQuota"></span>
             </div>
             <div class="progress" id="fileProgress" style="display:none"><div></div></div>
             <div class="status-line" id="fileStatus"></div>
@@ -341,10 +336,10 @@
               <div class="field">
                 <label class="lbl" for="liveChunk">逐字稿更新頻率</label>
                 <select class="field-sel" id="liveChunk" title="多久把一段錄音送去轉成文字。越短看到字越快，但同樣長度的會議要打更多次 AI 請求">
-                  <option value="20">每 20 秒（最快，一小時約 180 次請求）</option>
-                  <option value="30">每 30 秒（一小時約 120 次請求）</option>
-                  <option value="45" selected>每 45 秒（預設，一小時約 80 次請求）</option>
-                  <option value="60">每 60 秒（最省，一小時約 60 次請求）</option>
+                  <option value="20">每 20 秒</option>
+                  <option value="30">每 30 秒</option>
+                  <option value="45" selected>每 45 秒</option>
+                  <option value="60">每 60 秒</option>
                 </select>
               </div>
             </div>
@@ -451,7 +446,7 @@
             <div class="meta-chips" id="rMeta"></div>
             <!-- 講者一律標代號（系統不猜姓名），由使用者在這裡自己換成真名 -->
             <div class="speaker-rename" id="rSpeakers" hidden>
-              <span class="hint">講者（點擊改名，逐字稿與出席者跟著更新）</span>
+              <span class="hint">講者</span>
               <div class="speaker-chips" id="rSpeakerChips"></div>
             </div>
           </div>
@@ -499,7 +494,6 @@
               <h3 class="sub">
                 <svg class="i-sm" aria-hidden="true"><use href="/static/icons.svg#circle-help"/></svg>
                 待確認事項
-                <span class="aux">議而未決，留待下次會議</span>
               </h3>
               <div class="pending-list" id="rPending"></div>
 
@@ -520,10 +514,6 @@
                   <button class="ghost" id="btnGmailDraft" title="開啟 Gmail 撰寫視窗，主旨與內文都已填好，收件人自己選">
                     <svg class="i-sm" aria-hidden="true"><use href="/static/icons.svg#send"/></svg>
                     Gmail
-                  </button>
-                  <button class="ghost" id="btnMailtoDraft" title="用這台裝置預設的郵件軟體開啟">
-                    <svg class="i-sm" aria-hidden="true"><use href="/static/icons.svg#external-link"/></svg>
-                    預設信箱
                   </button>
                   <button class="ghost" id="btnCopyDraft">
                     <svg class="i-sm" aria-hidden="true"><use href="/static/icons.svg#copy"/></svg>
@@ -640,10 +630,6 @@
                 <option value="doing">進行中</option>
                 <option value="done">完成</option>
               </select>
-              <a class="ghost btn-link" href="/api/export/tasks.csv" download>
-                <svg class="i-sm" aria-hidden="true"><use href="/static/icons.svg#download"/></svg>
-                匯出 CSV
-              </a>
               <button class="ghost" id="btnRefreshTasks">
                 <svg class="i-sm" aria-hidden="true"><use href="/static/icons.svg#refresh-cw"/></svg>
                 重新整理
@@ -682,7 +668,6 @@
               歷史會議
             </h2>
           </div>
-          <div class="tag-filter" id="tagFilter" style="display:none"></div>
           <div id="meetingRows">
             <div class="skel-list">
               <div class="skel-block"><span class="skel" style="width:58%"></span><span class="skel" style="width:32%"></span></div>
