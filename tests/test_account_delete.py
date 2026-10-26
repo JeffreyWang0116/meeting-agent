@@ -67,6 +67,7 @@ def test_also_deletes_templates_feedback_and_job_records(tmp_path):
     client.post("/api/feedback", json={
         "meeting_id": mid, "target": "todo", "reason": "other", "note": "私人說明"}, headers=h("amy"))
     client.store.save_job({"id": "j1", "user": "uid-amy", "transcript": "逐字稿"})
+    client.store.save_push_subscription({"id": "p1", "user": "uid-amy", "endpoint": "https://x/1"})
     client.post("/api/templates", json={"name": "bob 的範本"}, headers=h("bob"))
 
     assert client.delete("/api/account", headers=h("amy")).status_code == 200
@@ -74,6 +75,8 @@ def test_also_deletes_templates_feedback_and_job_records(tmp_path):
     assert client.store.list_templates("uid-amy") == []
     assert client.store.list_feedback("uid-amy") == []
     assert client.store.list_jobs("uid-amy") == []
+    # 不刪的話那支手機每天還是會收到提醒，而資料已經不在了
+    assert client.store.list_push_subscriptions("uid-amy") == []
     assert len(client.store.list_templates("uid-bob")) == 1  # 別人的不受影響
 
 
@@ -84,12 +87,14 @@ def test_guest_wipe_also_deletes_templates_feedback_and_job_records(tmp_path):
     store.save_template({"id": "t1", "user": "guest", "name": "x", "sections": []})
     store.save_feedback({"id": "f1", "user": "guest", "note": "x"})
     store.save_job({"id": "j1", "user": "guest", "transcript": "x"})
+    store.save_push_subscription({"id": "p1", "user": "guest", "endpoint": "https://x/1"})
 
     purge_scope(store, "guest")
 
     assert store.list_templates("guest") == []
     assert store.list_feedback("guest") == []
     assert store.list_jobs("guest") == []
+    assert store.list_push_subscriptions("guest") == []
 
 
 def test_leaves_groups_and_declines_invites_but_keeps_group_data(tmp_path):

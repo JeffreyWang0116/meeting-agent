@@ -8,6 +8,7 @@
 import { api } from "./api.js";
 import { $, showError } from "./core.js";
 import { blockedReason, urlBase64ToUint8Array } from "./push.js";
+import { localDailyEnabled, maybeNotifyReminders, setLocalDaily } from "./reminders.js";
 
 const isIOS = () =>
   /iPad|iPhone|iPod/.test(navigator.userAgent)
@@ -61,29 +62,49 @@ function payload(sub) {
   };
 }
 
+async function isOn() {
+  return !!(await currentSub()) || localDailyEnabled();
+}
+
 async function render() {
-  const btn = $("btnNotifyToggle");
   const sub = await currentSub();
-  btn.textContent = sub ? "已開啟" : "開啟";
+  $("btnNotifyToggle").textContent = (sub || localDailyEnabled()) ? "已開啟" : "開啟";
   $("btnNotifyTest").hidden = !sub;
-  if (sub) setHint("每天早上 9 點，有逾期或即將到期的待辦時會通知你。");
+  if (sub) setHint("每天早上 9 點，有逾期或即將到期的待辦時會通知你。App 關著也收得到。");
+}
+
+async function askPermission() {
+  // 權限要在點擊的同一拍問，前面不能有 await（iOS 會直接忽略）
+  const perm = await Notification.requestPermission();
+  if (perm === "granted") return true;
+  setHint("瀏覽器沒有允許通知。請到這個網站的設定裡把通知打開，再回來開啟一次。");
+  return false;
+}
+
+// 站台沒設定 VAPID 金鑰時的退路：這個瀏覽器自己跳，但只有 App 開著時才會發生
+async function enableLocalOnly() {
+  if (!("Notification" in window)) { setHint("這個瀏覽器不支援通知。"); return; }
+  if (!await askPermission()) return;
+  setLocalDaily(true);
+  if (await maybeNotifyReminders(true)) {
+    setHint("這個站台沒有設定推播，只能在 App 開著的時候提醒你。");
+  } else {
+    setLocalDaily(false);
+    setHint("這個瀏覽器發不出通知，每日提醒不會出現。");
+  }
 }
 
 async function enable() {
+  if (serverEnabled === false) { await enableLocalOnly(); return; }
+
   const reason = blockedReason({
-    supported: supported(), ios: isIOS(), standalone: isStandalone(),
-    serverEnabled: serverEnabled !== false,
+    supported: supported(), ios: isIOS(), standalone: isStandalone(), serverEnabled: true,
   });
   if (reason) { setHint(reason); return; }
+  if (!await askPermission()) return;
 
-  // 權限要在點擊的同一拍問，前面不能有 await（iOS 會直接忽略）
-  const perm = await Notification.requestPermission();
-  if (perm !== "granted") {
-    setHint("瀏覽器沒有允許通知。請到這個網站的設定裡把通知打開，再回來開啟一次。");
-    return;
-  }
   if (!serverKey) await loadKey();
-  if (!serverKey) { setHint("這個站台還沒有設定推播金鑰，暫時無法開啟通知。"); return; }
+  if (!serverKey) { await enableLocalOnly(); return; }
 
   const reg = await registration();
   const sub = await reg.pushManager.subscribe({
@@ -91,15 +112,18 @@ async function enable() {
     applicationServerKey: urlBase64ToUint8Array(serverKey),
   });
   await api.pushSubscribe(payload(sub));
-  setHint("已開啟。每天早上 9 點，有逾期或即將到期的待辦時會通知你。");
+  setLocalDaily(false);  // 伺服器會送了，兩邊都送只是同一件事講兩次
+  setHint("已開啟。每天早上 9 點，有逾期或即將到期的待辦時會通知你。App 關著也收得到。");
 }
 
 async function disable() {
+  setLocalDaily(false);
   const sub = await currentSub();
-  if (!sub) return;
-  // 先告訴伺服器再退訂：反過來的話退訂成功但伺服器失敗，就會留一筆死訂閱
-  await api.pushUnsubscribe({ endpoint: sub.endpoint });
-  await sub.unsubscribe();
+  if (sub) {
+    // 先告訴伺服器再退訂：反過來的話退訂成功但伺服器失敗，就會留一筆死訂閱
+    await api.pushUnsubscribe({ endpoint: sub.endpoint });
+    await sub.unsubscribe();
+  }
   setHint("已關閉。");
 }
 
@@ -107,7 +131,7 @@ $("btnNotifyToggle").addEventListener("click", async () => {
   const btn = $("btnNotifyToggle");
   btn.disabled = true;
   try {
-    if (await currentSub()) await disable();
+    if (await isOn()) await disable();
     else await enable();
   } catch (e) {
     showError(`通知設定失敗：${e.message}`);
@@ -141,4 +165,4 @@ window.addEventListener("workspacechange", async () => {
 
 loadKey().then(render);
 
-export { currentSub, isIOS, isStandalone, render, supported };
+export { currentSub, isIOS, isOn, isStandalone, render, supported };

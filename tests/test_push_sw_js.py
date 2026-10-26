@@ -27,6 +27,7 @@ const focused = [];
 const self = {
   addEventListener: (type, handler) => { listeners[type] = handler; },
   skipWaiting: () => {},
+  location: { origin: "https://meeting.example" },
   clients: {
     claim: () => {},
     matchAll: async () => WINDOWS,
@@ -91,9 +92,10 @@ def test_notifications_replace_each_other_instead_of_piling_up():
 
 
 def test_clicking_focuses_a_window_that_is_already_open():
+    """每點一次就開一個新分頁的話，桌面很快會躺著十個一樣的頁面。"""
     out = run("""
 let focusedOne = false;
-WINDOWS.push({ url: "https://x/", focus: () => { focusedOne = true; } });
+WINDOWS.push({ url: "https://meeting.example/", focus: () => { focusedOne = true; } });
 await listeners.notificationclick({
   notification: { close: () => {}, data: { url: "/" } },
   waitUntil: p => p,
@@ -107,6 +109,18 @@ focused.push(focusedOne);
 
 def test_clicking_opens_the_app_when_nothing_is_open():
     out = run("""
+await listeners.notificationclick({
+  notification: { close: () => {}, data: { url: "/" } },
+  waitUntil: p => p,
+});
+""")
+
+    assert out["opened"] == ["/"]
+
+
+def test_a_window_from_another_site_is_not_mistaken_for_ours():
+    out = run("""
+WINDOWS.push({ url: "https://somewhere.else/", focus: () => {} });
 await listeners.notificationclick({
   notification: { close: () => {}, data: { url: "/" } },
   waitUntil: p => p,

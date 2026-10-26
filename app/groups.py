@@ -177,6 +177,8 @@ def purge_scope(store, scope: str, on_scope_deleted=None) -> int:
         store.delete_feedback(item["id"], scope)
     for job in store.list_jobs(scope):  # 含轉錄到一半的逐字稿
         store.delete_job(job["id"])
+    for sub in store.list_push_subscriptions(scope):  # 不刪的話手機每天還是會響
+        store.delete_push_subscription(sub["id"])
     if on_scope_deleted:
         on_scope_deleted(scope)
     return len(meetings)

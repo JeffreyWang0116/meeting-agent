@@ -9,9 +9,6 @@ from datetime import datetime, timezone
 from fastapi.testclient import TestClient
 
 from app.agents.decision_agent import DecisionAgent
-from app.agents.executor_agent import ExecutorAgent
-from app.agents.notifier_agent import NotifierAgent
-from app.agents.parser_agent import ParserAgent
 from app.config import Settings
 from app.main import create_app
 from app.orchestrator import Orchestrator
@@ -42,10 +39,8 @@ class FakeSender:
 def make(tmp_path, *, sender=None, now=None, keys=True):
     store = LocalJsonStore(tmp_path / "db.json")
     orchestrator = Orchestrator(
-        parser=ParserAgent(),
         decision=DecisionAgent(generate=lambda p: valid_json()),
-        executor=ExecutorAgent(store),
-        notifier=NotifierAgent(tmp_path / "notifications"),
+        store=store,
     )
     settings = Settings(
         gemini_api_key=None, data_dir=tmp_path,
