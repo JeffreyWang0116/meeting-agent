@@ -145,6 +145,19 @@ class Settings:
     # 「我知道，就是要開一個沒有門的公開站」。預設 False：忘記設定與刻意不設定，
     # 後果差太多，不該共用同一個沉默的預設值
     allow_no_auth: bool = False
+    # 手機推播（Web Push / VAPID）。公鑰給前端訂閱用，私鑰簽署送出的請求。
+    # 三個都有值才算啟用——缺一個就簽不出合法的請求，不如明說功能是關的。
+    # 產生金鑰：python -m app.push keygen
+    vapid_public_key: str | None = None
+    vapid_private_key: str | None = None
+    vapid_subject: str | None = None  # mailto:you@example.com，推播服務要求的聯絡方式
+    # /api/push/run 的通關密語。那支端點沒有登入者（GitHub Actions 打進來的），
+    # 靠這個把關；沒設＝排程端點直接關閉，不開一個誰都能觸發的入口
+    push_cron_secret: str | None = None
+
+    @property
+    def push_enabled(self) -> bool:
+        return bool(self.vapid_public_key and self.vapid_private_key and self.vapid_subject)
 
     @property
     def auth_enabled(self) -> bool:
@@ -230,6 +243,10 @@ def get_settings() -> Settings:
         is_public_deploy=bool(os.environ.get("RENDER")),
         allow_no_auth=os.environ.get("ALLOW_NO_AUTH", "").strip().lower()
         in {"1", "true", "yes"},
+        vapid_public_key=os.environ.get("VAPID_PUBLIC_KEY") or None,
+        vapid_private_key=os.environ.get("VAPID_PRIVATE_KEY") or None,
+        vapid_subject=os.environ.get("VAPID_SUBJECT") or None,
+        push_cron_secret=os.environ.get("PUSH_CRON_SECRET") or None,
         rate_limit_enabled=(
             os.environ["RATE_LIMIT_ENABLED"].strip().lower() in {"1", "true", "yes"}
             if os.environ.get("RATE_LIMIT_ENABLED", "").strip()
