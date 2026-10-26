@@ -67,12 +67,14 @@ function renderAvatar(user) {
     initial.textContent = guest ? "訪" : label.trim().charAt(0).toUpperCase();
   }
   $("avatarBtn").title = label;
-  $("avatarMenu").innerHTML = guest
-    ? `<div class="avatar-who"><b>訪客</b><span>資料會在離開訪客時刪除</span></div>
-       <button class="ws-item" data-act="to-google">改用 Google 登入（訪客資料會刪除）</button>
+  // 只重寫這兩塊：中間的工作區那一列是 groups.js 管的，整個 innerHTML 蓋掉會把它連同事件一起弄丟
+  $("avatarWho").innerHTML = guest
+    ? `<div class="avatar-who"><b>訪客</b><span>資料會在離開訪客時刪除</span></div>`
+    : `<div class="avatar-who"><b>${esc(user.displayName || "")}</b><span>${esc(user.email || "")}</span></div>`;
+  $("avatarActions").innerHTML = guest
+    ? `<button class="ws-item" data-act="to-google">改用 Google 登入（訪客資料會刪除）</button>
        <button class="ws-item danger" data-act="leave-guest">離開訪客並刪除資料</button>`
-    : `<div class="avatar-who"><b>${esc(user.displayName || "")}</b><span>${esc(user.email || "")}</span></div>
-       <button class="ws-item" data-act="switch">切換帳號</button>
+    : `<button class="ws-item" data-act="switch">切換帳號</button>
        <button class="ws-item" data-act="sign-out">登出</button>
        <button class="ws-item danger" data-act="delete-account">刪除帳號與所有資料</button>`;
   $("avatarWrap").hidden = false;

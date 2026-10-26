@@ -89,18 +89,29 @@
 
   <main class="main">
     <header class="topbar">
-      <h1 id="viewTitle">首頁</h1>
-      <!-- 手機版側欄變成底部分頁列、看不到工作區切換，改由這顆打開同一個選單 -->
-      <button class="ghost ws-chip" id="wsChip" hidden aria-haspopup="true"></button>
-      <div class="head-tools">
-        <!-- 帳號頭像：切換帳號、登出（訪客：改用 Google 登入、離開訪客）。只在開了登入時出現 -->
-        <div class="avatar-wrap" id="avatarWrap" hidden>
-          <button class="avatar" id="avatarBtn" aria-haspopup="true" aria-expanded="false" aria-label="帳號">
-            <img id="avatarImg" alt="" referrerpolicy="no-referrer" hidden>
-            <span id="avatarInitial"></span>
-          </button>
-          <div class="avatar-menu" id="avatarMenu" hidden></div>
+      <!-- 目前分頁的名稱不顯示（左上角留給頭像），但留著給螢幕閱讀器：
+           拿掉的話整頁連一個 h1 都沒有，讀屏使用者就不知道切到哪一頁了 -->
+      <h1 id="viewTitle" class="sr-only">首頁</h1>
+      <!-- 帳號頭像：切換帳號、登出（訪客：改用 Google 登入、離開訪客）。只在開了登入時出現 -->
+      <div class="avatar-wrap" id="avatarWrap" hidden>
+        <button class="avatar" id="avatarBtn" aria-haspopup="true" aria-expanded="false" aria-label="帳號">
+          <img id="avatarImg" alt="" referrerpolicy="no-referrer" hidden>
+          <span id="avatarInitial"></span>
+        </button>
+        <!-- 選單內容由 auth.js 重寫，所以拆成「身分」「工作區」「帳號動作」三塊：
+             中間那塊是靜態的，才不會每次重繪帳號資訊就被蓋掉 -->
+        <div class="avatar-menu" id="avatarMenu" hidden>
+          <div id="avatarWho"></div>
+          <!-- 手機版側欄變成底部分頁列、看不到工作區切換，改放這裡；
+               電腦版用側欄那顆，這一列藏起來（見 style.css 的 #wsChipRow） -->
+          <div id="wsChipRow" hidden>
+            <button class="ws-item" id="wsChip" aria-haspopup="true"></button>
+            <hr class="set-sep">
+          </div>
+          <div id="avatarActions"></div>
         </div>
+      </div>
+      <div class="head-tools">
         <div class="settings-wrap">
           <button class="ghost" id="btnSettings" title="設定" aria-label="設定" aria-expanded="false">
             <svg class="i-sm" aria-hidden="true"><use href="/static/icons.svg#settings"/></svg>

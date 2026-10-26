@@ -33,7 +33,7 @@ async function loadGroups() {
     return;
   }
   $("wsSwitch").hidden = false;
-  $("wsChip").hidden = false;
+  $("wsChipRow").hidden = false;
   renderSwitch();
 }
 
@@ -41,8 +41,9 @@ function renderSwitch() {
   const g = currentGroup();
   const label = g ? g.name : "個人";
   $("wsName").textContent = label;
-  // 只放名稱：角色在下面的選單裡每一列都標著，擠在手機標題旁只會把名稱壓到剩幾個字
-  $("wsChip").innerHTML = `${icon("users", "i-sm")}${esc(label)}`;
+  // 角色不放這裡：工作區選單裡每一列本來就標著，擠進來只會把名稱壓到剩幾個字
+  $("wsChip").innerHTML =
+    `${icon("users", "i-sm")}<span class="ws-item-name">工作區：${esc(label)}</span>`;
   const n = state.invites.length;
   $("wsInviteBadge").hidden = !n;
   $("wsInviteBadge").textContent = n ? String(n) : "";
@@ -96,7 +97,14 @@ function closeMenu() {
 for (const id of ["wsBtn", "wsChip"]) {
   $(id).addEventListener("click", e => {
     e.stopPropagation();
-    if ($("wsMenu").hidden) openMenu($(id)); else closeMenu();
+    // 手機版那顆在頭像選單裡：先把頭像選單收起來，工作區選單才不會疊在它上面，
+    // 並且對齊頭像本身——那一列的位置會隨選單內容長短跑掉
+    const chip = id === "wsChip";
+    if (chip) {
+      $("avatarMenu").hidden = true;
+      $("avatarBtn").setAttribute("aria-expanded", "false");
+    }
+    if ($("wsMenu").hidden) openMenu($(chip ? "avatarBtn" : id)); else closeMenu();
   });
 }
 document.addEventListener("click", e => {
@@ -260,7 +268,7 @@ window.addEventListener("workspacechange", renderSwitch);
 window.addEventListener("accountchange", () => {
   state = { me: null, groups: [], invites: [] };
   $("wsSwitch").hidden = true;
-  $("wsChip").hidden = true;
+  $("wsChipRow").hidden = true;
   closeMenu();
   loadGroups();
 });

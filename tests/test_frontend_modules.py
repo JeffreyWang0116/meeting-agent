@@ -128,3 +128,20 @@ def test_upload_poll_falls_back_to_the_browser_copy_when_the_job_is_lost():
     block = _upload_poll_block(src)
     assert "404" in block, "上傳輪詢沒有分辨 404（工作已遺失）與其他暫時性錯誤"
     assert "api.analyze" in block, "上傳輪詢撞到 404 時沒有改走純文字分析的退路"
+
+
+# ---- 頭像選單的三塊結構 ----
+
+def test_auth_does_not_overwrite_the_whole_avatar_menu(modules):
+    """工作區切換在手機版就放在頭像選單裡，是 index.html 的靜態元素。
+
+    auth.js 每次帳號狀態變動都會重畫選單內容。整個 #avatarMenu 的 innerHTML
+    蓋掉的話，工作區那一列連同 groups.js 綁在上面的事件一起消失——而且是登入後
+    才發生，開發時點得到、使用者點不到。
+    """
+    assert '$("avatarMenu").innerHTML' not in modules["auth.js"]
+    for slot in ('$("avatarWho").innerHTML', '$("avatarActions").innerHTML'):
+        assert slot in modules["auth.js"], f"auth.js 應該只重寫 {slot}"
+    html = (JS_DIR.parent / "index.html").read_text(encoding="utf-8")
+    menu = html[html.index('id="avatarMenu"') : html.index('id="avatarActions"')]
+    assert 'id="wsChip"' in menu, "工作區那一列要在頭像選單裡"
