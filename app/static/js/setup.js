@@ -79,19 +79,6 @@ function meetingTerms() {
     .map(term => ({ term, note: "" }));
 }
 
-// 勾了「一併加入全域詞彙表」就把本次的詞補進去。失敗只是少了個方便功能，
-// 不該讓已經跑完的分析看起來像出錯，所以靜靜略過
-async function maybePromoteTerms() {
-  const terms = meetingTerms();
-  if (!$("termsToGlossary").checked || !terms.length) return;
-  try {
-    const existing = (await api.glossary()).terms;
-    const known = new Set(existing.map(t => t.term));
-    const merged = existing.concat(terms.filter(t => !known.has(t.term)));
-    if (merged.length === existing.length) return;
-    await api.saveGlossary({ terms: merged });
-  } catch (e) { /* 加不進去不影響這次分析 */ }
-}
 
 // AI 校正錯字：與錄音種類無關（任何逐字稿都可能有同音錯字），
 // 所以不跟著 selectedFeatures 的「非會議就回 null」規則走。預設關閉，記住選擇。
@@ -263,4 +250,4 @@ async function loadHealth() {
 }
 loadHealth();
 
-export { FEATURE_BOX, LOOPBACK_RE, PLATFORM, applyKindDefaults, chunkSeconds, correctTypos, enrollMaxSpeakers, featuresTouched, kindDefaults, kindHints, loadHealth, loadKinds, maybePromoteTerms, meetingTerms, micConstraints, micDeviceId, populateMicDevices, populateSysSources, selectedFeatures, sysSourceValue, wantSystemAudio };
+export { FEATURE_BOX, LOOPBACK_RE, PLATFORM, applyKindDefaults, chunkSeconds, correctTypos, enrollMaxSpeakers, featuresTouched, kindDefaults, kindHints, loadHealth, loadKinds, meetingTerms, micConstraints, micDeviceId, populateMicDevices, populateSysSources, selectedFeatures, sysSourceValue, wantSystemAudio };

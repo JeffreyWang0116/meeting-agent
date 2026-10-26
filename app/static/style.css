@@ -763,23 +763,46 @@
     .ws-switch { display: none; }
     button.ghost.ws-chip:not([hidden]) { display: inline-flex; align-items: center; gap: 6px; max-width: 46vw; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
     .side-nav { flex: 1; flex-direction: row; justify-content: space-around; gap: 0; }
+    /* 分頁列是手機上唯一的導覽，點不準就什麼都做不了。
+       Apple 的建議是 44pt，這裡給到 52px 高（含上下 padding） */
     .nav-item {
-      position: relative; flex-direction: column; gap: 3px; align-items: center;
-      padding: 7px 4px; font-size: .66rem; text-align: center;
+      position: relative; flex-direction: column; gap: 4px; align-items: center;
+      padding: 9px 4px; font-size: .72rem; text-align: center; min-height: 52px;
+      justify-content: center; border-radius: var(--radius-sm);
     }
-    .nav-item .i { width: 19px; height: 19px; }
+    .nav-item .i { width: 23px; height: 23px; }
     .nav-text { flex: none; }
-    .nav-badge { position: absolute; top: 2px; left: 50%; margin-left: 5px; min-width: 16px; font-size: .6rem; padding: 0 5px; }
-    .wrap { padding: 22px 16px 96px; }
+    .nav-badge { position: absolute; top: 3px; left: 50%; margin-left: 7px; min-width: 17px; font-size: .62rem; padding: 0 5px; }
+    .wrap { padding: 22px 16px 104px; }
     .topbar { padding: 13px 16px; }
   }
 
   /* ---- 手機響應式 ---- */
   @media (max-width: 640px) {
     body { font-size: 14.5px; }
-    .wrap { padding: 18px 12px 92px; gap: 16px; }
+    .wrap { padding: 18px 12px 100px; gap: 16px; }
     .panel { padding: 16px; border-radius: var(--radius-md); }
-    .topbar h1 { font-size: 1.2rem; }
+
+    /* 頂列：標題、工作區、頭像、設定四個東西擠在一行。
+       加到主畫面時頁面會頂到瀏海底下，所以上緣要讓開狀態列（env 在一般分頁是 0） */
+    .topbar {
+      gap: 8px; padding: 10px 14px;
+      padding-top: calc(10px + env(safe-area-inset-top));
+    }
+    .topbar h1 {
+      font-size: 1.1rem; min-width: 0; flex: 0 1 auto;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .head-tools { gap: 8px; flex: none; }
+    /* 工作區名稱可長可短，讓它先被壓縮，不要去擠掉右邊的頭像與設定 */
+    button.ghost.ws-chip:not([hidden]) { max-width: 34vw; font-size: .76rem; padding: 6px 10px; }
+    .avatar { width: 32px; height: 32px; }
+    /* 「設定」兩個字在這個寬度只是佔位，留圖示就夠，但點擊區要撐到 40px */
+    #btnSettings {
+      font-size: 0; gap: 0; width: 40px; height: 40px;
+      padding: 0; justify-content: center;
+    }
+    #btnSettings .i-sm { width: 19px; height: 19px; }
     .tabs { align-self: stretch; }
     .tab { flex: 1; justify-content: center; padding: 9px 8px; font-size: .82rem; }
     .panel-actions { width: 100%; }

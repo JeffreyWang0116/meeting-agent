@@ -22,10 +22,11 @@ const PHONE_NOTE = "手機瀏覽器收不到其他 App（Discord、LINE 通話�
 // 勾選「同時收錄耳機／系統音源」時顯示：分享對話框跳出來之前就知道該怎麼選
 function systemAudioGuide(platform) {
   if (platform === "windows") {
-    return "Discord、Teams 等桌面 App：分享時選「整個螢幕」並勾選「同時分享系統音訊」，"
-      + "而且 Discord 的「設定 → 語音與視訊 → 輸出裝置」要設成「Default（預設）」——"
-      + "Chrome 只錄 Windows 預設播放裝置，Discord 輸出到別的耳機就會錄到空白。"
-      + "會議開在瀏覽器分頁的話，選那個分頁並勾選「分享分頁音訊」。";
+    // 「輸出裝置要設成預設」這條照樣要講：Chrome 只錄 Windows 預設播放裝置，
+    // Discord 輸出到別的耳機就會整場錄到空白，而那要等錄完才發現
+    return "桌面 App（Discord、Teams）：分享時選「整個螢幕」並勾選「同時分享系統音訊」，"
+      + "且該 App 的輸出裝置要設成「預設」，否則會錄到空白。"
+      + "會議開在瀏覽器分頁就選那個分頁，勾「分享分頁音訊」。";
   }
   if (platform === "mac") {
     return "macOS 上 Chrome 分享整個螢幕常常沒有系統聲音。Discord 請改用網頁版（discord.com/app），"
@@ -38,10 +39,6 @@ function systemAudioGuide(platform) {
 
 // 沒偵測到「立體聲混音」這類回放裝置時顯示：裝好就能直接錄、免每次分享畫面
 function loopbackSetupHint(platform) {
-  if (platform === "windows") {
-    return "想免每次分享畫面：到「控制台 → 聲音 → 錄製」，在空白處按右鍵勾「顯示已停用的裝置」，"
-      + "啟用「立體聲混音」後重新整理本頁；清單裡沒有這個裝置的話，安裝免費的 VB-CABLE。";
-  }
   if (platform === "mac") {
     return "想免每次分享畫面：安裝免費的 BlackHole，並在「音訊 MIDI 設定」建立包含耳機與 BlackHole 的"
       + "「多重輸出裝置」、設為系統輸出，重新整理本頁後就能在來源選單選 BlackHole。";

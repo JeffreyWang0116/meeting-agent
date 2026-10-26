@@ -4,7 +4,6 @@ import { $, PRIORITY_ZH, esc, icon, showError, showNotice, skelBlocks, skelLine 
 import { askSpeakerName, detectSpeakers, refreshMeetings, renameSpeaker } from "./meetings.js";
 import { refreshReminders } from "./reminders.js";
 import { WIDE, showView } from "./router.js";
-import { maybePromoteTerms } from "./setup.js";
 import { refreshTasks } from "./tasks.js";
 import { jumpToTranscript, renderChat } from "./transcript.js";
 import { bindTranscriptEditor, wireTranscriptEditor } from "./transcriptui.js";
@@ -176,7 +175,6 @@ function renderPending(items) {
 // 升級進詞彙表、不重整各清單，種類用會議自己存的（不是新會議表單上目前選的）
 function renderResult(result, transcript, { kind = null, fromHistory = false } = {}) {
   $("result").classList.remove("is-loading");
-  if (!fromHistory) maybePromoteTerms();
   historyMeetingId = fromHistory ? result.meeting_id : null;
   $("btnBackHistory").hidden = !fromHistory;
   currentResult = result;
@@ -314,7 +312,6 @@ async function openCompose(via) {
 }
 
 $("btnGmailDraft").addEventListener("click", () => openCompose("gmail"));
-$("btnMailtoDraft").addEventListener("click", () => openCompose("mailto"));
 
 // 摘要翻譯（再按一次收起）
 $("btnTransSummary").addEventListener("click", async () => {
