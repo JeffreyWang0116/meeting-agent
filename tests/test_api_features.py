@@ -11,9 +11,6 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.agents.decision_agent import DecisionAgent
-from app.agents.executor_agent import ExecutorAgent
-from app.agents.notifier_agent import NotifierAgent
-from app.agents.parser_agent import ParserAgent
 from app.config import Settings
 from app.main import create_app
 from app.orchestrator import Orchestrator
@@ -36,12 +33,10 @@ def client(tmp_path):
     settings = Settings(gemini_api_key=None, data_dir=tmp_path)
     store = LocalJsonStore(tmp_path / "db.json")
     orchestrator = Orchestrator(
-        parser=ParserAgent(),
         # 假 LLM 永遠回傳「全部欄位都有值」的完整 payload：驗證的重點是
         # features 停用的欄位有沒有被後端強制清空，而不是 prompt 內容本身
         decision=DecisionAgent(generate=lambda prompt: valid_json()),
-        executor=ExecutorAgent(store),
-        notifier=NotifierAgent(tmp_path / "notifications"),
+        store=store,
     )
     app = create_app(
         settings, store=store, orchestrator=orchestrator, transcriber=FakeTranscriber()
@@ -226,10 +221,8 @@ def correcting_client(tmp_path):
     settings = Settings(gemini_api_key=None, data_dir=tmp_path)
     store = LocalJsonStore(tmp_path / "db.json")
     orchestrator = Orchestrator(
-        parser=ParserAgent(),
         decision=DecisionAgent(generate=lambda prompt: valid_json()),
-        executor=ExecutorAgent(store),
-        notifier=NotifierAgent(tmp_path / "notifications"),
+        store=store,
         corrector=CorrectorAgent(
             generate=lambda prompt: '{"corrections": [{"wrong": "涵式", "right": "函式"}]}'
         ),

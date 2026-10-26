@@ -1,6 +1,7 @@
 """Notifier Agent：時程同步與通知模組。
 
-產生「會議結論確認信草稿」與「行事曆事件 JSON」並存到本地。
+產生「會議結論確認信草稿」與「行事曆事件 JSON」，跟著分析結果回給前端；
+不另外寫檔，歷史會議要看時從資料庫重產（notifications_from_record）。
 
 calendar_events 的格式就是 Google Calendar API events.insert 的請求主體，
 前端（static/js/calendar.js）拿著使用者授權的 token 逐筆送出。信件那邊還是
@@ -10,9 +11,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
-import json
 from datetime import timedelta
-from pathlib import Path
 
 from app.models import MeetingAnalysis
 
@@ -115,15 +114,19 @@ def email_draft_from_record(record: dict, tasks: list[dict]) -> str:
     return build_email_draft(analysis_from_record(record, tasks))
 
 
-def notifications_from_record(record: dict, tasks: list[dict]) -> dict:
-    """與 NotifierAgent.notify 回傳同一個形狀，但不寫檔。事件 id 只看會議與任務名稱，
-    任務沒改名就與分析當下相同，「先前已加過」的判斷照樣有效。"""
-    analysis = analysis_from_record(record, tasks)
+def build_notifications(analysis: MeetingAnalysis, meeting_id: str) -> dict:
+    """這份 dict 會原封不動放進 /api/meetings 的回應。"""
     return {
         "email_draft": build_email_draft(analysis),
         "email_subject": build_email_subject(analysis),
-        "calendar_events": build_calendar_events(analysis, record["id"]),
+        "calendar_events": build_calendar_events(analysis, meeting_id),
     }
+
+
+def notifications_from_record(record: dict, tasks: list[dict]) -> dict:
+    """歷史會議用：從資料庫組回分析結果再產生。事件 id 只看會議與任務名稱，
+    任務沒改名就與分析當下相同，「先前已加過」的判斷照樣有效。"""
+    return build_notifications(analysis_from_record(record, tasks), record["id"])
 
 
 def build_calendar_events(analysis: MeetingAnalysis, meeting_id: str = "") -> list[dict]:
@@ -150,31 +153,3 @@ def build_calendar_events(analysis: MeetingAnalysis, meeting_id: str = "") -> li
             }
         )
     return events
-
-
-class NotifierAgent:
-    def __init__(self, output_dir: Path | str):
-        self.output_dir = Path(output_dir)
-
-    def notify(self, meeting_id: str, analysis: MeetingAnalysis) -> dict:
-        target = self.output_dir / meeting_id
-        target.mkdir(parents=True, exist_ok=True)
-
-        email_draft = build_email_draft(analysis)
-        events = build_calendar_events(analysis, meeting_id)
-
-        email_path = target / "email_draft.txt"
-        events_path = target / "calendar_events.json"
-        email_path.write_text(email_draft, encoding="utf-8")
-        events_path.write_text(
-            json.dumps(events, ensure_ascii=False, indent=2), encoding="utf-8"
-        )
-
-        # 這份 dict 會原封不動變成 /api/meetings 的回應。檔案照寫（data/output 下
-        # 仍留一份），但路徑不回傳：前端拿到的是內容本身、用不到路徑，而公開部署
-        # 等於把容器內的目錄結構印給每個看得到回應的人
-        return {
-            "email_draft": email_draft,
-            "email_subject": build_email_subject(analysis),
-            "calendar_events": events,
-        }

@@ -40,20 +40,20 @@
 ```
 ① 文字貼上 ─────────────────────────────────┐
 ② 音檔/影片上傳                                │
-   影片 → ffmpeg 抽音軌 →                      ├→ Parser Agent（正規化）
+   影片 → ffmpeg 抽音軌 →                      ├→ 正規化（換行、零寬字元、空行）
    faster-whisper 轉錄（GPU，進度即時回報）      │   → Corrector Agent（校正錯字，選用）
 ③ 即時聆聽                                     │   → Decision Agent（Gemini → 結構化 JSON）
-   瀏覽器錄音，每 45 秒一段即時轉逐字稿 ─────────┘   → Executor Agent（寫入任務庫）
-                                                   → Notifier Agent（確認信草稿＋行事曆事件）
+   瀏覽器錄音，每 45 秒一段即時轉逐字稿 ─────────┘   → 存進任務庫（store）
+                                                   → 確認信草稿＋行事曆事件（跟著回應回傳，不另外寫檔）
 ```
 
 | 模組 | 位置 | 目前實作 | 之後升級 |
 |------|------|----------|----------|
-| 輸入與解析 | `app/agents/parser_agent.py`、`app/transcription/` | 本地 faster-whisper（GPU）或雲端 Gemini 轉錄，可切換 | — |
+| 輸入與解析 | `app/orchestrator.py`、`app/transcription/` | 本地 faster-whisper（GPU）或雲端 Gemini 轉錄，可切換 | — |
 | 錯字校正（選用） | `app/agents/corrector_agent.py` | Gemini 找出同音錯字，回傳修正清單在本地套用 | — |
 | 檢索與決策 | `app/agents/decision_agent.py` | Gemini 產出結構化 JSON | — |
 | 跨會議問答（RAG） | `app/rag.py`、`app/ask_planner.py` | Gemini 解析條件（日期／種類／人名）→ 本地篩會議 → 向量＋關鍵字混合檢索 → 回答並標引用段落；索引與會議／任務同一個 store（本地 JSON 或 Firestore） | — |
-| 資料庫與任務分發 | `app/agents/executor_agent.py`、`app/stores/` | 本地 JSON（`data/output/db.json`）；填 Firebase 金鑰即自動改用 Firestore 雲端持久化 | ✅ Firestore 已接（`FirestoreStore` 實作同一 `TaskStore` 介面） |
+| 資料庫與任務分發 | `app/stores/` | 本地 JSON（`data/output/db.json`）；填 Firebase 金鑰即自動改用 Firestore 雲端持久化 | ✅ Firestore 已接（`FirestoreStore` 實作同一 `TaskStore` 介面） |
 | 時程同步與通知 | `app/agents/notifier_agent.py` | 產生確認信草稿與行事曆事件 | ✅ 已接（Gmail 一鍵開信；開了 Google 登入後可一鍵加入 Google 行事曆）|
 
 ### 轉錄後端可切換
@@ -373,10 +373,7 @@ repo 已附 `Dockerfile`（含 ffmpeg）、`requirements-cloud.txt`（精簡依�
 
 **確認信一鍵開信**：草稿右上角的「Gmail」／「預設信箱」會開啟已填好主旨與內文的撰寫視窗，收件人留空由你自己選（出席者是姓名，對不到 email）。內容太長塞不進網址時會改成複製全文到剪貼簿並提示你貼上——寧可多按一下，也不要寄出被截斷的信。
 
-產出的檔案在 `data/output/`：
-- `db.json` — 任務庫（會議 + 攤平的任務）
-- `notifications/<meeting_id>/email_draft.txt` — 確認信草稿全文
-- `notifications/<meeting_id>/calendar_events.json` — Google Calendar `events.insert` 可直接使用的事件格式
+資料存在 `data/output/db.json`（會議 + 攤平的任務）。確認信與行事曆事件不另外寫檔：分析當下跟著回應回傳，歷史會議要看時從資料庫重產（`GET /api/meetings/{id}/notifications`）；行事曆事件就是 Google Calendar `events.insert` 可直接使用的格式。
 
 ## 量化評估：代辦事項抽取
 
@@ -435,13 +432,11 @@ app/
 ├── main.py               # FastAPI 入口：所有 API 端點、features 解析、API 認證
 ├── config.py             # .env 設定（金鑰、轉錄引擎、儲存後端…）
 ├── models.py             # MeetingAnalysis JSON schema（LLM 產出契約，含 Highlight）
-├── orchestrator.py       # Parser → Decision → Executor → Notifier 串接
+├── orchestrator.py       # 正規化 →（校正）→ Decision → 存檔 → 確認信 串接
 ├── agents/
-│   ├── parser_agent.py       # 輸入清洗（零寬字元、空行）
 │   ├── corrector_agent.py    # 轉錄後錯字校正（選用）：回傳修正清單，本地套用
 │   ├── decision_agent.py     # LLM 分析：摘要/會議重點/決議/代辦 prompt 與重試
-│   ├── executor_agent.py     # 分析結果寫入任務庫
-│   ├── notifier_agent.py     # 確認信草稿 + 行事曆事件
+│   ├── notifier_agent.py     # 確認信草稿 + 行事曆事件（純函式，不寫檔）
 │   └── reminder_agent.py     # 主動提醒（逾期/將到期/未指派掃描）
 ├── transcription/
 │   ├── transcriber.py        # 本地 faster-whisper 轉錄
@@ -476,7 +471,7 @@ requirements-cloud.lock   # 雲端完整鎖定版本（Dockerfile 與 CI 共用�
 ruff.toml                 # lint 規則（CI 跑 ruff check .）
 render.yaml               # Render 一鍵部署藍圖
 data/samples/             # 模擬會議紀錄（中英夾雜、含邊界案例）
-data/output/              # 任務庫與通知產出
+data/output/              # 本地 JSON 資料庫
 ```
 
 ### 前端（app/static/，ES modules、無建置步驟）

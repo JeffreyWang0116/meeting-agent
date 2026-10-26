@@ -13,9 +13,6 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.agents.decision_agent import DecisionAgent
-from app.agents.executor_agent import ExecutorAgent
-from app.agents.notifier_agent import NotifierAgent
-from app.agents.parser_agent import ParserAgent
 from app.auth import AuthError
 from app.config import Settings
 from app.main import create_app
@@ -43,10 +40,8 @@ def make_app(tmp_path, *, auth=True, verify=fake_verify, **extra):
     )
     store = LocalJsonStore(tmp_path / "db.json")
     orchestrator = Orchestrator(
-        parser=ParserAgent(),
         decision=DecisionAgent(generate=lambda p: valid_json()),
-        executor=ExecutorAgent(store),
-        notifier=NotifierAgent(tmp_path / "notifications"),
+        store=store,
     )
     app = create_app(
         settings, store=store, orchestrator=orchestrator, verify_token=verify
@@ -207,10 +202,8 @@ def test_login_without_admin_credentials_fails_loudly(tmp_path):
     )
     store = LocalJsonStore(tmp_path / "db.json")
     orchestrator = Orchestrator(
-        parser=ParserAgent(),
         decision=DecisionAgent(generate=lambda p: valid_json()),
-        executor=ExecutorAgent(store),
-        notifier=NotifierAgent(tmp_path / "notifications"),
+        store=store,
     )
 
     with pytest.raises(RuntimeError, match="FIREBASE_CREDENTIALS"):
@@ -222,10 +215,8 @@ def test_login_without_admin_credentials_fails_loudly(tmp_path):
 def _plain_deps(tmp_path):
     store = LocalJsonStore(tmp_path / "db.json")
     orchestrator = Orchestrator(
-        parser=ParserAgent(),
         decision=DecisionAgent(generate=lambda p: valid_json()),
-        executor=ExecutorAgent(store),
-        notifier=NotifierAgent(tmp_path / "notifications"),
+        store=store,
     )
     return {"store": store, "orchestrator": orchestrator}
 

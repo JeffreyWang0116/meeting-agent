@@ -1,7 +1,7 @@
-"""Orchestrator：把各個 Agent 串成完整 pipeline。
+"""Orchestrator：把分析流程串成完整 pipeline。
 
-文字（貼上 / 轉錄產生）→ Parser →（Corrector）→（預錄姓名）→ Decision
-→ Executor → Notifier。
+文字（貼上 / 轉錄產生）→ 正規化 →（Corrector）→（預錄姓名）→ Decision
+→ 存進 store → 產生確認信與行事曆事件。
 
 Corrector 是選用的：開啟時先修掉語音辨識的同音錯字，後面的分析與存檔
 都吃校正後的版本（存進資料庫的逐字稿也是校正後的）。
@@ -12,30 +12,35 @@ Corrector 是選用的：開啟時先修掉語音辨識的同音錯字，後面�
 """
 from __future__ import annotations
 
+import re
 from datetime import date
 
-from app.stores.base import DEFAULT_USER
+from app.stores.base import DEFAULT_USER, TaskStore
 from app.transcription.speaker_names import apply_speaker_names, is_safe_name
 
 from app.agents.decision_agent import DecisionAgent
-from app.agents.executor_agent import ExecutorAgent
-from app.agents.notifier_agent import NotifierAgent
-from app.agents.parser_agent import ParserAgent
+from app.agents.notifier_agent import build_notifications
+
+_ZERO_WIDTH = re.compile(r"[\u200b\u200c\u200d\ufeff]")
+_EXCESS_BLANK_LINES = re.compile(r"\n{3,}")
+
+
+def normalize_text(raw: str) -> str:
+    """貼上的文字或轉錄稿：統一換行、去掉零寬字元與行尾空白、壓掉多餘空行。"""
+    if not raw or not raw.strip():
+        raise ValueError("輸入內容是空的，請提供會議紀錄文字")
+
+    text = raw.replace("\r\n", "\n").replace("\r", "\n")
+    text = _ZERO_WIDTH.sub("", text)
+    text = "\n".join(line.rstrip() for line in text.split("\n"))
+    text = _EXCESS_BLANK_LINES.sub("\n\n", text)
+    return text.strip()
 
 
 class Orchestrator:
-    def __init__(
-        self,
-        parser: ParserAgent,
-        decision: DecisionAgent,
-        executor: ExecutorAgent,
-        notifier: NotifierAgent,
-        corrector=None,
-    ):
-        self.parser = parser
+    def __init__(self, decision: DecisionAgent, store: TaskStore, corrector=None):
         self.decision = decision
-        self.executor = executor
-        self.notifier = notifier
+        self.store = store
         self.corrector = corrector
 
     def process_transcript(
@@ -55,7 +60,7 @@ class Orchestrator:
         # 自訂會議範本的區塊定義（見 app/templates.py）
         kind_spec: dict | None = None,
     ) -> dict:
-        text = self.parser.parse(raw_text)
+        text = normalize_text(raw_text)
         corrections: list[dict] = []
         if correct_typos and self.corrector:
             text, corrections = self.corrector.correct(text, user)
@@ -76,10 +81,10 @@ class Orchestrator:
             notes=notes,
             kind_spec=kind_spec,
         )
-        meeting_id = self.executor.execute(
+        meeting_id = self.store.save_meeting(
             analysis, transcript=text, kind=kind, terms=terms, user=user
         )
-        notifications = self.notifier.notify(meeting_id, analysis)
+        notifications = build_notifications(analysis, meeting_id)
         return {
             "meeting_id": meeting_id,
             "analysis": analysis.model_dump(mode="json"),

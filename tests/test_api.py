@@ -11,9 +11,6 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.agents.decision_agent import DecisionAgent
-from app.agents.executor_agent import ExecutorAgent
-from app.agents.notifier_agent import NotifierAgent
-from app.agents.parser_agent import ParserAgent
 from app.config import Settings
 from app.main import asset_version, create_app
 from app.orchestrator import Orchestrator
@@ -37,10 +34,8 @@ def client(tmp_path):
     settings = Settings(gemini_api_key=None, data_dir=tmp_path)
     store = LocalJsonStore(tmp_path / "db.json")
     orchestrator = Orchestrator(
-        parser=ParserAgent(),
         decision=DecisionAgent(generate=lambda prompt: valid_json()),
-        executor=ExecutorAgent(store),
-        notifier=NotifierAgent(tmp_path / "notifications"),
+        store=store,
     )
     app = create_app(
         settings, store=store, orchestrator=orchestrator, transcriber=FakeTranscriber()
@@ -838,9 +833,6 @@ def test_pwa_manifest_sw_and_icon_served(client):
 
 def test_unexpected_analysis_failure_returns_clean_502(tmp_path):
     from app.agents.decision_agent import DecisionAgent
-    from app.agents.executor_agent import ExecutorAgent
-    from app.agents.notifier_agent import NotifierAgent
-    from app.agents.parser_agent import ParserAgent
     from app.config import Settings
     from app.orchestrator import Orchestrator
     from app.stores.local_store import LocalJsonStore
@@ -853,10 +845,8 @@ def test_unexpected_analysis_failure_returns_clean_502(tmp_path):
         Settings(gemini_api_key=None, data_dir=tmp_path),
         store=store,
         orchestrator=Orchestrator(
-            parser=ParserAgent(),
             decision=DecisionAgent(generate=boom),
-            executor=ExecutorAgent(store),
-            notifier=NotifierAgent(tmp_path / "n"),
+            store=store,
         ),
     )
     resp = TestClient(app).post("/api/meetings", json={"text": "測試"})
@@ -874,10 +864,8 @@ def tiny_limit_client(tmp_path):
     settings = Settings(gemini_api_key=None, data_dir=tmp_path, max_upload_mb=1)
     store = LocalJsonStore(tmp_path / "db.json")
     orchestrator = Orchestrator(
-        parser=ParserAgent(),
         decision=DecisionAgent(generate=lambda prompt: valid_json()),
-        executor=ExecutorAgent(store),
-        notifier=NotifierAgent(tmp_path / "notifications"),
+        store=store,
     )
     app = create_app(
         settings, store=store, orchestrator=orchestrator, transcriber=FakeTranscriber()
@@ -994,10 +982,8 @@ def _voice_app(tmp_path, transcriber, matcher):
     settings = Settings(gemini_api_key=None, data_dir=tmp_path)
     store = LocalJsonStore(tmp_path / "db.json")
     orchestrator = Orchestrator(
-        parser=ParserAgent(),
         decision=DecisionAgent(generate=lambda prompt: valid_json()),
-        executor=ExecutorAgent(store),
-        notifier=NotifierAgent(tmp_path / "notifications"),
+        store=store,
     )
     return TestClient(create_app(
         settings,
@@ -1096,10 +1082,8 @@ def _live_app(tmp_path, transcriber, matcher=None, on_prompt=None):
         return valid_json()
 
     orchestrator = Orchestrator(
-        parser=ParserAgent(),
         decision=DecisionAgent(generate=generate),
-        executor=ExecutorAgent(store),
-        notifier=NotifierAgent(tmp_path / "notifications"),
+        store=store,
     )
     live_manager = LiveSessionManager(
         transcriber,
@@ -1237,10 +1221,8 @@ def test_media_upload_uses_injected_diarizer(tmp_path):
     settings = Settings(gemini_api_key=None, data_dir=tmp_path)
     store = LocalJsonStore(tmp_path / "db.json")
     orchestrator = Orchestrator(
-        parser=ParserAgent(),
         decision=DecisionAgent(generate=lambda prompt: valid_json()),
-        executor=ExecutorAgent(store),
-        notifier=NotifierAgent(tmp_path / "notifications"),
+        store=store,
     )
     app = create_app(
         settings, store=store, orchestrator=orchestrator,
@@ -1260,10 +1242,8 @@ def _app_with_diarizer(tmp_path, diarizer):
     settings = Settings(gemini_api_key=None, data_dir=tmp_path)
     store = LocalJsonStore(tmp_path / "db.json")
     orchestrator = Orchestrator(
-        parser=ParserAgent(),
         decision=DecisionAgent(generate=lambda prompt: valid_json()),
-        executor=ExecutorAgent(store),
-        notifier=NotifierAgent(tmp_path / "notifications"),
+        store=store,
     )
     app = create_app(
         settings, store=store, orchestrator=orchestrator,
@@ -1372,10 +1352,8 @@ def test_keyword_search_reads_meetings_in_one_pass(tmp_path):
     settings = Settings(gemini_api_key=None, data_dir=tmp_path)
     store = CountingStore(tmp_path / "db.json")
     orchestrator = Orchestrator(
-        parser=ParserAgent(),
         decision=DecisionAgent(generate=lambda prompt: valid_json()),
-        executor=ExecutorAgent(store),
-        notifier=NotifierAgent(tmp_path / "notifications"),
+        store=store,
     )
     client = TestClient(create_app(
         settings, store=store, orchestrator=orchestrator, transcriber=FakeTranscriber()
@@ -1397,10 +1375,8 @@ def _limited_client(tmp_path, limits):
     )
     store = LocalJsonStore(tmp_path / "db.json")
     orchestrator = Orchestrator(
-        parser=ParserAgent(),
         decision=DecisionAgent(generate=lambda prompt: valid_json()),
-        executor=ExecutorAgent(store),
-        notifier=NotifierAgent(tmp_path / "notifications"),
+        store=store,
     )
     return TestClient(create_app(
         settings, store=store, orchestrator=orchestrator, transcriber=FakeTranscriber()

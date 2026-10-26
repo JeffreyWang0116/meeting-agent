@@ -128,9 +128,6 @@ def test_data_created_through_the_api_is_stamped_with_the_user(tmp_path):
     from fastapi.testclient import TestClient
 
     from app.agents.decision_agent import DecisionAgent
-    from app.agents.executor_agent import ExecutorAgent
-    from app.agents.notifier_agent import NotifierAgent
-    from app.agents.parser_agent import ParserAgent
     from app.config import Settings
     from app.main import create_app
     from app.orchestrator import Orchestrator
@@ -141,10 +138,8 @@ def test_data_created_through_the_api_is_stamped_with_the_user(tmp_path):
         Settings(gemini_api_key=None, data_dir=tmp_path),
         store=store,
         orchestrator=Orchestrator(
-            parser=ParserAgent(),
             decision=DecisionAgent(generate=lambda p: valid_json()),
-            executor=ExecutorAgent(store),
-            notifier=NotifierAgent(tmp_path / "notifications"),
+            store=store,
         ),
     )
     client = TestClient(app)

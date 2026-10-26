@@ -8,9 +8,6 @@ from __future__ import annotations
 from fastapi.testclient import TestClient
 
 from app.agents.decision_agent import DecisionAgent
-from app.agents.executor_agent import ExecutorAgent
-from app.agents.notifier_agent import NotifierAgent
-from app.agents.parser_agent import ParserAgent
 from app.config import Settings
 from app.main import create_app
 from app.orchestrator import Orchestrator
@@ -33,10 +30,8 @@ class FakeRefiner:
 def make(tmp_path, refiner=None):
     store = LocalJsonStore(tmp_path / "db.json")
     orchestrator = Orchestrator(
-        parser=ParserAgent(),
         decision=DecisionAgent(generate=lambda p: valid_json()),
-        executor=ExecutorAgent(store),
-        notifier=NotifierAgent(tmp_path / "notifications"),
+        store=store,
     )
     refiner = refiner or FakeRefiner()
     app = create_app(
@@ -141,10 +136,8 @@ def test_refine_is_rate_limited(tmp_path):
     """它會打 Gemini，沒節流就是另一個燒額度的入口。"""
     store = LocalJsonStore(tmp_path / "db.json")
     orchestrator = Orchestrator(
-        parser=ParserAgent(),
         decision=DecisionAgent(generate=lambda p: valid_json()),
-        executor=ExecutorAgent(store),
-        notifier=NotifierAgent(tmp_path / "notifications"),
+        store=store,
     )
     app = create_app(
         Settings(gemini_api_key=None, data_dir=tmp_path,
@@ -162,10 +155,8 @@ def test_applying_is_not_rate_limited(tmp_path):
     """套用不打 AI，不該佔用同一份額度——否則預覽完卻套用不了。"""
     store = LocalJsonStore(tmp_path / "db.json")
     orchestrator = Orchestrator(
-        parser=ParserAgent(),
         decision=DecisionAgent(generate=lambda p: valid_json()),
-        executor=ExecutorAgent(store),
-        notifier=NotifierAgent(tmp_path / "notifications"),
+        store=store,
     )
     app = create_app(
         Settings(gemini_api_key=None, data_dir=tmp_path,

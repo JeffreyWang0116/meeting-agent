@@ -86,18 +86,13 @@ def test_store_saves_transcript_and_strips_from_list(tmp_path):
 
 def test_orchestrator_passes_transcript_to_store(tmp_path):
     from app.agents.decision_agent import DecisionAgent
-    from app.agents.executor_agent import ExecutorAgent
-    from app.agents.notifier_agent import NotifierAgent
-    from app.agents.parser_agent import ParserAgent
     from app.orchestrator import Orchestrator
     from tests.test_decision import valid_json
 
     store = LocalJsonStore(tmp_path / "db.json")
     pipeline = Orchestrator(
-        parser=ParserAgent(),
         decision=DecisionAgent(generate=lambda p: valid_json()),
-        executor=ExecutorAgent(store),
-        notifier=NotifierAgent(tmp_path / "n"),
+        store=store,
     )
     result = pipeline.process_transcript("志明下週一交 prompt")
     assert "志明下週一交 prompt" in store.get_meeting(result["meeting_id"])["transcript"]

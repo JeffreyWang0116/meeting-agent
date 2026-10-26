@@ -31,9 +31,11 @@ from app.agents.decision_agent import (
     DecisionAgentError,
     default_features_for_kind,
 )
-from app.agents.executor_agent import ExecutorAgent
-from app.agents.notifier_agent import NotifierAgent, email_draft_from_record, notifications_from_record
-from app.agents.parser_agent import ParserAgent
+from app.agents.notifier_agent import (
+    build_notifications,
+    email_draft_from_record,
+    notifications_from_record,
+)
 from app.agents.reminder_agent import scan as scan_reminders
 from app import groups as group_svc
 from app.auth import (
@@ -533,7 +535,6 @@ def create_app(
     # 以 callable 注入，轉錄/分析每次都讀到最新內容
     glossary = Glossary(store)
     orchestrator = orchestrator or Orchestrator(
-        parser=ParserAgent(),
         decision=DecisionAgent(
             api_key=settings.gemini_api_key,
             api_keys=settings.gemini_api_keys,
@@ -541,8 +542,7 @@ def create_app(
             model=settings.gemini_model,
             glossary=glossary.terms,
         ),
-        executor=ExecutorAgent(store),
-        notifier=NotifierAgent(settings.data_dir / "output" / "notifications"),
+        store=store,
         corrector=CorrectorAgent(
             api_key=settings.gemini_api_key,
             api_keys=settings.gemini_api_keys,
@@ -1284,7 +1284,7 @@ def create_app(
             updates["transcript"] = transcript
         store.update_meeting(meeting_id, updates, user=current_user())
         tasks = store.replace_tasks(meeting_id, dumped["todos"], user=current_user())
-        notifications = orchestrator.notifier.notify(meeting_id, analysis)
+        notifications = build_notifications(analysis, meeting_id)
         drop_from_rag(meeting_id)
         return {
             "meeting_id": meeting_id,

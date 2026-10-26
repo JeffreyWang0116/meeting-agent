@@ -4,7 +4,9 @@
 翁曉玲詢問王榮璋）模型把講者自己說的「主席好」「謝謝王委員的提問」當成他本人，
 被批評的陳菊也被安成講者。整條已移除：講者一律維持代號，由使用者事後改名。
 """
+from app.models import MeetingAnalysis
 from app.orchestrator import Orchestrator
+from tests.test_models import make_valid_payload
 from app.transcription.speaker_names import apply_speaker_names, is_safe_name
 
 TRANSCRIPT = (
@@ -56,40 +58,23 @@ def test_any_bad_mapping_abandons_the_whole_batch():
 
 # ---- pipeline：只有預錄姓名會自動套用 ----
 
-class _Parser:
-    def parse(self, t):
-        return t
-
-
-class _Analysis:
-    def model_dump(self, mode=None):
-        return {}
-
-
 class _Decision:
     def __init__(self):
         self.text = None
 
     def analyze(self, text, **kw):
         self.text = text
-        return _Analysis()
+        return MeetingAnalysis.model_validate(make_valid_payload())
 
 
-class _Executor:
-    def execute(self, *a, **kw):
+class _Store:
+    def save_meeting(self, *a, **kw):
         return "m1"
-
-
-class _Notifier:
-    def notify(self, *a, **kw):
-        return {}
 
 
 def _pipeline():
     decision = _Decision()
-    return Orchestrator(
-        parser=_Parser(), decision=decision, executor=_Executor(), notifier=_Notifier()
-    ), decision
+    return Orchestrator(decision=decision, store=_Store()), decision
 
 
 def test_speakers_stay_as_codes_without_a_prior():

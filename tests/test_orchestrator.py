@@ -1,10 +1,7 @@
-"""Orchestrator：四個 Agent 的 pipeline 串接測試。"""
+"""Orchestrator：正規化 → 分析 → 存檔 → 確認信的 pipeline 串接測試。"""
 import pytest
 
 from app.agents.decision_agent import DecisionAgent
-from app.agents.executor_agent import ExecutorAgent
-from app.agents.notifier_agent import NotifierAgent
-from app.agents.parser_agent import ParserAgent
 from app.orchestrator import Orchestrator
 from app.stores.local_store import LocalJsonStore
 from tests.test_decision import valid_json
@@ -15,10 +12,8 @@ def orchestrator(tmp_path):
     store = LocalJsonStore(tmp_path / "db.json")
     return (
         Orchestrator(
-            parser=ParserAgent(),
             decision=DecisionAgent(generate=lambda prompt: valid_json()),
-            executor=ExecutorAgent(store),
-            notifier=NotifierAgent(tmp_path / "notifications"),
+            store=store,
         ),
         store,
     )
@@ -33,6 +28,15 @@ def test_full_pipeline_produces_complete_result(orchestrator):
     assert "email_draft" in result["notifications"]
     assert store.get_meeting(result["meeting_id"]) is not None
     assert len(store.list_tasks(meeting_id=result["meeting_id"])) == 1
+
+
+def test_pipeline_writes_no_files_besides_the_store(tmp_path, orchestrator, monkeypatch):
+    # 確認信與行事曆事件以前另外寫一份到 data/output/notifications，沒有任何地方
+    # 讀它，雲端又是暫時性磁碟。內容只從回應與資料庫重產
+    monkeypatch.chdir(tmp_path)
+    pipeline, _ = orchestrator
+    pipeline.process_transcript("志明：我下週一前把 prompt 寫好")
+    assert sorted(p.name for p in tmp_path.rglob("*") if p.is_file()) == ["db.json"]
 
 
 def test_empty_input_raises_value_error(orchestrator):
@@ -67,10 +71,8 @@ def test_stored_transcript_uses_prior_names(tmp_path):
     """預錄姓名套用後，存進資料庫的必須是換上姓名的版本。"""
     store = LocalJsonStore(tmp_path / "db.json")
     pipeline = Orchestrator(
-        parser=ParserAgent(),
         decision=DecisionAgent(generate=lambda prompt: valid_json()),
-        executor=ExecutorAgent(store),
-        notifier=NotifierAgent(tmp_path / "notifications"),
+        store=store,
     )
     result = pipeline.process_transcript(
         "[0:05] 講者A：我下週一前把 prompt 寫好", speaker_prior={"講者A": "吳宗憲"}
@@ -98,10 +100,8 @@ def test_attendees_reach_the_decision_agent(tmp_path):
         return valid_json()
 
     pipeline = Orchestrator(
-        parser=ParserAgent(),
         decision=DecisionAgent(generate=fake_generate),
-        executor=ExecutorAgent(store),
-        notifier=NotifierAgent(tmp_path / "notifications"),
+        store=store,
     )
     pipeline.process_transcript("[0:05] 講者A：大家好", attendees=["王小明"])
     assert "王小明" in captured["prompt"]

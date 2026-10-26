@@ -16,9 +16,6 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.agents.decision_agent import DecisionAgent
-from app.agents.executor_agent import ExecutorAgent
-from app.agents.notifier_agent import NotifierAgent
-from app.agents.parser_agent import ParserAgent
 from app.config import Settings
 from app.main import create_app
 from app.orchestrator import Orchestrator
@@ -29,10 +26,8 @@ from tests.test_decision import valid_json
 def make_client(tmp_path, **extra) -> TestClient:
     store = LocalJsonStore(tmp_path / "db.json")
     orchestrator = Orchestrator(
-        parser=ParserAgent(),
         decision=DecisionAgent(generate=lambda p: valid_json()),
-        executor=ExecutorAgent(store),
-        notifier=NotifierAgent(tmp_path / "notifications"),
+        store=store,
     )
     settings = Settings(gemini_api_key=None, data_dir=tmp_path, **extra)
     return TestClient(create_app(settings, store=store, orchestrator=orchestrator))

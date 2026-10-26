@@ -17,9 +17,6 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.agents.decision_agent import DecisionAgent
-from app.agents.executor_agent import ExecutorAgent
-from app.agents.notifier_agent import NotifierAgent
-from app.agents.parser_agent import ParserAgent
 from app.config import Settings
 from app.jobs import MediaJobManager
 from app.main import create_app
@@ -41,10 +38,8 @@ class FakeTranscriber:
 
 def test_job_visible_only_to_its_owner(tmp_path):
     orch = Orchestrator(
-        parser=ParserAgent(),
         decision=DecisionAgent(generate=lambda p: valid_json()),
-        executor=ExecutorAgent(LocalJsonStore(tmp_path / "db.json")),
-        notifier=NotifierAgent(tmp_path / "n"),
+        store=LocalJsonStore(tmp_path / "db.json"),
     )
     mgr = MediaJobManager(FakeTranscriber(), orch, tmp_path)
     audio = tmp_path / "a.wav"
@@ -89,10 +84,8 @@ def app_as(tmp_path, monkeypatch):
     """讓測試指定「這個請求是誰發的」，模擬登入接上之後的情況。"""
     store = LocalJsonStore(tmp_path / "db.json")
     orchestrator = Orchestrator(
-        parser=ParserAgent(),
         decision=DecisionAgent(generate=lambda p: valid_json()),
-        executor=ExecutorAgent(store),
-        notifier=NotifierAgent(tmp_path / "notifications"),
+        store=store,
     )
     client = TestClient(create_app(
         Settings(gemini_api_key=None, data_dir=tmp_path),

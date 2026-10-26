@@ -1,10 +1,9 @@
 """Notifier Agent：確認信草稿與行事曆事件產生測試。"""
-import json
 import re
 
 import pytest
 
-from app.agents.notifier_agent import NotifierAgent, build_calendar_events
+from app.agents.notifier_agent import build_calendar_events, build_notifications
 from app.models import MeetingAnalysis
 from tests.test_models import make_valid_payload
 
@@ -14,30 +13,17 @@ def analysis():
     return MeetingAnalysis.model_validate(make_valid_payload())
 
 
-def test_notify_writes_email_and_calendar_files(tmp_path, analysis):
-    NotifierAgent(tmp_path).notify("m001", analysis)
-
-    assert (tmp_path / "m001" / "email_draft.txt").exists()
-    assert (tmp_path / "m001" / "calendar_events.json").exists()
-
-
-def test_notify_result_carries_no_server_filesystem_paths(tmp_path, analysis):
-    """notify() 的回傳值會原封不動變成 /api/meetings 的回應。
-
-    原本附了 email_draft_path 與 calendar_events_path 兩個絕對路徑。前端根本
-    用不到（它拿到的是 email_draft 內容本身），而公開部署等於把容器內的目錄結構
-    印給每個看得到回應的人。內容留著，路徑拿掉。
-    """
-    result = NotifierAgent(tmp_path).notify("m001", analysis)
+def test_notifications_carry_no_server_filesystem_paths(analysis):
+    """回傳值會原封不動變成 /api/meetings 的回應，公開部署不能夾帶容器內的路徑。"""
+    result = build_notifications(analysis, "m001")
 
     assert result["email_draft"] and result["calendar_events"]
     leaked = [k for k in result if k.endswith("_path")]
     assert not leaked, f"回應仍夾帶伺服器路徑：{leaked}"
-    assert str(tmp_path) not in json.dumps(result, ensure_ascii=False)
 
 
-def test_email_draft_contains_key_sections(tmp_path, analysis):
-    result = NotifierAgent(tmp_path).notify("m001", analysis)
+def test_email_draft_contains_key_sections(analysis):
+    result = build_notifications(analysis, "m001")
     draft = result["email_draft"]
 
     assert "專題進度會議" in draft
@@ -50,29 +36,29 @@ def test_email_draft_contains_key_sections(tmp_path, analysis):
     assert "高" in draft                                   # 優先級中文化
 
 
-def test_email_subject_returned_separately(tmp_path, analysis):
+def test_email_subject_returned_separately(analysis):
     """前端要把主旨與內文分開塞進 Gmail/mailto 的 su= 與 body=，不能自己剖字串。"""
-    result = NotifierAgent(tmp_path).notify("m001", analysis)
+    result = build_notifications(analysis, "m001")
     assert result["email_subject"] == "【會議紀錄確認】專題進度會議（2026-07-12）"
 
 
-def test_email_draft_first_line_matches_subject(tmp_path, analysis):
+def test_email_draft_first_line_matches_subject(analysis):
     """草稿全文（複製用）仍帶主旨行，且與 email_subject 是同一份內容。"""
-    result = NotifierAgent(tmp_path).notify("m001", analysis)
+    result = build_notifications(analysis, "m001")
     assert result["email_draft"].split("\n")[0] == f"主旨：{result['email_subject']}"
 
 
-def test_email_draft_handles_missing_summary(tmp_path):
+def test_email_draft_handles_missing_summary():
     """summary 功能沒被使用（None）時，草稿不能出現 Python 的 "None" 字樣。"""
     payload = make_valid_payload()
     payload["meeting"]["summary"] = None
     analysis = MeetingAnalysis.model_validate(payload)
-    draft = NotifierAgent(tmp_path).notify("m001", analysis)["email_draft"]
+    draft = build_notifications(analysis, "m001")["email_draft"]
     assert "None" not in draft
 
 
-def test_calendar_event_shape_matches_google_api(tmp_path, analysis):
-    result = NotifierAgent(tmp_path).notify("m001", analysis)
+def test_calendar_event_shape_matches_google_api(analysis):
+    result = build_notifications(analysis, "m001")
     events = result["calendar_events"]
 
     assert len(events) == 1
@@ -83,22 +69,16 @@ def test_calendar_event_shape_matches_google_api(tmp_path, analysis):
     assert "陳志明" in event["description"]
 
 
-def test_todos_without_due_date_get_no_calendar_event(tmp_path, analysis):
+def test_todos_without_due_date_get_no_calendar_event(analysis):
     analysis.todos[0].due_date = None
-    result = NotifierAgent(tmp_path).notify("m001", analysis)
+    result = build_notifications(analysis, "m001")
     assert result["calendar_events"] == []
 
 
-def test_unassigned_owner_shown_as_pending(tmp_path, analysis):
+def test_unassigned_owner_shown_as_pending(analysis):
     analysis.todos[0].owner = None
-    result = NotifierAgent(tmp_path).notify("m001", analysis)
+    result = build_notifications(analysis, "m001")
     assert "未指派" in result["email_draft"]
-
-
-def test_events_file_is_valid_json(tmp_path, analysis):
-    NotifierAgent(tmp_path).notify("m001", analysis)
-    data = json.loads((tmp_path / "m001" / "calendar_events.json").read_text(encoding="utf-8"))
-    assert isinstance(data, list)
 
 
 # ---- 事件 id：讓「加入 Google 行事曆」按兩次不會變成兩份 ----
@@ -134,6 +114,6 @@ def test_event_id_differs_by_task_and_meeting(analysis):
     assert other_task != base
 
 
-def test_events_written_by_notify_also_carry_ids(tmp_path, analysis):
-    result = NotifierAgent(tmp_path).notify("m001", analysis)
+def test_notifications_events_carry_ids(analysis):
+    result = build_notifications(analysis, "m001")
     assert all(e.get("id") for e in result["calendar_events"])
