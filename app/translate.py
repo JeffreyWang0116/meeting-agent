@@ -5,20 +5,34 @@ Gemini 文字翻譯則兩個轉錄後端都通用，中↔英雙向。
 """
 from __future__ import annotations
 
+import re
+
 from app.gemini_keys import KeyPool, call_with_model_fallback
 
-TARGETS = {"en": "英文", "zh": "繁體中文"}
+TARGETS = {"en": "English", "zh": "Traditional Chinese (Taiwan)"}
 
-_PROMPT = """把以下逐字稿翻譯成{target}。
+# 指令刻意用英文寫：gemini-3.5-flash-lite 收到中文寫的「翻譯成英文」時，
+# 會把中文原文原樣吐回來（實測每次都是），英文指令才會真的翻
+_PROMPT = """Translate the following transcript into {target}.
 
-規則：
-1. 逐行翻譯，輸出行數與原文相同。
-2. 行首的講者標註（如「講者A：」「小明：」）保留原樣，只翻譯冒號後的內容。
-3. 人名與專有名詞保留原文寫法。
-4. 只輸出譯文，不要任何說明或標題。
+Rules:
+1. Translate line by line; the output must have the same number of lines as the source.
+2. Some lines may begin with a speaker label followed by a colon (for example "Speaker A:" or "Jenny:"). Keep such a label unchanged and translate the rest of the line. Lines without a label are translated in full.
+3. Leave people's names and proper nouns in their original script (do not romanize them), but translate every other word of the sentence.
+4. Output only the translation, with no explanations or headings. Never return the source text untranslated.
 
-原文：
-{text}"""
+The source text is between <source> tags.
+<source>
+{text}
+</source>"""
+
+_CJK = re.compile(r"[一-鿿]")
+_LATIN = re.compile(r"[A-Za-z]")
+
+
+def _needs_translation(text: str, target: str) -> bool:
+    """原文裡有沒有要翻的字。沒有的話（英文那段要翻成英文），回傳原文是對的。"""
+    return bool(_CJK.search(text)) if target == "en" else bool(_LATIN.search(text))
 
 
 class TranslateError(Exception):
@@ -48,7 +62,13 @@ class Translator:
         if not text:
             return ""
         prompt = _PROMPT.format(target=TARGETS[target], text=text)
-        return (self._generate(prompt) or "").strip()
+        # 提示詞修好後 flash-lite 仍偶爾把原文原樣吐回來，重試一次；
+        # 兩次都沒翻就報錯，不能把原文當成譯文交出去
+        for _ in range(2):
+            result = (self._generate(prompt) or "").strip()
+            if result != text or not _needs_translation(text, target):
+                return result
+        raise TranslateError("模型沒有翻譯，回傳的是原文，請再試一次")
 
     def _generate_with_gemini(self, prompt: str) -> str:
         if not self._pool:
