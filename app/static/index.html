@@ -751,6 +751,10 @@
               任務庫
             </h2>
             <div class="panel-actions">
+              <span class="view-switch" role="group" aria-label="檢視方式">
+                <button class="ghost active" id="btnViewList" data-taskview="list">清單</button>
+                <button class="ghost" id="btnViewBoard" data-taskview="board">看板</button>
+              </span>
               <button class="ghost" id="btnAddTask">
                 <svg class="i-sm" aria-hidden="true"><use href="/static/icons.svg#plus"/></svg>
                 新增任務
@@ -774,7 +778,8 @@
           </div>
           <div class="task-add" id="taskAddRow" style="display:none">
             <input type="text" id="newTaskName" placeholder="任務名稱">
-            <input type="text" id="newTaskOwner" placeholder="負責人（選填）">
+            <input type="text" id="newTaskOwner" list="ownerList" placeholder="負責人（選填）">
+            <datalist id="ownerList"></datalist>
             <input type="date" id="newTaskDue" title="期限（選填）">
             <select id="newTaskPriority" class="status-sel">
               <option value="high">高</option>
@@ -784,6 +789,7 @@
             <button class="primary" id="btnAddTaskSave">新增</button>
             <button class="ghost" id="btnAddTaskCancel">取消</button>
           </div>
+          <div class="kanban" id="kanban" hidden></div>
           <div class="mtg-groups" id="taskGroups">
             <div class="skel-list">
               <div class="skel-block"><span class="skel" style="width:44%"></span><span class="skel" style="width:22%"></span></div>

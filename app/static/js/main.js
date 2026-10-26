@@ -21,6 +21,8 @@
     transcriptui 逐字稿就地修正的介面（接上面的純函式到畫面）
     result      分析結果頁
     refine      請 AI 修改結果（一句話 → 預覽 → 套用）
+    subtasks    任務的子項目清單與負責人建議
+    kanban      任務看板（三欄、卡片可拖曳）
     tasks       任務庫
     meetings    歷史會議
     reminders   主動提醒
@@ -53,6 +55,8 @@ import "./transcriptui.js";
 import "./calendar.js";
 import "./refine.js";
 import "./result.js";
+import "./subtasks.js";
+import "./kanban.js";
 import "./tasks.js";
 import "./meetings.js";
 import "./reminders.js";

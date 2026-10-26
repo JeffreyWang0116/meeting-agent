@@ -70,6 +70,17 @@ function whereLabel(target) {
   return WHERE[kind] || "這一項";
 }
 
+// 任務庫與看板也要開得了留言，但那裡的 meetingId 不是「目前看的那一場」，
+// 是任務自己所屬的那一場——所以開啟時一併帶進來
+async function openFor(id, target, quote) {
+  if (!id) {
+    showError("手動新增的任務不屬於任何會議，沒有地方可以掛留言");
+    return;
+  }
+  meetingId = id;
+  await openThread(target, quote);
+}
+
 async function openThread(target, quote) {
   openTarget = target;
   openLabel = quote;
@@ -143,4 +154,20 @@ $("cmtThread").addEventListener("click", async e => {
   }
 });
 
-export { commentBtn, loadComments, whereLabel };
+// 任務庫／看板的留言鈕：meetingId 要跟著任務走
+function taskCommentBtn(task) {
+  if (!task.meeting_id) return "";
+  const n = task.comment_count || 0;
+  return `<button class="cmt-btn${n ? " has" : ""}" data-meeting="${esc(task.meeting_id)}"`
+    + ` data-target="task:${esc(task.id)}" data-quote="${esc(task.task || "")}"`
+    + ` title="留言討論" aria-label="留言">💬</button>`;
+}
+
+for (const id of ["taskGroups", "kanban"]) {
+  $(id)?.addEventListener("click", e => {
+    const btn = e.target.closest(".cmt-btn");
+    if (btn) openFor(btn.dataset.meeting, btn.dataset.target, btn.dataset.quote);
+  });
+}
+
+export { commentBtn, loadComments, openFor, taskCommentBtn, whereLabel };

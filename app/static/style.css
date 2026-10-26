@@ -1501,3 +1501,56 @@
 .rep-block ul { margin: 0; padding-left: 16px; font-size: .82rem; }
 .rep-block li { margin: 3px 0; display: flex; gap: 8px; }
 .rep-when { color: var(--faint); font-size: .72rem; white-space: nowrap; margin-left: auto; }
+
+/* ---- 任務子項目與重複（subtasks.js）---- */
+.sub-chip, .rep-chip {
+  margin-left: 6px; padding: 0 6px; border-radius: 8px;
+  font-size: .68rem; font-family: var(--mono);
+  background: var(--card-3, var(--card)); color: var(--faint);
+}
+.sub-row > td { padding: 0 !important; background: var(--card-2); }
+.sub-list { display: flex; flex-direction: column; gap: 2px; padding: 8px 10px 10px 26px; }
+.sub-item { display: flex; align-items: center; gap: 8px; font-size: .82rem; }
+.sub-item .sub-done { color: var(--faint); text-decoration: line-through; }
+.sub-item .del-btn { margin-left: auto; visibility: hidden; }
+.sub-item:hover .del-btn { visibility: visible; }
+.sub-add { margin-top: 4px; }
+.sub-new {
+  width: 100%; max-width: 320px; padding: 4px 8px; font: inherit; font-size: .8rem;
+  background: var(--card); color: var(--ink);
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+}
+
+/* ---- 任務看板（kanban.js）---- */
+.view-switch { display: inline-flex; gap: 2px; }
+.view-switch .ghost.active { background: var(--card-3, var(--card)); color: var(--ink); }
+.kanban { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; padding: 10px; }
+.kb-col {
+  display: flex; flex-direction: column; min-height: 140px;
+  background: var(--card-2); border: 1px solid var(--border); border-radius: var(--radius-md);
+}
+.kb-col.kb-over { border-color: var(--accent); background: var(--card-3, var(--card-2)); }
+.kb-head {
+  display: flex; align-items: center; gap: 8px; padding: 8px 10px;
+  font-size: .82rem; border-bottom: 1px solid var(--border);
+}
+.kb-count { margin-left: auto; font-family: var(--mono); color: var(--faint); font-size: .74rem; }
+.kb-body { display: flex; flex-direction: column; gap: 6px; padding: 8px; flex: 1; }
+.kb-empty { margin: auto; color: var(--faint); font-size: .76rem; }
+.kb-card {
+  padding: 8px 10px; background: var(--card); border: 1px solid var(--border);
+  border-left: 3px solid var(--border-strong); border-radius: var(--radius-sm);
+  cursor: grab; font-size: .84rem;
+}
+.kb-card.p-high { border-left-color: #e0685f; }
+.kb-card.p-medium { border-left-color: #d9a441; }
+.kb-card.p-low { border-left-color: #6b8fb5; }
+.kb-card.kb-dragging { opacity: .45; cursor: grabbing; }
+.kb-meta {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  margin-top: 4px; font-size: .72rem; color: var(--faint);
+}
+/* 手機上三欄會擠成一片，而且拖曳本來就不好用——改成直的，狀態還是靠列表改 */
+@media (max-width: 760px) {
+  .kanban { grid-template-columns: 1fr; }
+}

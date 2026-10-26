@@ -12,7 +12,9 @@ from app.models import MeetingAnalysis
 from app.stores.base import DEFAULT_USER, TaskStore, owns, scoped_read, scoped_write
 
 # 手動任務可填的欄位（與 AI 產出的任務同型別，缺的補預設）
-_MANUAL_TASK_FIELDS = ("task", "owner", "due_date", "priority", "source_quote")
+# 重複任務自動排的下一輪也走 add_task，所以 recurrence／subtasks 要在這裡帶得過去
+_MANUAL_TASK_FIELDS = ("task", "owner", "due_date", "priority", "source_quote",
+                       "recurrence", "subtasks")
 
 
 def _new_task_record(task: dict) -> dict:

@@ -76,6 +76,12 @@ from app.push import (
 from app.rag import AskAgent, GeminiEmbedder, RagIndex
 from app.speaker_rename import name_problem, rename_meeting_fields, rename_task_fields
 from app.stores import make_store
+from app.taskextras import (
+    RECURRENCES,
+    TaskExtraError,
+    clean_subtasks,
+    next_occurrence,
+)
 from app.subtitles import to_srt, to_vtt
 from app.transcription import media
 from app.transcription.segments import parse_time_label, replace_term_in_range
@@ -1774,7 +1780,8 @@ def create_app(
 
     # ---- 任務管理 ----
 
-    _EDITABLE_FIELDS = {"status", "task", "owner", "due_date", "priority"}
+    _EDITABLE_FIELDS = {"status", "task", "owner", "due_date", "priority",
+                        "subtasks", "recurrence"}
     _VALID_STATUS = {"todo", "doing", "done"}
 
     @app.post("/api/tasks")
@@ -1797,6 +1804,57 @@ def create_app(
         log_activity("task.add", task, created.get("id"))
         return created
 
+    def repeat_if_due(before: dict | None, after: dict) -> None:
+        """重複任務一被標成完成，就把下一輪排進去。
+
+        只在「這一次才變成 done」時排，不然每按一次完成都會多生一筆。
+        """
+        if after.get("status") != "done" or (before or {}).get("status") == "done":
+            return
+        due = next_occurrence(after.get("due_date"), after.get("recurrence"))
+        if not due:
+            return
+        store.add_task({
+            "task": after.get("task"),
+            "owner": after.get("owner"),
+            "due_date": due,
+            "priority": after.get("priority") or "medium",
+            "meeting_id": after.get("meeting_id"),
+            "recurrence": after.get("recurrence"),
+            # 上一輪勾完的子項目帶過來的話，這一輪一開始就是全部完成
+            "subtasks": [{"text": s["text"], "done": False} for s in after.get("subtasks") or []],
+        }, user=current_user())
+
+    @app.get("/api/owners")
+    def list_owners():
+        """負責人建議：用過的負責人、出席過的人，群組工作區再加上成員。
+
+        自動補全與「指派給成員」用的是同一份名單——那本來就是同一個問題。
+        """
+        user = current_user()
+        names: list[str] = []
+
+        def add(name) -> None:
+            name = str(name or "").strip()
+            if name and name not in names:
+                names.append(name)
+
+        for task in store.list_tasks(user=user):
+            add(task.get("owner"))
+        for meeting in store.list_meetings(user=user):
+            for who in (meeting.get("meeting") or {}).get("attendees") or []:
+                add(who)
+
+        members = []
+        if in_group_workspace():
+            group = store.get_group(user.split(":", 1)[1]) or {}
+            for m in group.get("members") or []:
+                email = m.get("email") or ""
+                label = email.split("@", 1)[0] if "@" in email else (m.get("uid") or "")
+                members.append({"uid": m.get("uid"), "email": email, "name": label})
+                add(label)
+        return {"owners": names, "members": members}
+
     @app.patch("/api/tasks/{task_id}")
     def patch_task(task_id: str, fields: dict):
         unknown = set(fields) - _EDITABLE_FIELDS
@@ -1814,6 +1872,17 @@ def create_app(
             raise HTTPException(status_code=400, detail="due_date 必須是 YYYY-MM-DD 格式或留空")
         # 複製一份：LocalJsonStore 回的是儲存層裡同一個 dict，update_task 會就地改掉它，
         # 直接留著參照的話前後比對永遠相等
+        if "recurrence" in fields and fields["recurrence"] not in (None, "", *RECURRENCES):
+            raise HTTPException(
+                status_code=400, detail=f"recurrence 只能是：{'、'.join(RECURRENCES)}"
+            )
+        if "subtasks" in fields:
+            try:
+                fields["subtasks"] = clean_subtasks(fields["subtasks"])
+            except TaskExtraError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+        # 複製一份：LocalJsonStore 回的是儲存層裡同一個 dict，update_task 會就地改掉它，
+        # 直接留著參照的話前後比對永遠相等
         before = next(
             (dict(t) for t in store.list_tasks(user=current_user()) if t["id"] == task_id), None
         )
@@ -1821,6 +1890,7 @@ def create_app(
         if updated is None:
             raise HTTPException(status_code=404, detail=f"找不到任務：{task_id}")
         log_activity(_task_action(before, updated), updated.get("task") or "", task_id)
+        repeat_if_due(before, updated)
         return updated
 
     @app.delete("/api/tasks/{task_id}")

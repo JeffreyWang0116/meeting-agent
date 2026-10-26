@@ -277,7 +277,8 @@ class FirestoreStore(TaskStore):
             "status": task.get("status") or "todo",
             "priority": task.get("priority") or "medium",
         }
-        for field_name in ("task", "owner", "due_date", "source_quote"):
+        # 重複任務自動排的下一輪也走這裡，recurrence／subtasks 要帶得過去
+        for field_name in ("task", "owner", "due_date", "source_quote", "recurrence", "subtasks"):
             record[field_name] = task.get(field_name)
         with self._lock:
             self._db.collection(self._tasks).document(task_id).set(record)

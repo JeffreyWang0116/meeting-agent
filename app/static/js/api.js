@@ -55,6 +55,8 @@ const api = {
     post(`/api/meetings/${q(id)}/rename-speaker`, { old: oldName, new: newName }),
   meetingKinds: () => get("/api/meeting-kinds"),
 
+  owners: () => get("/api/owners"),
+
   // ---- 跨會議追蹤 ----
   openItems: () => get("/api/insights/open-items"),
   people: () => get("/api/insights/people"),
