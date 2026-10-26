@@ -31,6 +31,8 @@
     push        推播的純函式（支援判斷、公鑰轉換）
     pushui      手機推播提醒的開關（訂閱／退訂／試送）
     templates   自訂會議範本（種類名稱、要哪些區塊）
+    commentsui  對摘要／決議／代辦留言討論
+    trashui     垃圾桶（30 天可救回）與群組活動紀錄
 */
 import "./core.js";
 import "./auth.js";
@@ -58,4 +60,6 @@ import "./settings.js";
 import "./push.js";
 import "./pushui.js";
 import "./templates.js";
+import "./commentsui.js";
+import "./trashui.js";
 import "./groups.js";

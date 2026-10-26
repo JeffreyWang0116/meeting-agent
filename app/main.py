@@ -1186,7 +1186,13 @@ def create_app(
     # ---- 留言：對摘要、決議、任務的討論 ----
 
     def with_author(comment: dict) -> dict:
-        return {**comment, "author_name": author_name(comment)}
+        # mine 讓前端知道哪幾則畫得出刪除鈕。只比對 uid，不比 email——
+        # 訪客沒有 email，全部都會變成「我的」
+        return {
+            **comment,
+            "author_name": author_name(comment),
+            "mine": comment.get("author_uid") == current_account(),
+        }
 
     @app.post("/api/meetings/{meeting_id}/comments")
     def add_comment(meeting_id: str, req: dict):

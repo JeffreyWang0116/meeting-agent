@@ -1,6 +1,6 @@
 import { api } from "./api.js";
 import { renderAskScope } from "./ask.js";
-import { $, PAGE_SIZE, esc, icon, loadFail, pageNo, paginate, registerPager, registerRefresher, renderPager, showError, showNotice } from "./core.js";
+import { $, PAGE_SIZE, REFRESHERS, esc, icon, loadFail, pageNo, paginate, registerPager, registerRefresher, renderPager, showError, showNotice } from "./core.js";
 import { renderHome } from "./home.js";
 import { refreshReminders, remindersLoaded, renderReminders } from "./reminders.js";
 import { copyWithFeedback, renderResult } from "./result.js";
@@ -312,7 +312,10 @@ $("meetingRows").addEventListener("click", async e => {
     delete meetingDetailCache[del.dataset.id];
     if (expandedMeetingId === del.dataset.id) expandedMeetingId = null;
     refreshMeetings(); refreshTasks(); refreshReminders();
+    // 刪除是丟進垃圾桶，底下那塊要跟著更新——不然使用者會以為東西真的沒了
+    REFRESHERS.trash?.(); REFRESHERS.activity?.();
     if (gone) showNotice("這場會議已經不存在（可能已在其他裝置或分頁刪除），已從列表移除。");
+    else showNotice("已移到垃圾桶，30 天內可以在歷史會議最下方救回來。");
     return;
   }
   // 會議重點 → 跳到逐字稿的時間節點

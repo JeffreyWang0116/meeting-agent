@@ -1,6 +1,7 @@
 import { api } from "./api.js";
 import { setCalendarEvents } from "./calendar.js";
 import { $, PRIORITY_ZH, esc, icon, showError, showNotice, skelBlocks, skelLine } from "./core.js";
+import { commentBtn, loadComments } from "./commentsui.js";
 import { askSpeakerName, detectSpeakers, refreshMeetings, renameSpeaker } from "./meetings.js";
 import { refreshReminders } from "./reminders.js";
 import { WIDE, showView } from "./router.js";
@@ -125,10 +126,10 @@ function renderTodos(todos) {
   $("hTodos").style.display = showTodos ? "flex" : "none";
   $("rTodos").style.display = showTodos ? "flex" : "none";
   $("rTodos").innerHTML = todos.length
-    ? todos.map(t => `
+    ? todos.map((t, i) => `
       <div class="todo-card p-${t.priority}">
         <div class="todo-head"><span class="led"></span><span class="todo-task">${esc(t.task)}</span>
-          ${badBtn("todo", t.task)}</div>
+          ${badBtn("todo", t.task)}${commentBtn(`task:${t.id || i}`, t.task)}</div>
         <div class="badges">
           <span class="badge ${t.owner ? "" : "owner-none"}">負責人 <b>${esc(t.owner || "未指派")}</b></span>
           <span class="badge">期限 <b>${esc(t.due_date || "未定")}</b>${
@@ -165,19 +166,26 @@ function badBtn(target, text) {
     ` title="回報這裡 AI 弄錯了" aria-label="回報錯誤">👎</button>`;
 }
 
+// 摘要沒有自己的容器可以塞按鈕，掛在標題列上（翻譯鈕旁邊）
+function paintSummaryComment(summary) {
+  const head = $("hSummary");
+  head.querySelector(".cmt-btn")?.remove();
+  head.insertAdjacentHTML("beforeend", commentBtn("summary", summary));
+}
+
 function renderDecisions(decisions) {
   const show = decisions.length > 0;
   $("hDecisions").style.display = show ? "flex" : "none";
   $("rDecisions").style.display = show ? "flex" : "none";
   $("rDecisions").innerHTML = show
-    ? decisions.map(d => `<li>${esc(d.description)}${d.context ? ` <span class="ctx">（${esc(d.context)}）</span>` : ""}`
-        + `${badBtn("decision", d.description)}</li>`).join("")
+    ? decisions.map((d, i) => `<li>${esc(d.description)}${d.context ? ` <span class="ctx">（${esc(d.context)}）</span>` : ""}`
+        + `${badBtn("decision", d.description)}${commentBtn(`decision:${i}`, d.description)}</li>`).join("")
     : `<p class="empty-note">本次會議無正式決議</p>`;
 }
 
 function renderPending(items) {
   $("rPending").innerHTML = items.length
-    ? items.map(p => `<div class="pending-item">${icon("circle-help")}<span>${esc(p.topic)}${p.reason ? `<span class="reason">${esc(p.reason)}</span>` : ""}</span></div>`).join("")
+    ? items.map((p, i) => `<div class="pending-item">${icon("circle-help")}<span>${esc(p.topic)}${p.reason ? `<span class="reason">${esc(p.reason)}</span>` : ""}</span>${commentBtn(`pending:${i}`, p.topic)}</div>`).join("")
     : `<p class="empty-note">無</p>`;
 }
 
@@ -229,6 +237,7 @@ function renderResult(result, transcript, { kind = null, fromHistory = false } =
   // 改版後每種類都有自己的預設區塊，所以一律改成「有內容才顯示」，
   // 不再把某一個種類寫死在前端
   $("hSummary").style.display = m.summary ? "flex" : "none";
+  paintSummaryComment(m.summary || "");
   $("rSummary").style.display = m.summary ? "block" : "none";
   $("rSummary").textContent = m.summary || "";
   // 摘要翻譯：中文摘要→譯成英文，外文摘要→譯成中文
@@ -243,6 +252,14 @@ function renderResult(result, transcript, { kind = null, fromHistory = false } =
   renderDecisions(a.decisions);
   renderTodos(a.todos);
   renderPending(a.pending_items);
+  // 留言數是另一次請求。先畫出沒有數字的按鈕，拿到之後再補上去——
+  // 等它回來才畫整份結果的話，結果頁會因為一個附屬功能而變慢
+  loadComments(result.meeting_id).then(() => {
+    renderDecisions(a.decisions);
+    renderTodos(a.todos);
+    renderPending(a.pending_items);
+    paintSummaryComment(m.summary || "");
+  });
 
   $("icsLink").href = `/api/meetings/${encodeURIComponent(result.meeting_id)}/events.ics`;
   const events = result.notifications.calendar_events || [];

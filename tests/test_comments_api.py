@@ -149,3 +149,14 @@ def test_trashing_a_meeting_keeps_its_comments_for_the_restore(client):
 
     client.post(f"/api/trash/{mid}/restore", headers=h())
     assert len(client.get(f"/api/meetings/{mid}/comments", headers=h()).json()["comments"]) == 1
+
+
+def test_the_thread_says_which_ones_are_mine(client):
+    """前端要靠這個決定哪幾則畫得出刪除鈕。"""
+    mid = meeting(client)
+    post(client, mid, uid="amy")
+    post(client, mid, text="我同意", uid="bob")
+
+    seen = client.get(f"/api/meetings/{mid}/comments", headers=h("bob")).json()["comments"]
+
+    assert [c["mine"] for c in seen] == [False, True]

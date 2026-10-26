@@ -1366,3 +1366,47 @@
   .login-options { display: flex; flex-direction: column; align-items: stretch; gap: 10px; width: 100%; }
   .login-options button { justify-content: center; }
   .login-note { margin: 0; font-size: .76rem; line-height: 1.6; color: var(--faint); }
+
+/* ---- 留言（commentsui.js）---- */
+.cmt-btn {
+  background: none; border: none; cursor: pointer; padding: 0 4px; margin-left: 4px;
+  font-size: .8rem; line-height: 1; opacity: .35; transition: opacity .12s;
+}
+.cmt-btn:hover, .cmt-btn.has { opacity: 1; }
+.cmt-n {
+  display: inline-block; margin-left: 2px; padding: 0 4px; border-radius: 8px;
+  background: var(--accent); color: #fff; font-size: .65rem; font-family: var(--mono);
+}
+.cmt-thread { display: flex; flex-direction: column; gap: 10px; max-height: 46vh; overflow-y: auto; }
+.cmt { padding: 8px 10px; background: var(--card-2); border-radius: var(--radius-sm); }
+.cmt-head { display: flex; align-items: center; gap: 8px; font-size: .74rem; color: var(--faint); }
+.cmt-who { font-weight: 600; color: var(--muted); }
+.cmt-head .cmt-del { margin-left: auto; }
+.cmt-text { margin-top: 4px; font-size: .84rem; line-height: 1.6; white-space: pre-wrap; }
+.cmt-compose { display: flex; gap: 8px; margin-top: 12px; }
+.cmt-compose textarea { flex: 1; resize: vertical; }
+
+/* ---- 垃圾桶與活動紀錄（trashui.js）---- */
+.side-panel { margin-top: 14px; }
+/* 面板標題旁的說明字（「保留 30 天」「誰改了什麼」）：是註解不是標題 */
+.side-panel .panel-head h2 .aux {
+  font-weight: 400; color: var(--faint); font-size: .76rem;
+}
+.side-panel > .panel-head { cursor: pointer; list-style: none; }
+.side-panel > .panel-head::-webkit-details-marker { display: none; }
+.trash-row {
+  display: flex; align-items: center; gap: 10px; padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+}
+.trash-row:last-child { border-bottom: none; }
+.trash-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
+.trash-title { font-size: .88rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.trash-meta { font-size: .74rem; color: var(--faint); }
+.ghost.danger { color: var(--danger, #e06c75); }
+.act-row {
+  display: flex; align-items: center; gap: 8px; padding: 6px 10px;
+  font-size: .8rem; color: var(--muted);
+}
+.act-row .i-sm { color: var(--faint); flex: none; }
+.act-text { flex: 1; min-width: 0; }
+.act-time { color: var(--faint); font-size: .72rem; white-space: nowrap; }

@@ -737,6 +737,31 @@
           </div>
           <div class="pager" id="meetingsPager" data-pager="meetings"></div>
         </div>
+
+        <!-- 垃圾桶：刪除的會議先進這裡，30 天內救得回來 -->
+        <details class="panel side-panel" id="trashPanel">
+          <summary class="panel-head">
+            <h2>
+              <svg class="i" aria-hidden="true"><use href="/static/icons.svg#trash-2"/></svg>
+              垃圾桶
+              <span class="aux" id="trashNote">刪除的會議會在這裡保留 30 天</span>
+            </h2>
+            <span class="nav-badge" id="trashCount" hidden></span>
+          </summary>
+          <div id="trashRows"></div>
+        </details>
+
+        <!-- 群組活動紀錄：誰在什麼時候改了什麼。個人工作區沒有這一塊 -->
+        <details class="panel side-panel" id="activityPanel" hidden>
+          <summary class="panel-head">
+            <h2>
+              <svg class="i" aria-hidden="true"><use href="/static/icons.svg#clock"/></svg>
+              群組活動紀錄
+              <span class="aux">誰在什麼時候改了什麼</span>
+            </h2>
+          </summary>
+          <div id="activityRows"></div>
+        </details>
       </section>
 
       <!-- 隱私與資料處理 -->
@@ -792,6 +817,23 @@
 </div>
 
 <!-- 自訂會議範本：種類名稱、要哪些區塊、每個區塊抓什麼 -->
+<div class="modal-overlay" id="commentModal">
+  <div class="modal">
+    <div class="panel-head">
+      <h2 id="cmtWhere">留言</h2>
+      <button class="panel-x" id="btnCmtClose" aria-label="關閉">
+        <svg class="i-sm" aria-hidden="true"><use href="/static/icons.svg#x"/></svg>
+      </button>
+    </div>
+    <p class="hint" id="cmtQuote"></p>
+    <div class="cmt-thread" id="cmtThread"></div>
+    <div class="cmt-compose">
+      <textarea id="cmtInput" rows="2" placeholder="說點什麼…（群組成員都看得到）"></textarea>
+      <button class="primary" id="btnCmtSend">送出</button>
+    </div>
+  </div>
+</div>
+
 <div class="modal-overlay" id="templateModal">
   <div class="modal">
     <div class="panel-head">

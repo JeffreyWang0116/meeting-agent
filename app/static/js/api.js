@@ -55,6 +55,15 @@ const api = {
     post(`/api/meetings/${q(id)}/rename-speaker`, { old: oldName, new: newName }),
   meetingKinds: () => get("/api/meeting-kinds"),
 
+  // ---- 垃圾桶、活動紀錄、留言 ----
+  listTrash: () => get("/api/trash"),
+  restoreMeeting: id => post(`/api/trash/${q(id)}/restore`, {}),
+  purgeMeeting: id => remove(`/api/trash/${q(id)}`),
+  listActivity: () => get("/api/activity"),
+  listComments: id => get(`/api/meetings/${q(id)}/comments`),
+  addComment: (id, body) => post(`/api/meetings/${q(id)}/comments`, body),
+  deleteComment: id => remove(`/api/comments/${q(id)}`),
+
   // ---- 手機推播 ----
   pushKey: () => get("/api/push/key"),
   pushSubscribe: body => post("/api/push/subscribe", body),
