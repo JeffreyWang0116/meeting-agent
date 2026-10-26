@@ -171,7 +171,6 @@ def purge_scope(store, scope: str, on_scope_deleted=None) -> int:
     for task in store.list_tasks(user=scope):  # 手動新增、不屬於任何會議的任務
         store.delete_task(task["id"], user=scope)
     store.save_glossary([], user=scope)
-    store.save_speaker_roster([], user=scope)
     for template in store.list_templates(scope):
         store.delete_template(template["id"], scope)
     for item in store.list_feedback(scope):  # 含使用者寫的說明與被回報的原文

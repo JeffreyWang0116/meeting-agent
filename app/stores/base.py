@@ -102,14 +102,6 @@ class TaskStore(ABC):
         """整份儲存自訂詞彙表。"""
 
     @abstractmethod
-    def get_speaker_roster(self, *, user: str = DEFAULT_USER) -> list[str]:
-        """讀取講者名冊（["林佳蓉", ...]，最近用到的在前），沒有回傳空清單。"""
-
-    @abstractmethod
-    def save_speaker_roster(self, names: list[str], *, user: str = DEFAULT_USER) -> None:
-        """整份儲存講者名冊。"""
-
-    @abstractmethod
     def get_rag_records(self) -> dict:
         """讀回跨會議問答的向量索引：{"dim": 向量維度 or None, "records": [...]}。
 
@@ -190,7 +182,7 @@ class TaskStore(ABC):
 
     @abstractmethod
     def export_all(self, *, user: str = DEFAULT_USER) -> dict:
-        """匯出整份資料（meetings + tasks + glossary + speaker_roster）供備份下載。"""
+        """匯出整份資料（meetings + tasks + glossary）供備份下載。"""
 
     @abstractmethod
     def import_all(self, data: dict, *, user: str = DEFAULT_USER) -> None:

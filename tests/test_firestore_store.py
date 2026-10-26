@@ -244,12 +244,6 @@ def test_glossary_get_and_save_persists():
     assert make_store(db).get_glossary() == [{"term": "林佳蓉", "note": "人名"}]
 
 
-def test_speaker_roster_get_and_save_persists():
-    db = FakeFirestore()
-    store = make_store(db)
-    assert store.get_speaker_roster() == []
-    store.save_speaker_roster(["林佳蓉", "李經理"])
-    assert make_store(db).get_speaker_roster() == ["林佳蓉", "李經理"]
 
 
 def test_add_manual_task():
@@ -266,11 +260,10 @@ def test_export_import_roundtrip():
     store = make_store(db)
     store.save_meeting(make_analysis(), transcript="逐字稿原文")
     store.save_glossary([{"term": "TaskHub", "note": ""}])
-    store.save_speaker_roster(["林佳蓉"])
 
     dump = store.export_all()
     assert dump["meetings"][0]["transcript"] == "逐字稿原文"
-    assert dump["tasks"] and dump["glossary"] and dump["speaker_roster"]
+    assert dump["tasks"] and dump["glossary"]
 
     # 匯入到另一個後端 → 內容一致
     other = make_store(FakeFirestore())
@@ -278,7 +271,6 @@ def test_export_import_roundtrip():
     assert other.list_meetings()[0]["meeting"]["title"] == "專題進度會議"
     assert other.list_tasks()[0]["task"] == "完成 Prompt 初版"
     assert other.get_glossary() == [{"term": "TaskHub", "note": ""}]
-    assert other.get_speaker_roster() == ["林佳蓉"]
 
     # 整份覆蓋：同一後端匯入空資料會清掉
     store.import_all({"meetings": [], "tasks": []})

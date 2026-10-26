@@ -204,13 +204,6 @@ def test_glossary_get_and_save_persists(tmp_path):
     assert LocalJsonStore(path).get_glossary() == [{"term": "林佳蓉", "note": "人名"}]
 
 
-def test_speaker_roster_get_and_save_persists(tmp_path):
-    path = tmp_path / "db.json"
-    store = LocalJsonStore(path)
-    assert store.get_speaker_roster() == []
-    store.save_speaker_roster(["林佳蓉", "李經理"])
-    assert store.get_speaker_roster() == ["林佳蓉", "李經理"]
-    assert LocalJsonStore(path).get_speaker_roster() == ["林佳蓉", "李經理"]
 
 
 def test_list_meetings_newest_first(tmp_path):
@@ -240,11 +233,10 @@ def test_export_import_roundtrip_and_overwrite(tmp_path):
     store = LocalJsonStore(tmp_path / "db.json")
     store.save_meeting(make_analysis(), transcript="逐字稿原文")
     store.save_glossary([{"term": "TaskHub", "note": ""}])
-    store.save_speaker_roster(["林佳蓉"])
 
     dump = store.export_all()
     assert dump["meetings"][0]["transcript"] == "逐字稿原文"  # 備份含逐字稿全文
-    assert dump["tasks"] and dump["glossary"] and dump["speaker_roster"]
+    assert dump["tasks"] and dump["glossary"]
 
     # 匯入到全新的 store → 內容一致
     fresh = LocalJsonStore(tmp_path / "db2.json")
@@ -252,7 +244,6 @@ def test_export_import_roundtrip_and_overwrite(tmp_path):
     assert fresh.list_meetings()[0]["meeting"]["title"] == "專題進度會議"
     assert fresh.list_tasks()[0]["task"] == "完成 Prompt 初版"
     assert fresh.get_glossary() == [{"term": "TaskHub", "note": ""}]
-    assert fresh.get_speaker_roster() == ["林佳蓉"]
 
     # import 是「整份覆蓋」：匯入空資料會清掉現有內容
     fresh.import_all({"meetings": [], "tasks": []})
@@ -266,3 +257,13 @@ def test_list_meetings_can_include_transcript(tmp_path):
     store.save_meeting(make_analysis(), transcript="志明下週一交 prompt")
     assert "transcript" not in store.list_meetings()[0]
     assert store.list_meetings(include_transcript=True)[0]["transcript"] == "志明下週一交 prompt"
+
+
+def test_speaker_roster_is_gone(tmp_path):
+    """講者名冊早已併進詞彙表（舊版搬移也已移除）：備份不再帶它，store 也不再讀寫。
+    舊備份檔裡還有 speaker_roster 欄位的，還原時直接略過。"""
+    store = LocalJsonStore(tmp_path / "db.json")
+    assert not hasattr(store, "get_speaker_roster")
+    assert "speaker_roster" not in store.export_all()
+    store.import_all({"meetings": [], "tasks": [], "speaker_roster": ["林佳蓉"]})
+    assert not (tmp_path / "speakers.json").exists()

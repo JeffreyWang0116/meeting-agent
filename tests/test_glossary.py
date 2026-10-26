@@ -81,23 +81,6 @@ def test_person_flag_is_dropped_on_save_and_on_load(tmp_path):
     assert Glossary(store).terms(DEFAULT_USER) == [{"term": "林佳蓉", "note": ""}]
 
 
-def test_legacy_roster_is_migrated_into_the_glossary(tmp_path):
-    """舊版把講者名冊存在另一個地方。搬進詞彙表當一般詞彙（註明人名），
-    姓名照樣幫轉錄聽對字，使用者的名冊也不會像憑空消失。"""
-    from app.glossary import Glossary
-    from app.stores.local_store import LocalJsonStore
-
-    store = LocalJsonStore(tmp_path / "db.json")
-    store.save_glossary([{"term": "TaskHub", "note": "產品名"}])
-    store.save_speaker_roster(["林佳蓉", "李四"])
-
-    g = Glossary(store)
-    assert g.terms(DEFAULT_USER) == [
-        {"term": "TaskHub", "note": "產品名"},
-        {"term": "林佳蓉", "note": "人名"},
-        {"term": "李四", "note": "人名"},
-    ]
-    assert store.get_speaker_roster() == []  # 搬完清空，不會再搬第二次
 
 
 # ---- 詞彙表只收使用者自己輸入的詞 ----

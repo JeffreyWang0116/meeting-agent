@@ -223,8 +223,7 @@ class LocalJsonStore(TaskStore):
                 "meetings": [dict(m) for m in self._data["meetings"] if owns(m, user)],
                 "tasks": [dict(t) for t in self._data["tasks"] if owns(t, user)],
                 "glossary": self.get_glossary(user=user),
-                "speaker_roster": self.get_speaker_roster(user=user),
-            }
+                }
 
     def import_all(self, data: dict, *, user: str = DEFAULT_USER) -> None:
         # 還原只能覆蓋自己的資料；別人的原封不動地留下來
@@ -240,8 +239,6 @@ class LocalJsonStore(TaskStore):
             self._flush()
         if "glossary" in data:
             self.save_glossary(data.get("glossary") or [], user=user)
-        if "speaker_roster" in data:
-            self.save_speaker_roster(data.get("speaker_roster") or [], user=user)
 
     # ---- 自訂詞彙（沿用同目錄的 glossary.json，與 db.json 並存） ----
 
@@ -384,21 +381,5 @@ class LocalJsonStore(TaskStore):
         atomic_write_text(
             path,
             json.dumps(scoped_write(self._read_doc(path), user, "terms", terms),
-                       ensure_ascii=False, indent=2),
-        )
-
-    # ---- 講者名冊（同目錄的 speakers.json） ----
-
-    def _roster_path(self):
-        return self._path.with_name("speakers.json")
-
-    def get_speaker_roster(self, *, user: str = DEFAULT_USER) -> list[str]:
-        return scoped_read(self._read_doc(self._roster_path()), user, "names")
-
-    def save_speaker_roster(self, names: list[str], *, user: str = DEFAULT_USER) -> None:
-        path = self._roster_path()
-        atomic_write_text(
-            path,
-            json.dumps(scoped_write(self._read_doc(path), user, "names", names),
                        ensure_ascii=False, indent=2),
         )

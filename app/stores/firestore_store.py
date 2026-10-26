@@ -280,7 +280,6 @@ class FirestoreStore(TaskStore):
             "meetings": self._user_docs(self._meetings, user),
             "tasks": self._user_docs(self._tasks, user),
             "glossary": self.get_glossary(user=user),
-            "speaker_roster": self.get_speaker_roster(user=user),
         }
 
     def import_all(self, data: dict, *, user: str = DEFAULT_USER) -> None:
@@ -298,8 +297,6 @@ class FirestoreStore(TaskStore):
                 self._db.collection(self._tasks).document(t["id"]).set(t)
         if "glossary" in data:
             self.save_glossary(data.get("glossary") or [], user=user)
-        if "speaker_roster" in data:
-            self.save_speaker_roster(data.get("speaker_roster") or [], user=user)
 
     # ---- 自訂詞彙（meta collection 底下單一 glossary 文件） ----
 
@@ -384,16 +381,6 @@ class FirestoreStore(TaskStore):
             for doc_id, data in wanted.items():
                 col.document(doc_id).set(data)
             self._db.collection(self._meta).document("rag").set({"dim": dim})
-
-    # ---- 講者名冊（meta collection 底下單一 speakers 文件） ----
-
-    def get_speaker_roster(self, *, user: str = DEFAULT_USER) -> list[str]:
-        return scoped_read(self._meta_doc("speakers"), user, "names")
-
-    def save_speaker_roster(self, names: list[str], *, user: str = DEFAULT_USER) -> None:
-        with self._lock:
-            doc = scoped_write(self._meta_doc("speakers"), user, "names", names)
-            self._db.collection(self._meta).document("speakers").set(doc)
 
     # ---- 轉錄工作紀錄 ----
 
