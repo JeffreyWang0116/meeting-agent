@@ -55,6 +55,17 @@ from app.gemini_keys import is_quota_error
 from app.glossary import Glossary, clean_terms
 from app.jobs import MediaJobManager
 from app.orchestrator import Orchestrator
+from app.push import (
+    GONE,
+    OK,
+    PushError,
+    digest,
+    due_now,
+    local_time,
+    make_sender,
+    normalize_subscription,
+    subscription_id,
+)
 from app.rag import AskAgent, GeminiEmbedder, RagIndex
 from app.speaker_rename import name_problem, rename_meeting_fields, rename_task_fields
 from app.stores import make_store
@@ -108,7 +119,8 @@ class NoCacheStatic(StaticFiles):
 
 # 不需要登入的 API：健康檢查（外部監控要打得到）與登入設定本身
 # （還沒登入的人正是要靠它才知道怎麼登入）
-PUBLIC_API_PATHS = {"/api/health", "/api/auth/config"}
+# /api/push/run 沒有登入者：它是排程（GitHub Actions）打進來的，改用共用密語把關
+PUBLIC_API_PATHS = {"/api/health", "/api/auth/config", "/api/push/run"}
 
 # 群組裡「只能看」的成員還是可以用的 POST：問答、翻譯只讀資料、不改資料
 VIEWER_ALLOWED_POSTS = {"/api/ask", "/api/translate"}
@@ -495,6 +507,8 @@ def create_app(
     diarizer=None,
     delete_auth_user=None,
     refine_generate=None,
+    push_send=None,
+    push_now=None,
 ) -> FastAPI:
     _configure_logging()
     settings = settings or get_settings()
@@ -1122,6 +1136,112 @@ def create_app(
             media_type="application/x-ndjson",
             headers={"Content-Disposition": 'attachment; filename="ai-feedback.jsonl"'},
         )
+
+    # ---- 手機推播提醒：App 關著、手機鎖著也跳得出來（見 docs/plans/2026-10-26-phase4-push.md）----
+
+    push_sender = push_send if push_send is not None else make_sender(
+        settings.vapid_public_key, settings.vapid_private_key, settings.vapid_subject
+    )
+    push_clock = push_now or (lambda: datetime.now(timezone.utc))
+
+    def require_push() -> None:
+        if push_sender is None:
+            raise HTTPException(status_code=503, detail="這個站台沒有設定推播（缺少 VAPID 金鑰）")
+
+    def push_to(subs: list[dict], payload: dict) -> tuple[int, int]:
+        """送給這些裝置，回傳（成功幾則，刪掉幾筆死訂閱）。"""
+        sent = dropped = 0
+        for sub in subs:
+            result = push_sender(sub, payload)
+            if result == GONE:
+                store.delete_push_subscription(sub["id"])
+                dropped += 1
+            elif result == OK:
+                sent += 1
+        return sent, dropped
+
+    @app.get("/api/push/key")
+    def push_key():
+        """前端訂閱前要先拿公鑰；沒設定時要能說出「這個站台沒有推播」，
+        而不是跳一個注定失敗的訂閱流程。"""
+        on = push_sender is not None
+        return {"enabled": on, "public_key": settings.vapid_public_key if on else None}
+
+    @app.post("/api/push/subscribe")
+    def push_subscribe(req: dict):
+        require_push()
+        try:
+            sub = normalize_subscription(req)
+        except PushError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        store.save_push_subscription({
+            "id": subscription_id(sub["endpoint"]),  # 同一支手機重訂會蓋掉舊的那筆
+            "user": current_user(),  # 訂閱跟著「當下在看的工作區」，切換時前端會重訂
+            "uid": current_account(),
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            **sub,
+        })
+        return {"ok": True}
+
+    @app.post("/api/push/unsubscribe")
+    def push_unsubscribe(req: dict):
+        endpoint = str(req.get("endpoint") or "").strip()
+        if not endpoint:
+            raise HTTPException(status_code=400, detail="缺少 endpoint")
+        store.delete_push_subscription(subscription_id(endpoint))
+        return {"ok": True}
+
+    @app.post("/api/push/test")
+    def push_test():
+        """立刻送一則。手機到底收不收得到，只有真的送一次才知道。"""
+        require_push()
+        subs = store.list_push_subscriptions(current_user())
+        sent, dropped = push_to(subs, {
+            "title": "會議助手",
+            "body": "通知測試成功，之後的待辦提醒會像這樣跳出來。",
+            "url": "/",
+        })
+        # 刻意不寫 last_sent：按過試送之後，當天早上還是要收得到真正的提醒
+        return {"sent": sent, "devices": len(subs), "dropped": dropped}
+
+    @app.post("/api/push/run")
+    def push_run(request: Request):
+        """排程每小時叫一次，決定誰現在該收到今天的提醒。
+
+        沒有登入者（GitHub Actions 打進來的），所以不在登入中介層的管轄內，
+        改用共用密語把關——沒設密語就整支關掉，不留一個誰都能觸發的入口。
+        """
+        secret = settings.push_cron_secret
+        if not secret or request.headers.get("X-Push-Secret") != secret:
+            raise HTTPException(status_code=401, detail="密語不正確")
+        if push_sender is None:
+            return {"enabled": False, "checked": 0, "sent": 0, "quiet": 0, "dropped": 0}
+
+        now = push_clock()
+        payloads: dict[str, dict | None] = {}  # 同一個工作區的多支手機只掃一次
+        checked = sent = quiet = dropped = 0
+        for sub in store.all_push_subscriptions():
+            user = sub.get("user")
+            if not user or not due_now(sub, now):
+                continue
+            checked += 1
+            if user not in payloads:
+                payloads[user] = digest(scan_reminders(
+                    store.list_tasks(user=user), store.list_meetings(user=user), due_soon_days=2
+                ))
+            payload = payloads[user]
+            if payload is None:
+                quiet += 1
+            else:
+                ok, gone = push_to([sub], payload)
+                sent += ok
+                dropped += gone
+                if gone:
+                    continue  # 訂閱已經刪掉了，不要再把它寫回去
+            # 沒東西可送也記一筆：不記的話早上 9 點到 11 點之間會把同一份清單重掃三次
+            sub["last_sent"] = local_time(sub, now).date().isoformat()
+            store.save_push_subscription(sub)
+        return {"enabled": True, "checked": checked, "sent": sent, "quiet": quiet, "dropped": dropped}
 
     @app.post("/api/meetings/{meeting_id}/refine")
     def refine_meeting(meeting_id: str, req: RefineRequest):
