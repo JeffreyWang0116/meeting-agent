@@ -41,7 +41,8 @@ function renderSwitch() {
   const g = currentGroup();
   const label = g ? g.name : "個人";
   $("wsName").textContent = label;
-  $("wsChip").innerHTML = `${icon("users", "i-sm")}${esc(label)}${g ? ` · ${esc(roleLabel(g.role))}` : ""}`;
+  // 只放名稱：角色在下面的選單裡每一列都標著，擠在手機標題旁只會把名稱壓到剩幾個字
+  $("wsChip").innerHTML = `${icon("users", "i-sm")}${esc(label)}`;
   const n = state.invites.length;
   $("wsInviteBadge").hidden = !n;
   $("wsInviteBadge").textContent = n ? String(n) : "";
@@ -184,7 +185,7 @@ function manageHtml(g) {
         ${roleSelect("", "editor", 'id="grpInviteRole"')}
         <button class="primary" id="btnGrpInvite">邀請</button>
       </div>
-      <p class="hint">對方用這個信箱登入本站，就會在工作區選單看到邀請；也可以按「用 Gmail 寄邀請信」通知他（信由你自己寄出）。</p>` : ""}
+      <p class="hint">對方用這個信箱登入本站，就會在工作區選單看到邀請。</p>` : ""}
     ${invites}
     <div class="grp-danger">
       ${owner

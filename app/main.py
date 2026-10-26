@@ -755,10 +755,18 @@ def create_app(
         }
 
     def validate_kind(kind: str | None, *, existing: bool = False) -> str | None:
-        """existing=True：這個 kind 來自已存檔的會議（編輯、重新分析）。"""
+        """existing=True：這個 kind 來自已存檔的會議（編輯、重新分析）。
+
+        自訂會議範本移除後，用範本分析過的舊會議帶著一個再也查不到的 `custom:<id>`。
+        那種紀錄擋下來的話連標題都改不了，而種類值本身也只剩「會議種類：custom:7f3a9b」
+        這種會被原樣拼進 prompt 的垃圾——所以回傳 None，當成沒有種類（通用格式）。
+        功能是我們收掉的，資料是使用者的。
+        """
         # LEGACY_KINDS 一併放行：改版前存下來的會議帶的是舊的錄音種類值，
         # 編輯或重新分析那些紀錄時不該被擋下來
         if kind and kind not in MEETING_KINDS and kind not in LEGACY_KINDS:
+            if existing:
+                return None
             raise HTTPException(
                 status_code=400,
                 detail=f"kind 只能是：{'、'.join(sorted(MEETING_KINDS))}",
@@ -895,8 +903,6 @@ def create_app(
                     "kinds": [
                         {
                             "value": k,
-                            # 下拉選單上顯示的字。自訂範本的 value 是 custom:<id>，
-                            # 不能直接拿來當標籤
                             "label": k,
                             # 給人看的說明，不是拼進 prompt 的 KIND_HINTS
                             "hint": KIND_DESCRIPTIONS[k],
@@ -935,7 +941,11 @@ def create_app(
             # 編輯時前端會把目前的 kind 原樣帶回來。範本已經被刪掉的話，
             # 嚴格檢查會讓那場會議連標題都改不了——沒換種類就放行
             current = store.get_meeting(meeting_id, user=current_user()) or {}
-            validate_kind(fields["kind"], existing=fields["kind"] == current.get("kind"))
+            # 回寫驗過的值：查不到的種類會變成 None，順手把它從紀錄上清掉，
+            # 不然歷史列表上會一直掛著「· custom:7f3a9b」
+            fields["kind"] = validate_kind(
+                fields["kind"], existing=fields["kind"] == current.get("kind")
+            )
         if "tags" in fields and not _is_str_list(fields["tags"]):
             raise HTTPException(status_code=400, detail="tags 必須是字串陣列")
         if "attendees" in fields and not _is_str_list(fields["attendees"]):
@@ -1204,7 +1214,7 @@ def create_app(
             raise HTTPException(status_code=400, detail="此會議沒有逐字稿全文，無法重新分析")
         limit("analyze")
 
-        kind = record.get("kind")
+        kind = validate_kind(record.get("kind"), existing=True)
         # 會前打的專用詞彙跟著會議存起來，重新分析時要沿用，不能弄丟
         stored_terms = record.get("terms") or None
         features = resolve_features(req.features if req else None, kind)
@@ -1242,6 +1252,8 @@ def create_app(
             # 種類專屬區塊也要換新：漏掉的話重新分析後畫面上還是舊的區塊內容
             "sections": dumped.get("sections", []),
         }
+        if kind != record.get("kind"):
+            updates["kind"] = kind  # 查不到的種類：這次用通用格式重跑了，紀錄也跟著更正
         if corrections:  # 逐字稿被改過才回寫，沒改就不動原紀錄
             updates["transcript"] = transcript
         store.update_meeting(meeting_id, updates, user=current_user())

@@ -32,7 +32,6 @@ DEFAULT_LIMITS: dict[str, tuple[int, int]] = {
     "live_chunk": (20, 600),
     "ask": (10, 100),        # 跨會議問答
     "translate": (20, 300),  # 摘要翻譯
-    "refine": (10, 100),     # 用一句話請 AI 修改分析結果（只有「預覽」那一步會打 AI）
 }
 
 # 訪客（匿名登入）的上限，照連線 IP 計算：清掉瀏覽器資料就能換一個新的匿名帳號，
@@ -44,7 +43,6 @@ GUEST_DEFAULT_LIMITS: dict[str, tuple[int, int]] = {
     "live_chunk": (20, 200),
     "ask": (5, 30),
     "translate": (10, 100),
-    "refine": (5, 30),
 }
 
 LABELS = {
@@ -54,7 +52,6 @@ LABELS = {
     "live_chunk": "即時聆聽錄音段",
     "ask": "詢問會議",
     "translate": "翻譯",
-    "refine": "請 AI 修改",
 }
 
 

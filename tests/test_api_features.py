@@ -39,7 +39,11 @@ def client(tmp_path):
     app = create_app(
         settings, store=store, orchestrator=orchestrator, transcriber=FakeTranscriber()
     )
-    return TestClient(app)
+    c = TestClient(app)
+    # 有幾條測試要繞過 API 直接塞進舊格式的紀錄，或要看送出去的 prompt 長什麼樣
+    c.store = store
+    c.decision = orchestrator.decision
+    return c
 
 
 def wait_for_job(client, job_id, timeout=5.0):
@@ -228,7 +232,11 @@ def correcting_client(tmp_path):
     app = create_app(
         settings, store=store, orchestrator=orchestrator, transcriber=FakeTranscriber()
     )
-    return TestClient(app)
+    c = TestClient(app)
+    # 有幾條測試要繞過 API 直接塞進舊格式的紀錄，或要看送出去的 prompt 長什麼樣
+    c.store = store
+    c.decision = orchestrator.decision
+    return c
 
 
 def test_correction_off_by_default(correcting_client):
@@ -361,3 +369,42 @@ def test_meeting_without_terms_stores_empty_list(client):
     body = client.post("/api/meetings", json={"text": "開會內容"}).json()
     detail = client.get(f"/api/meetings/{body['meeting_id']}").json()
     assert detail["terms"] == []
+
+
+# ---- 自訂範本移除後留下來的舊會議 ----
+
+def _meeting_with_deleted_template(client):
+    """造一場帶著「範本已被刪掉」的種類值的會議。"""
+    meeting_id = client.post("/api/meetings", json={"text": "開會內容"}).json()["meeting_id"]
+    assert client.store.update_meeting(meeting_id, {"kind": "custom:7f3a9b"}) is not None
+    return meeting_id
+
+
+def test_meeting_saved_with_a_deleted_custom_template_is_still_editable(client):
+    """自訂會議範本功能已經移除，但用範本分析過的會議還帶著 `custom:<id>`。
+
+    那是一個再也查不到的種類值。嚴格擋下來的話，那場會議連標題都改不了——
+    資料是使用者的，功能是我們收掉的，不能讓它變成改不動的紀錄。
+    """
+    meeting_id = _meeting_with_deleted_template(client)
+
+    resp = client.patch(
+        f"/api/meetings/{meeting_id}", json={"title": "改個標題", "kind": "custom:7f3a9b"}
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["meeting"]["title"] == "改個標題"
+    # 順手把查不到的種類清掉：留著它只會在歷史列表上顯示「· custom:7f3a9b」
+    assert not resp.json().get("kind")
+
+
+def test_deleted_custom_template_falls_back_to_the_generic_format(client):
+    """重新分析時那個種類值會被原樣拼進 prompt（「會議種類：custom:7f3a9b」）。
+    範本的欄位定義已經不存在，唯一還原得出來的行為是退回通用格式。"""
+    meeting_id = _meeting_with_deleted_template(client)
+    seen = []
+    client.decision._generate = lambda prompt: (seen.append(prompt) or valid_json())
+
+    resp = client.post(f"/api/meetings/{meeting_id}/reanalyze")
+    assert resp.status_code == 200, resp.text
+    assert "custom:7f3a9b" not in seen[0]
+    assert not client.get(f"/api/meetings/{meeting_id}").json().get("kind")

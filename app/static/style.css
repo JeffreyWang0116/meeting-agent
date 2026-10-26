@@ -761,7 +761,9 @@
     }
     .side-brand { display: none; }
     .ws-switch { display: none; }
-    button.ghost.ws-chip:not([hidden]) { display: inline-flex; align-items: center; gap: 6px; max-width: 46vw; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+    /* 工作區鈕屬於左邊那一組：margin-right 吃掉剩餘空間，它才會貼著標題，
+       頭像與設定被推到最右邊。拿掉的話 space-between 會把它丟到正中間 */
+    button.ghost.ws-chip:not([hidden]) { display: inline-flex; align-items: center; gap: 6px; margin-right: auto; max-width: 46vw; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
     .side-nav { flex: 1; flex-direction: row; justify-content: space-around; gap: 0; }
     /* 分頁列是手機上唯一的導覽，點不準就什麼都做不了。
        Apple 的建議是 44pt，這裡給到 52px 高（含上下 padding） */
@@ -793,7 +795,7 @@
       font-size: 1.1rem; min-width: 0; flex: 0 1 auto;
       overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     }
-    .head-tools { gap: 8px; flex: none; }
+    .head-tools { gap: 8px; flex: none; }  /* 與 .topbar 的 gap 一致：左右兩組的內部間距看起來才對稱 */
     /* 工作區名稱可長可短，讓它先被壓縮，不要去擠掉右邊的頭像與設定 */
     button.ghost.ws-chip:not([hidden]) { max-width: 34vw; font-size: .76rem; padding: 6px 10px; }
     .avatar { width: 32px; height: 32px; }
