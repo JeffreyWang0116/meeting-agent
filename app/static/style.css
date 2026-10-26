@@ -1454,3 +1454,50 @@
   display: flex; align-items: flex-start; gap: 8px; padding: 6px 10px;
   color: var(--faint); font-size: .78rem;
 }
+
+/* ---- 跨會議追蹤（insights.js）---- */
+.oi-row {
+  display: grid; grid-template-columns: 1fr auto; gap: 4px 10px;
+  padding: 9px 10px; border-bottom: 1px solid var(--border);
+}
+.oi-row:last-child { border-bottom: none; }
+.oi-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.oi-topic { font-size: .88rem; }
+.oi-meta, .oi-reason { font-size: .74rem; color: var(--faint); }
+.oi-tag {
+  align-self: start; padding: 1px 7px; border-radius: 10px;
+  font-size: .7rem; white-space: nowrap;
+}
+.oi-open .oi-tag { background: rgba(224, 104, 95, .14); color: #e0685f; }
+.oi-done .oi-tag { background: rgba(76, 175, 125, .14); color: #4caf7d; }
+.oi-answer {
+  grid-column: 1 / -1; display: flex; gap: 6px; align-items: flex-start;
+  font-size: .76rem; color: var(--muted);
+}
+.oi-answer .i-sm { color: #4caf7d; flex: none; }
+
+.person-row {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  padding: 8px 10px; border-bottom: 1px solid var(--border); font-size: .8rem;
+}
+.person-row:last-child { border-bottom: none; }
+.person-name { font-size: .88rem; min-width: 5em; }
+.person-stat { color: var(--faint); }
+.person-stat b { color: var(--ink); font-family: var(--mono); }
+.person-stat.overdue b { color: #e0685f; }
+.person-rate { margin-left: auto; display: flex; align-items: center; gap: 6px; color: var(--faint); }
+.rate-bar {
+  display: block; width: 70px; height: 4px; border-radius: 2px;
+  background: var(--card-3, var(--card)); overflow: hidden;
+}
+.rate-bar > span { display: block; height: 100%; background: var(--accent); }
+
+.report-switch { display: flex; gap: 6px; padding: 8px 10px 0; }
+.report-switch .ghost.active { background: var(--card-3, var(--card)); color: var(--ink); }
+.rep-nums { display: flex; flex-wrap: wrap; gap: 14px; padding: 10px; font-size: .8rem; color: var(--faint); }
+.rep-nums b { font-family: var(--mono); font-size: 1.1rem; color: var(--ink); margin-right: 3px; }
+.rep-block { padding: 0 10px 8px; }
+.rep-block h4 { margin: 6px 0 4px; font-size: .78rem; color: var(--faint); font-weight: 500; }
+.rep-block ul { margin: 0; padding-left: 16px; font-size: .82rem; }
+.rep-block li { margin: 3px 0; display: flex; gap: 8px; }
+.rep-when { color: var(--faint); font-size: .72rem; white-space: nowrap; margin-left: auto; }

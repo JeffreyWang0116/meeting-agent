@@ -59,6 +59,7 @@ from app.docexport import PdfFontMissing, meeting_to_docx, meeting_to_pdf
 from app.export import meeting_report_md, tasks_to_csv, tasks_to_ics
 from app.gemini_keys import is_quota_error
 from app.glossary import Glossary, clean_terms
+from app.insights import open_items, people_stats, period_report
 from app.jobs import MediaJobManager
 from app.orchestrator import Orchestrator
 from app.push import (
@@ -1210,6 +1211,37 @@ def create_app(
             content="\n".join(lines) + ("\n" if lines else ""),
             media_type="application/x-ndjson",
             headers={"Content-Disposition": 'attachment; filename="ai-feedback.jsonl"'},
+        )
+
+    # ---- 跨會議追蹤（見 app/insights.py）。全部是既有資料的彙整，不打 AI ----
+
+    def _window(days: int) -> tuple[str, str]:
+        end = now_utc().date()
+        return (end - timedelta(days=days - 1)).isoformat(), end.isoformat()
+
+    @app.get("/api/insights/open-items")
+    def insights_open_items():
+        """未決事項看板：同一件事在哪幾場出現過、後來哪一條決議回答了它。"""
+        return {"items": open_items(store.list_meetings(user=current_user()))}
+
+    @app.get("/api/insights/people")
+    def insights_people():
+        user = current_user()
+        return {"people": people_stats(
+            store.list_meetings(user=user), store.list_tasks(user=user),
+            today=now_utc().date().isoformat(),
+        )}
+
+    @app.get("/api/insights/report")
+    def insights_report(days: int = 7):
+        """週報（7）／月報（30）。days 只開放這兩種：中間的數字沒有人會想看，
+        但每一種都要在前端多一個按鈕。"""
+        if days not in (7, 30):
+            raise HTTPException(status_code=400, detail="days 只能是 7 或 30")
+        user = current_user()
+        start, end = _window(days)
+        return period_report(
+            store.list_meetings(user=user), store.list_tasks(user=user), start=start, end=end
         )
 
     # ---- 會議前準備：系列與「上次沒做完的」（見 app/agenda.py）----

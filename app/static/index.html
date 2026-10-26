@@ -255,6 +255,46 @@
             </div>
           </div>
         </div>
+
+        <!-- 跨會議追蹤：一場一場翻會議紀錄回答不了的三個問題 -->
+        <details class="panel side-panel" id="openItemsPanel">
+          <summary class="panel-head">
+            <h2>
+              <svg class="i" aria-hidden="true"><use href="/static/icons.svg#circle-help"/></svg>
+              未決事項
+              <span class="aux">跨會議追蹤：這件事提了幾次、後來誰回答了它</span>
+            </h2>
+            <span class="nav-badge" id="openItemsCount" hidden></span>
+          </summary>
+          <div id="openItemsRows"></div>
+        </details>
+
+        <details class="panel side-panel" id="peoplePanel">
+          <summary class="panel-head">
+            <h2>
+              <svg class="i" aria-hidden="true"><use href="/static/icons.svg#users"/></svg>
+              成員概況
+              <span class="aux">出席場次、手上的事、完成率</span>
+            </h2>
+          </summary>
+          <div id="peopleRows"></div>
+        </details>
+
+        <details class="panel side-panel" id="reportPanel">
+          <summary class="panel-head">
+            <h2>
+              <svg class="i" aria-hidden="true"><use href="/static/icons.svg#clipboard-list"/></svg>
+              週報／月報
+              <span class="aux">這段期間開了幾場、決定了什麼、誰最忙</span>
+            </h2>
+          </summary>
+          <div class="report-switch">
+            <button class="ghost active" data-days="7">最近 7 天</button>
+            <button class="ghost" data-days="30">最近 30 天</button>
+            <button class="ghost" id="btnCopyReport" style="margin-left:auto">複製純文字</button>
+          </div>
+          <div id="reportBody"></div>
+        </details>
       </section>
 
       <!-- ============ 新會議：三種輸入路徑 ============ -->

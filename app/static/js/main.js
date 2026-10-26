@@ -34,6 +34,7 @@
     templates   自訂會議範本（種類名稱、要哪些區塊）
     commentsui  對摘要／決議／代辦留言討論
     trashui     垃圾桶（30 天可救回）與群組活動紀錄
+    insights    跨會議追蹤：未決事項、成員概況、週報月報
     gdocs       把會議紀錄存成 Google 文件（上傳 .docx 讓雲端硬碟轉檔）
 */
 import "./core.js";
@@ -65,5 +66,6 @@ import "./pushui.js";
 import "./templates.js";
 import "./commentsui.js";
 import "./trashui.js";
+import "./insights.js";
 import "./gdocs.js";
 import "./groups.js";
