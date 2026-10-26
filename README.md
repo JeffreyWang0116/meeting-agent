@@ -293,8 +293,9 @@ Firebase 專案裡：
 匯出一份會議紀錄不該換來整個雲端硬碟的鑰匙。沒設定的話按下去會回 403，
 畫面上會直接說要去開哪一個設定。
 
-PDF 與 Word 不需要任何設定。PDF 的中文字型由映像裡的 `fonts-noto-cjk` 提供
-（見 `Dockerfile`）——少了它產出的 PDF 版面正確但每個字都是別的字。
+PDF 與 Word 不需要任何設定。PDF 的中文字型由映像裡的 `fonts-arphic-uming` 提供（見 `Dockerfile`）——
+少了它產出的 PDF 版面正確但每個字都是別的字。用 arphic 而不是 noto-cjk 是因為
+後者是 OpenType/CFF 外框，reportlab 讀不了。
 
 #### （選填）手機推播提醒：App 關著也收得到
 

@@ -121,6 +121,26 @@ def test_a_machine_with_no_chinese_font_says_so_instead_of_producing_garbage():
         find_cjk_font(paths=("/nowhere/no-such-font.ttf",))
 
 
+def test_a_font_file_reportlab_cannot_read_does_not_count_as_found():
+    """真的發生過：fonts-noto-cjk 路徑存在、檔案也正常，但它是 OpenType/CFF
+    外框，reportlab 的 TTFont 只讀得懂 TrueType 的 glyf。只檢查路徑在不在的話，
+    會在使用者按下「下載 PDF」的當下才炸。"""
+    from app.docexport import PdfFontMissing, find_cjk_font
+
+    with pytest.raises(PdfFontMissing):
+        find_cjk_font(paths=(__file__,))  # 存在，但不是字型
+
+
+def test_a_working_font_is_still_found_after_a_broken_one():
+    """壞掉的那個不該讓整串候選就此中斷。"""
+    from app.docexport import find_cjk_font
+
+    path, index = find_cjk_font()  # 這台機器上真的有的那一個
+    found, _ = find_cjk_font(paths=(__file__, "/nowhere/nope.ttf", path))
+
+    assert found == path
+
+
 def test_a_long_meeting_spills_onto_more_than_one_page():
     record = {**RECORD, "decisions": [{"description": f"第 {i} 條決議" * 5} for i in range(120)]}
 

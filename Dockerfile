@@ -2,11 +2,12 @@
 FROM python:3.12-slim
 
 # ffmpeg：正規化各種音訊/影片格式，Gemini 只吃標準音訊
-# fonts-noto-cjk：匯出 PDF 要有中文字型可以「內嵌」。少了它，產出的 PDF 版面
-#   完全正確但每一個字都是別的字，而且在有系統字型的開發機上看起來完全正常
+# fonts-arphic-uming：匯出 PDF 要有中文字型可以「內嵌」。少了它，產出的 PDF
+#   版面完全正確但每一個字都是別的字，而且在有系統字型的開發機上看起來正常。
+#   用 arphic 而不是 noto-cjk：noto-cjk 是 OpenType/CFF 外框，reportlab 讀不了
 #   （見 app/docexport.py 的 CJK_FONT_PATHS）
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ffmpeg fonts-noto-cjk \
+    && apt-get install -y --no-install-recommends ffmpeg fonts-arphic-uming \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

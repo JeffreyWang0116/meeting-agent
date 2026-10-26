@@ -21,13 +21,19 @@ PDF_FONT = "CJK"
 # （「專題進度會議」變成「菡斌砦東滘琡」）。這種錯連「有沒有中文」的檢查
 # 都過得了，只有真的把 PDF 畫出來才看得到。
 #
-# 所以改成找一份系統上的 CJK TrueType 字型內嵌進去。Linux 那幾個路徑由
-# Dockerfile 的 fonts-noto-cjk 提供，Windows 的是給開發機用的。
+# 所以改成找一份系統上的 CJK 字型內嵌進去。Linux 那幾個路徑由 Dockerfile 的
+# fonts-arphic-uming 提供（繁體、而且是 TrueType 外框），Windows 的是給開發機用的。
+#
+# 為什麼不是 fonts-noto-cjk：那包是 OpenType/CFF 外框，reportlab 的 TTFont
+# 只讀得懂 TrueType 的 glyf，載入會直接失敗。所以下面不是「挑一個存在的檔案」
+# 而是「一個一個真的試著註冊，成功才算數」——光看路徑在不在是不夠的。
 CJK_FONT_PATHS = (
-    "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
-    "/usr/share/fonts/opentype/noto/NotoSerifCJK-Regular.ttc",
     "/usr/share/fonts/truetype/arphic/uming.ttc",
+    "/usr/share/fonts/truetype/arphic/ukai.ttc",
     "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",
+    "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
+    "/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf",
+    "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
     r"C:\Windows\Fonts\msjh.ttc",
     r"C:\Windows\Fonts\mingliu.ttc",
     r"C:\Windows\Fonts\kaiu.ttf",
@@ -39,7 +45,7 @@ _TC_HINTS = ("tc", "tw", "jheng", "ming", "hk", "hei")
 
 
 class PdfFontMissing(RuntimeError):
-    """這台機器上找不到任何中文字型，產不出看得懂的 PDF。"""
+    """這台機器上找不到任何 reportlab 載得進來的中文字型，產不出看得懂的 PDF。"""
 
 TASK_HEADERS = ["任務", "負責人", "期限", "優先級", "狀態"]
 
@@ -125,31 +131,50 @@ def meeting_to_docx(record: dict, tasks: list[dict]) -> bytes:
     return buf.getvalue()
 
 
-def find_cjk_font(paths=CJK_FONT_PATHS) -> tuple[str, int]:
-    """回傳（字型檔路徑, .ttc 裡的第幾套）。找不到就丟 PdfFontMissing。"""
-    import os
+def _faces(path: str) -> list[int]:
+    """這個字型檔裡有哪幾套字，繁體那一套排前面。
+
+    .ttc 常常把日／韓／簡／繁包在一起。字都畫得出來，但「骨、直、戶」這些
+    字形依地區而異，所以優先挑繁體。
+    """
+    if not path.lower().endswith(".ttc"):
+        return [0]
 
     from reportlab.pdfbase.ttfonts import TTFontFile
+
+    preferred, rest = [], []
+    for index in range(16):
+        try:
+            name = TTFontFile(path, subfontIndex=index, validate=0).name.decode("latin-1").lower()
+        except Exception:  # noqa: BLE001 - 索引超出範圍就是這套字型只有這麼多
+            break
+        (preferred if any(h in name for h in _TC_HINTS) else rest).append(index)
+    return preferred + rest or [0]
+
+
+def find_cjk_font(paths=CJK_FONT_PATHS) -> tuple[str, int]:
+    """回傳（字型檔路徑, .ttc 裡的第幾套）；一個都載不進來就丟 PdfFontMissing。
+
+    刻意「真的試著載一次」而不是只看檔案在不在：fonts-noto-cjk 那種
+    OpenType/CFF 外框路徑存在、檔案也正常，但 reportlab 的 TTFont 只讀得懂
+    TrueType 的 glyf，載入會直接失敗。光檢查路徑的話，會在產 PDF 的當下才炸。
+    """
+    import os
+
+    from reportlab.pdfbase.ttfonts import TTFont
 
     for path in paths:
         if not os.path.exists(path):
             continue
-        if not path.lower().endswith(".ttc"):
-            return path, 0
-        best = None
-        for index in range(16):
+        for index in _faces(path):
             try:
-                name = TTFontFile(path, subfontIndex=index, validate=0).name.decode("latin-1").lower()
-            except Exception:  # noqa: BLE001 - 索引超出範圍就是這套字型只有這麼多
-                break
-            if best is None:
-                best = index
-            if any(hint in name for hint in _TC_HINTS):
-                return path, index
-        if best is not None:
-            return path, best
+                TTFont("probe", path, subfontIndex=index)
+            except Exception:  # noqa: BLE001 - 載不進來就換下一套／下一個檔案
+                continue
+            return path, index
     raise PdfFontMissing(
-        "伺服器上找不到中文字型，無法產生 PDF（Docker 映像需要 fonts-noto-cjk）"
+        "伺服器上找不到 reportlab 載得進來的中文字型，無法產生 PDF"
+        "（Docker 映像需要 fonts-arphic-uming 這類 TrueType 外框的中文字型）"
     )
 
 

@@ -19,7 +19,7 @@ jobs:
       # 少了它 PDF 的版面完全正確但每個字都是別的字，那正是 test_docexport
       # 要擋的事——在沒有字型的 runner 上跳過等於沒有擋
       - name: Install CJK font
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends fonts-noto-cjk
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends fonts-arphic-uming
       - name: Install dependencies
         run: |
           # 與 Dockerfile 裝同一份鎖定版本：CI 綠燈才代表 Render 部署的那組版本能跑
