@@ -164,6 +164,23 @@ class TaskStore(ABC):
     def delete_feedback(self, feedback_id: str, user: str) -> None:
         """只刪得掉自己的。"""
 
+    # ---- 手機推播訂閱：存在工作區底下，排程掃全站。不進備份 ----
+
+    @abstractmethod
+    def save_push_subscription(self, sub: dict) -> None:
+        """新增或整份覆蓋一筆訂閱（sub 自帶 id＝endpoint 的雜湊，同一支手機重訂會覆蓋）。"""
+
+    @abstractmethod
+    def list_push_subscriptions(self, user: str) -> list[dict]: ...
+
+    @abstractmethod
+    def all_push_subscriptions(self) -> list[dict]:
+        """不依使用者過濾：排程在沒有登入者的情況下跑。"""
+
+    @abstractmethod
+    def delete_push_subscription(self, sub_id: str) -> None:
+        """不比對使用者：排程發現訂閱失效時也要刪得掉。"""
+
     # ---- 上傳轉錄的工作紀錄：伺服器重啟後還查得到進度與已轉好的逐字稿。不進備份 ----
 
     @abstractmethod

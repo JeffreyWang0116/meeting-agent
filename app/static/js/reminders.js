@@ -1,5 +1,5 @@
 import { api } from "./api.js";
-import { $, esc, icon, loadFail, pageNo, paginate, registerPager, registerRefresher, renderPager, showError } from "./core.js";
+import { $, esc, icon, loadFail, pageNo, paginate, registerPager, registerRefresher, renderPager } from "./core.js";
 import { renderHome } from "./home.js";
 import { allMeetings, meetingLabel } from "./meetings.js";
 import { showAppNotification } from "./notify.js";
@@ -115,7 +115,7 @@ async function refreshReminders() {
     remindersLoaded = true;
     renderReminders();
     renderHome();
-    maybeNotifyReminders(false);
+    maybeNotifyReminders(false);  // 推播沒設定時的退路：趁 App 開著的時候提醒一次
   } catch (e) {
     remindersLoaded = true;
     $("reminderBody").innerHTML = loadFail("reminders");
@@ -125,16 +125,18 @@ async function refreshReminders() {
   }
 }
 
-// ---- 每日提醒通知（Notification API）----
+// 提醒掃描結果（首頁徽章與推播摘要都讀這一份）。手機推播的開關在 pushui.js——
+// 原本這裡用頁面端的 new Notification()，iOS 不支援、而且要 App 開著才跳得出來
 let lastReminders = null;
+// 這個瀏覽器自己跳的每日提醒：只在 App 開著、而且剛好跑到掃描那一行時才發得出來。
+// 它是推播沒設定時的退路，真正關著也收得到的提醒走 Web Push（pushui.js / app/push.py）。
+// 按鈕由 pushui.js 統一管，一顆開關不能有兩個主人。
 const NOTIFY_KEY = "dailyNotify", NOTIFY_DATE_KEY = "dailyNotifyDate";
-const notifyEnabled = () => localStorage.getItem(NOTIFY_KEY) === "1";
-function updateNotifyBtn() {
-  $("btnNotifyToggle").textContent = notifyEnabled() ? "已開啟" : "開啟";
-}
+const localDailyEnabled = () => localStorage.getItem(NOTIFY_KEY) === "1";
+const setLocalDaily = on => localStorage.setItem(NOTIFY_KEY, on ? "1" : "0");
 // 回傳 false 代表該發卻發不出來（瀏覽器不讓發）；沒有要提醒的事回傳 true
 async function maybeNotifyReminders(force) {
-  if (!notifyEnabled() || !lastReminders) return true;
+  if (!localDailyEnabled() || !lastReminders) return true;
   const urgent = lastReminders.reminders.filter(x => x.kind === "overdue" || x.kind === "due_soon");
   if (!urgent.length) return true;
   const today = new Date().toLocaleDateString("sv");
@@ -142,25 +144,13 @@ async function maybeNotifyReminders(force) {
   const overdue = urgent.filter(x => x.kind === "overdue").length;
   const soon = urgent.length - overdue;
   const parts = [overdue ? `${overdue} 項逾期` : "", soon ? `${soon} 項即將到期` : ""].filter(Boolean);
-  const shown = await showAppNotification("會議 Agent 待辦提醒", {
+  const shown = await showAppNotification("會議助手待辦提醒", {
     body: parts.join("、") + "，點開看看吧。", icon: "/static/icon.svg",
     tag: "daily-reminder", data: { url: "/#reminder" },
   });
   if (shown) localStorage.setItem(NOTIFY_DATE_KEY, today);  // 沒發出去就別記，下次開網站再試
   return shown;
 }
-$("btnNotifyToggle").addEventListener("click", async () => {
-  if (notifyEnabled()) { localStorage.setItem(NOTIFY_KEY, "0"); updateNotifyBtn(); return; }
-  if (!("Notification" in window)) { showError("此瀏覽器不支援通知功能"); return; }
-  let perm = Notification.permission;
-  if (perm !== "granted") perm = await Notification.requestPermission();
-  if (perm !== "granted") { showError("尚未允許通知權限，請到瀏覽器網站設定開啟"); return; }
-  localStorage.setItem(NOTIFY_KEY, "1");
-  updateNotifyBtn();
-  // 開啟當下先示範一次；發不出來就明講，不要讓使用者以為之後會收到
-  if (!(await maybeNotifyReminders(true))) showError("這個瀏覽器發不出通知，每日提醒不會出現");
-});
-updateNotifyBtn();
 
 // 記住群組展開／收合，重繪後才能還原（原生 <details> 撐不過 innerHTML 重設）
 $("reminderBody").addEventListener("toggle", e => {
@@ -197,4 +187,4 @@ window.addEventListener("workspacechange", () => {
   refreshReminders();
 });
 
-export { ALERT_LABEL, NOTIFY_KEY, activeAlerts, dismissedAlerts, lastReminders, maybeNotifyReminders, notifyEnabled, refreshReminders, remindersLoaded, renderReminders, updateAlertCount, updateNotifyBtn };
+export { ALERT_LABEL, activeAlerts, dismissedAlerts, lastReminders, localDailyEnabled, maybeNotifyReminders, refreshReminders, remindersLoaded, renderReminders, setLocalDaily, updateAlertCount };

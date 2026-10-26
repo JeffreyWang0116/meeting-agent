@@ -28,6 +28,8 @@
     ask         跨會議問答
     inputs      三條輸入路徑：文字貼上／檔案上傳／即時聆聽
     settings    主題、設定選單、詞彙表、備份、PWA
+    push        推播的純函式（支援判斷、公鑰轉換）
+    pushui      手機推播提醒的開關（訂閱／退訂／試送）
     templates   自訂會議範本（種類名稱、要哪些區塊）
 */
 import "./core.js";
@@ -53,5 +55,7 @@ import "./home.js";
 import "./ask.js";
 import "./inputs.js";
 import "./settings.js";
+import "./push.js";
+import "./pushui.js";
 import "./templates.js";
 import "./groups.js";

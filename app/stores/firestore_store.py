@@ -45,6 +45,7 @@ class FirestoreStore(TaskStore):
         jobs: str = "media_jobs",
         feedback: str = "feedback",
         templates: str = "templates",
+        push_subscriptions: str = "push_subscriptions",
     ):
         self._db = db
         self._meetings = meetings
@@ -55,6 +56,7 @@ class FirestoreStore(TaskStore):
         self._jobs = jobs
         self._feedback = feedback
         self._templates = templates
+        self._push = push_subscriptions
         self._lock = threading.Lock()
         self._backfill_lock = threading.Lock()  # 與 _lock 分開，才能在鎖內安全呼叫
         self._backfilled = False
@@ -430,4 +432,19 @@ class FirestoreStore(TaskStore):
     def delete_template(self, template_id: str, user: str) -> None:
         if self.get_template(template_id, user) is not None:
             self._db.collection(self._templates).document(template_id).delete()
+
+    # ---- 推播訂閱 ----
+
+    def save_push_subscription(self, sub: dict) -> None:
+        self._db.collection(self._push).document(sub["id"]).set(dict(sub))
+
+    def list_push_subscriptions(self, user: str) -> list[dict]:
+        query = self._db.collection(self._push).where(filter=_user_filter(user))
+        return [snap.to_dict() for snap in query.stream()]
+
+    def all_push_subscriptions(self) -> list[dict]:
+        return [snap.to_dict() for snap in self._db.collection(self._push).stream()]
+
+    def delete_push_subscription(self, sub_id: str) -> None:
+        self._db.collection(self._push).document(sub_id).delete()
 
