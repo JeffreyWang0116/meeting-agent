@@ -14,11 +14,10 @@
     audioguide  收音防護：依平台給說明、新裝置偵測、系統音源靜音（純函式）
     groupinvite 群組角色名稱、邀請信 Gmail 草稿網址（純函式）
     groups      工作區切換（個人／群組）、群組管理與邀請
+    bubbles     逐字稿切泡泡（純函式）
     transcript  逐字稿渲染與時間/引用句跳轉
     progress    轉錄進度的剩餘時間推算（純函式）
     notify      瀏覽器通知（手機要經由 service worker 發）
-    transcriptedit 逐字稿就地編輯的純函式（改句、改講者、合併、拆句、刪句）
-    transcriptui 逐字稿就地修正的介面（接上面的純函式到畫面）
     result      分析結果頁
     tasks       任務庫
     meetings    歷史會議
@@ -39,11 +38,10 @@ import "./setup.js";
 import "./speakers.js";
 import "./audioguide.js";
 import "./groupinvite.js";
+import "./bubbles.js";
 import "./transcript.js";
 import "./progress.js";
 import "./notify.js";
-import "./transcriptedit.js";
-import "./transcriptui.js";
 import "./calendar.js";
 import "./result.js";
 import "./tasks.js";

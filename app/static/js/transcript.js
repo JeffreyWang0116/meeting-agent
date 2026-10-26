@@ -1,6 +1,6 @@
 import { $, esc } from "./core.js";
 import { LABEL_RE } from "./speakers.js";
-import { parseChatMessages } from "./transcriptedit.js";
+import { parseChatMessages } from "./bubbles.js";
 
 /* ==================================================================
    3. 逐字稿：連續文件式渲染（時間欄＋講者＋內文）與時間/引用句跳轉
@@ -16,9 +16,6 @@ const TIME_RE = /^\[(\d{1,2}(?::\d{1,2}){0,2})\]\s*/;
 function timeLabelToSeconds(label) {
   return String(label).split(":").reduce((acc, p) => acc * 60 + Number(p), 0);
 }
-
-// 泡泡怎麼切（含講者標籤的繼承規則）只有 transcriptedit.js 一份：就地編輯要靠
-// 「畫面上第幾個泡泡 ＝ 原文哪幾行」對得起來，兩邊各切一次遲早會不一致
 
 // speakerMap：跨段落維持同講者同色（即時聆聽逐段附加時傳入同一個 map）
 // translation：對應的譯文（可選）。行數對得上就逐句雙語對照，對不上就整段附在最後。

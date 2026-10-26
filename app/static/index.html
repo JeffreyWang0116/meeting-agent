@@ -341,15 +341,6 @@
                   <option value="zh">譯成中文</option>
                 </select>
               </div>
-              <div class="field">
-                <label class="lbl" for="liveChunk">逐字稿更新頻率</label>
-                <select class="field-sel" id="liveChunk" title="多久把一段錄音送去轉成文字。越短看到字越快，但同樣長度的會議要打更多次 AI 請求">
-                  <option value="20">每 20 秒</option>
-                  <option value="30">每 30 秒</option>
-                  <option value="45" selected>每 45 秒</option>
-                  <option value="60">每 60 秒</option>
-                </select>
-              </div>
             </div>
             <!-- 麥克風來源：樣本與正式聆聽共用同一支，聲紋才比得準（同一個人換裝置錄，
                  音色差距足以讓比對失效）。裝置名稱要授權過才看得到，所以點開才列舉 -->
@@ -420,21 +411,11 @@
                 <svg class="i-sm" aria-hidden="true"><use href="/static/icons.svg#disc"/></svg>
                 回到沉浸畫面
               </button>
-              <button class="ghost" id="btnLiveMark" hidden title="記下現在這個時間點，分析時優先列入會議重點">
-                <svg class="i-sm" aria-hidden="true"><use href="/static/icons.svg#star"/></svg>
-                標記這一刻
-              </button>
               <button class="ghost" id="btnLiveRetry" style="display:none">
                 <svg class="i-sm" aria-hidden="true"><use href="/static/icons.svg#refresh-cw"/></svg>
                 重試分析
               </button>
               <span class="status-line" id="liveStatus"></span>
-            </div>
-            <div class="mark-list" id="liveMarks" hidden></div>
-            <div class="field" id="liveNotesRow" hidden>
-              <label class="lbl" for="liveNotes">我的筆記（會一起送去分析，但不會寫進逐字稿）</label>
-              <textarea class="field-sel" id="liveNotes" rows="3"
-                placeholder="會議中想到的事、聽不清楚要回頭確認的地方…"></textarea>
             </div>
             <div class="transcript-box" id="liveTranscript"></div>
           </div>
@@ -537,21 +518,12 @@
                 <summary>
                   <svg class="i-sm" aria-hidden="true"><use href="/static/icons.svg#scroll-text"/></svg>
                   會議逐字稿
-                  <button class="ghost" id="btnEditTranscript" style="margin-left:auto" hidden>
-                    <svg class="i-sm" aria-hidden="true"><use href="/static/icons.svg#pencil"/></svg>
-                    修正
-                  </button>
-                  <button class="ghost" id="btnCopyTranscript">
+                  <button class="ghost" id="btnCopyTranscript" style="margin-left:auto">
                     <svg class="i-sm" aria-hidden="true"><use href="/static/icons.svg#copy"/></svg>
                     複製
                   </button>
                 </summary>
-                <p class="edit-hint" id="transEditHint" hidden>點任一句可修正文字或改講者；也可以與下一句合併、從游標處拆開、刪掉整句。</p>
                 <div class="transcript-full" id="rTranscript"></div>
-                <div class="edit-foot" id="transEditFoot" hidden>
-                  <span>逐字稿已修改，分析結果還是舊的。</span>
-                  <button class="primary" id="btnReanalyzeEdited">用修正後的逐字稿重新分析</button>
-                </div>
               </details>
 
               <details class="transcript-details" id="rCorrSec" style="display:none">

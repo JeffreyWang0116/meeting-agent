@@ -229,11 +229,6 @@ let liveRecording = false, liveSegTimer = null, uploadsInFlight = 0, liveStartTi
 // 目前在錄的錄音器。相鄰兩段刻意重疊幾秒，所以重疊期間會同時有兩個
 let liveRecorders = [];
 let liveSegIndex = 0, liveSentCount = 0, liveWakeLock = null, liveStarting = false;
-// 這一場實際用的分段秒數（使用者在「逐字稿更新頻率」選的；沒選就是伺服器預設）
-let liveChunkSeconds = 0;
-// 聆聽中按「標記這一刻」記下的秒數（整場相對時間）
-let liveMarks = [];
-function segmentSeconds() { return liveChunkSeconds || chunkSeconds; }
 
 // 取得要錄的串流。withSystemAudio 為真時，額外抓耳機／系統音源（對方的聲音），
 // 和麥克風混成一條軌一起錄。音源來源由 sysSourceValue() 決定：
@@ -468,7 +463,7 @@ function liveTick() {
   const s = Math.floor((Date.now() - liveStartTime) / 1000);
   const clock = `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
   const pending = uploadsInFlight > 0 ? `，${uploadsInFlight} 段辨識中…` : "";
-  const sent = liveSentCount > 0 ? `已送出 ${liveSentCount} 段${pending}` : `第一段約 ${Math.min(12, segmentSeconds())} 秒後送出`;
+  const sent = liveSentCount > 0 ? `已送出 ${liveSentCount} 段${pending}` : `第一段約 ${Math.min(12, chunkSeconds)} 秒後送出`;
   $("liveStatus").innerHTML = `<span class="rec-dot"></span>聆聽中 ${clock}（${sent}）`;
   if (!$("liveStage").hidden) {
     $("stageTime").textContent = clock;
@@ -731,7 +726,7 @@ function recordSegment(scheduled) {
     return;
   }
   // 第一段縮短到 12 秒：讓使用者快速看到第一句逐字稿，確認「真的有在聽」
-  const secs = liveSegIndex === 0 ? Math.min(12, segmentSeconds()) : segmentSeconds();
+  const secs = liveSegIndex === 0 ? Math.min(12, chunkSeconds) : chunkSeconds;
   liveSegIndex++;
   // 下一段提早 LIVE_OVERLAP_SECONDS 開錄，與本段重疊。退回不重疊模式時就不排，
   // 改由本段的 onstop 接續（＝這個功能出現之前的行為）
@@ -1094,8 +1089,6 @@ $("btnLiveStart").addEventListener("click", async () => {
   const availErr = micAvailabilityError();
   if (availErr) { showError(availErr); return; }
   if (!confirmRecordingConsent()) return;
-  // 段長在這裡定下來，整場不變：中途換會讓已排定的重疊計時器對不上
-  liveChunkSeconds = Number($("liveChunk").value) || chunkSeconds;
   try {
     liveStream = await buildLiveStream(wantSystemAudio());
   } catch (e) { releaseLiveStreams(); showError(e.message); return; }
@@ -1123,11 +1116,6 @@ $("btnLiveStart").addEventListener("click", async () => {
   liveSpeakers = {};
   liveTranscriptText = "";
   announcedNames.clear();  // 新的一場重新回報，別沿用上一場認出的人
-  liveMarks = [];
-  renderMarks();
-  $("btnLiveMark").hidden = false;
-  $("liveNotesRow").hidden = false;
-  $("liveNotes").value = "";
   acquireWakeLock();  // 保持螢幕常亮，避免手機鎖屏中斷錄音
   $("btnLiveStart").disabled = true;
   $("btnLiveStop").disabled = false;
@@ -1139,38 +1127,6 @@ $("btnLiveStart").addEventListener("click", async () => {
   liveTick();
   recordSegment();
   openStage();
-});
-
-// ---- 標記這一刻：當下按一下，分析時那幾段優先列入會議重點 ----
-// 模型自己挑重點常常挑到客套話；使用者當場按的那一下最準，而且事後補不回來
-function markLabel(seconds) {
-  const s = Math.max(0, Math.floor(seconds));
-  const mm = String(Math.floor(s / 60)).padStart(2, "0");
-  return `${mm}:${String(s % 60).padStart(2, "0")}`;
-}
-
-function renderMarks() {
-  const box = $("liveMarks");
-  box.hidden = !liveMarks.length;
-  box.innerHTML = liveMarks.map((s, i) =>
-    `<span class="mark-chip">★ ${markLabel(s)}` +
-    `<button data-i="${i}" aria-label="取消這個標記" title="取消">×</button></span>`).join("");
-}
-
-$("btnLiveMark").addEventListener("click", () => {
-  if (!liveRecording || !liveStartTime) return;
-  const at = (Date.now() - liveStartTime) / 1000;
-  // 同一秒按兩下只記一次；手指滑掉按重複很常見
-  if (liveMarks.some(s => Math.abs(s - at) < 1)) return;
-  liveMarks.push(at);
-  renderMarks();
-});
-
-$("liveMarks").addEventListener("click", e => {
-  const btn = e.target.closest("button[data-i]");
-  if (!btn) return;
-  liveMarks.splice(Number(btn.dataset.i), 1);
-  renderMarks();
 });
 
 $("btnLiveStop").addEventListener("click", async () => {
@@ -1250,16 +1206,10 @@ async function finishLiveSession() {
     correct_typos: correctTypos(),
     terms: meetingTerms(),
   };
-  // 標記與筆記只有聆聽這條路徑有。救援用的純文字分析不吃這兩個欄位，
-  // 所以放在另一個物件，不混進 options
-  const extras = {
-    marks: liveMarks.map(markLabel),
-    notes: $("liveNotes").value.trim() || null,
-  };
   try {
     let result;
     try {
-      result = await api.liveFinish(liveSessionId, { ...options, ...extras });
+      result = await api.liveFinish(liveSessionId, options);
     } catch (e) {
       // 404＝聆聽 session 不見了。session 只存在伺服器記憶體，行程一重啟（雲端
       // 重新部署、當掉重生）就永遠找不回來，再按幾次「重試分析」都是同樣的 404。
@@ -1298,11 +1248,6 @@ $("btnLiveRetry").addEventListener("click", finishLiveSession);
 
 function resetLivePanel() {
   liveTranscriptText = "";
-  liveMarks = [];
-  renderMarks();
-  $("btnLiveMark").hidden = true;
-  $("liveNotesRow").hidden = true;
-  $("liveNotes").value = "";
   $("liveTranscript").innerHTML = "";
   $("liveTranscript").style.display = "none";
   $("liveStatus").textContent = "";

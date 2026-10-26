@@ -54,9 +54,6 @@ class Orchestrator:
         user: str = DEFAULT_USER,
         speaker_prior: dict[str, str] | None = None,
         attendees: list[str] | None = None,
-        # 聆聽時按的「標記這一刻」時間點，與會議中自己打的筆記
-        marks: list[str] | None = None,
-        notes: str | None = None,
     ) -> dict:
         text = normalize_text(raw_text)
         corrections: list[dict] = []
@@ -75,8 +72,6 @@ class Orchestrator:
             # attendees：會前錄過聲音樣本的人，等於使用者指認的出席名單。
             # 只用於補全 attendees 與統一姓名寫法，不得用來猜 owner（見 build_prompt）
             attendees=attendees,
-            marks=marks,
-            notes=notes,
         )
         meeting_id = self.store.save_meeting(
             analysis, transcript=text, kind=kind, terms=terms, user=user

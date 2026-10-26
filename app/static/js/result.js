@@ -6,7 +6,6 @@ import { refreshReminders } from "./reminders.js";
 import { WIDE, showView } from "./router.js";
 import { refreshTasks } from "./tasks.js";
 import { jumpToTranscript, renderChat } from "./transcript.js";
-import { bindTranscriptEditor, wireTranscriptEditor } from "./transcriptui.js";
 
 /* ==================================================================
    4. 分析結果：摘要、會議重點、決議、代辦、行事曆、確認信
@@ -185,20 +184,6 @@ function renderResult(result, transcript, { kind = null, fromHistory = false } =
   $("rTransSec").open = WIDE.matches;
   const a = result.analysis, m = a.meeting;
   renderSpeakers();
-  // 逐字稿就地修正：已存檔的會議才能改（剛貼上還沒存的沒有 meeting_id）
-  bindTranscriptEditor({
-    meetingId: () => currentResult?.meeting_id || null,
-    transcript: () => currentTranscript,
-    setTranscript: next => {
-      currentTranscript = next;
-      currentResult.transcript = next;
-    },
-    knownNames: () => [
-      ...(currentResult?.analysis?.meeting?.attendees || []),
-      ...(currentResult?.speaker_names || []).map(s => s.name),
-    ],
-    reanalyze: reanalyzeCurrent,
-  });
   renderCorrections(result.corrections || []);
   // 成效指標：這場會議 AI 幫你做了多少事、花了多久
   const elapsed = analysisStartTime ? ((Date.now() - analysisStartTime) / 1000).toFixed(1) : null;
@@ -386,27 +371,6 @@ $("rTodos").addEventListener("click", e => {
     sec.scrollIntoView({ behavior: "smooth", block: "nearest" });  // 找不到就只展開逐字稿
   }
 });
-
-// ---- 修正逐字稿後重新分析：摘要、代辦、引用句都還是改之前的 ----
-// 刻意不在每次修正後自動重跑：重新分析要花 AI 額度，改一個錯字不值得
-async function reanalyzeCurrent() {
-  const id = currentResult?.meeting_id;
-  if (!id) return;
-  const btn = $("btnReanalyzeEdited");
-  if (!confirm("用修正後的逐字稿重跑 AI，這場會議的任務會整批換新。繼續？")) return;
-  btn.disabled = true;
-  const original = btn.textContent;
-  btn.textContent = "分析中…";
-  try {
-    const r = await api.reanalyze(id);
-    $("transEditFoot").hidden = true;
-    renderResult({ ...r, meeting_id: id }, r.transcript, { kind: metaKind, fromHistory: Boolean(historyMeetingId) });
-    refreshTasks(); refreshMeetings(); refreshReminders();
-  } catch (err) { showError("重新分析失敗：" + err.message); }
-  finally { btn.disabled = false; btn.textContent = original; }
-}
-
-wireTranscriptEditor();
 
 // ---- 會議重點：點擊 → 展開逐字稿、跳到該時間節點（沒有時間就用原句比對） ----
 $("rHighlights").addEventListener("click", e => {

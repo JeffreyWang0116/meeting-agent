@@ -5,6 +5,7 @@ import { $, esc, showNotice } from "./core.js";
 // 收音說明依平台不同（Windows 與 macOS 擷取系統聲音的方式完全不一樣）
 const PLATFORM = detectPlatform(navigator.userAgent);
 
+// 一段錄音錄多久送去轉成文字一次。由伺服器決定（LIVE_CHUNK_SECONDS），使用者不用管
 let chunkSeconds = 45;
 
 /* ==================================================================
@@ -230,12 +231,7 @@ let enrollMaxSpeakers = 0;
 async function loadHealth() {
   try {
     const h = await api.health();
-    // 伺服器的預設值；使用者可在「逐字稿更新頻率」自己選，選過就以他的為準
     chunkSeconds = h.live_chunk_seconds || 45;
-    if (![...$("liveChunk").options].some(o => Number(o.value) === chunkSeconds)) {
-      $("liveChunk").add(new Option(`每 ${chunkSeconds} 秒（伺服器設定）`, String(chunkSeconds)));
-    }
-    $("liveChunk").value = String(chunkSeconds);
     enrollMaxSpeakers = h.live_enroll_max_speakers || 0;
     $("liveEnrollRow").style.display = enrollMaxSpeakers > 0 ? "" : "none";
     // 人數下拉在這裡填，避免 inputs.js 反過來 import setup.js 造成循環相依
