@@ -1,0 +1,34 @@
+# 每小時叫一次 /api/push/run，讓伺服器決定誰現在該收到今天的待辦提醒。
+#
+# 為什麼不在應用程式裡跑排程：Render 免費方案沒活動就休眠，睡著的程序不會
+# 自己醒來看時間。GitHub Actions 的 cron 獨立於本服務，順便兼具喚醒作用。
+#
+# 需要兩個 repository secret：
+#   APP_URL          https://meeting-agent-mjcf.onrender.com
+#   PUSH_CRON_SECRET 與 Render 上同名環境變數一致的那串
+name: 待辦提醒推播
+
+on:
+  schedule:
+    # 整點（UTC）。實際送出時機由伺服器按每位訂閱者的當地時間決定，
+    # 這裡只負責把它叫醒——所以 cron 延遲十幾分鐘也沒關係
+    - cron: "0 * * * *"
+  workflow_dispatch:  # 手動觸發，用來驗證接線
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 觸發推播掃描
+        run: |
+          # Render 免費方案冷啟動要幾十秒，給它寬裕的時間與一次重試
+          for attempt in 1 2; do
+            code=$(curl -sS -o response.json -w "%{http_code}" \
+              --max-time 120 \
+              -X POST "${{ secrets.APP_URL }}/api/push/run" \
+              -H "X-Push-Secret: ${{ secrets.PUSH_CRON_SECRET }}") && break
+            echo "第 $attempt 次失敗，30 秒後重試"
+            sleep 30
+          done
+          cat response.json; echo
+          test "$code" = "200"
