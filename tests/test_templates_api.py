@@ -1,6 +1,8 @@
 """自訂範本的 API，以及「用自訂種類分析」真的會把區塊定義餵進提示詞。"""
 from __future__ import annotations
 
+import io
+
 from fastapi.testclient import TestClient
 
 from app.agents.decision_agent import DecisionAgent
@@ -11,19 +13,24 @@ from app.config import Settings
 from app.main import create_app
 from app.orchestrator import Orchestrator
 from app.stores.local_store import LocalJsonStore
+from tests.test_api import FakeTranscriber, wait_for_job
+
+
+def reply(sections="[]"):
+    return (
+        '{"meeting": {"title": "專題會議", "date": "2026-10-20", "summary": "s",'
+        ' "attendees": []}, "decisions": [], "todos": [], "pending_items": [],'
+        f' "highlights": [], "sections": {sections}, "tags": []}}'
+    )
 
 
 def make(tmp_path):
-    """記下送進模型的提示詞，回固定的合法 JSON。"""
+    """記下送進模型的提示詞，回 client.reply 的內容（預設是固定的合法 JSON）。"""
     seen = []
 
     def generate(prompt):
         seen.append(prompt)
-        return (
-            '{"meeting": {"title": "專題會議", "date": "2026-10-20", "summary": "s",'
-            ' "attendees": []}, "decisions": [], "todos": [], "pending_items": [],'
-            ' "highlights": [], "sections": [], "tags": []}'
-        )
+        return client.reply
 
     store = LocalJsonStore(tmp_path / "db.json")
     orchestrator = Orchestrator(
@@ -33,8 +40,10 @@ def make(tmp_path):
         notifier=NotifierAgent(tmp_path / "notifications"),
     )
     client = TestClient(create_app(
-        Settings(gemini_api_key=None, data_dir=tmp_path), store=store, orchestrator=orchestrator
+        Settings(gemini_api_key=None, data_dir=tmp_path), store=store, orchestrator=orchestrator,
+        transcriber=FakeTranscriber(),
     ))
+    client.reply = reply()
     client.prompts = seen
     client.store = store
     return client
@@ -96,6 +105,52 @@ def test_analysing_with_a_custom_kind_feeds_the_sections_into_the_prompt(tmp_pat
     assert "學校專題的每週進度會議" in prompt
     # features 只有 summary 與 todos → 其餘欄位要叫模型不要輸出
     assert "decisions" in prompt
+
+
+def test_custom_kind_sections_from_the_model_are_kept(tmp_path):
+    """模型照範本回了區塊，不能被內建種類的白名單濾掉。"""
+    client = make(tmp_path)
+    created = client.post("/api/templates", json=BODY).json()["template"]
+    client.reply = reply('[{"label": "本週進度", "items": ["登入做完了"]}, {"label": "亂加的", "items": ["x"]}]')
+
+    mid = client.post("/api/meetings", json={
+        "text": "本週把登入做完了", "kind": f"custom:{created['id']}"}).json()["meeting_id"]
+
+    assert client.get(f"/api/meetings/{mid}").json()["sections"] == [
+        {"label": "本週進度", "items": ["登入做完了"]}]
+
+
+def test_uploading_a_file_with_a_custom_kind_feeds_the_sections_into_the_prompt(tmp_path):
+    """上傳走背景執行緒，沒有請求上下文：範本要在送出當下就查好帶進去。"""
+    client = make(tmp_path)
+    created = client.post("/api/templates", json=BODY).json()["template"]
+
+    resp = client.post(
+        "/api/media",
+        files={"file": ("meeting.wav", io.BytesIO(b"RIFF-fake-wav"), "audio/wav")},
+        data={"kind": f"custom:{created['id']}"},
+    )
+    job = wait_for_job(client, resp.json()["job_id"])
+
+    assert job["status"] == "done"
+    prompt = client.prompts[-1]
+    assert "本週進度" in prompt and "卡住的地方" in prompt
+    assert f"custom:{created['id']}" not in prompt
+
+
+def test_reanalysing_a_custom_kind_meeting_uses_the_template_and_updates_sections(tmp_path):
+    client = make(tmp_path)
+    created = client.post("/api/templates", json=BODY).json()["template"]
+    mid = client.post("/api/meetings", json={
+        "text": "本週把登入做完了", "kind": f"custom:{created['id']}"}).json()["meeting_id"]
+    client.reply = reply('[{"label": "本週進度", "items": ["登入做完了"]}]')
+
+    assert client.post(f"/api/meetings/{mid}/reanalyze").status_code == 200
+
+    prompt = client.prompts[-1]
+    assert "本週進度" in prompt and "學校專題的每週進度會議" in prompt
+    assert client.get(f"/api/meetings/{mid}").json()["sections"] == [
+        {"label": "本週進度", "items": ["登入做完了"]}]
 
 
 def test_the_meeting_remembers_its_custom_kind(tmp_path):

@@ -75,6 +75,9 @@ class MediaJobManager:
         features: set[str] | None = None,
         correct_typos: bool = False,
         user: str = DEFAULT_USER,
+        # 自訂範本的區塊定義。範本存在 store 裡、要靠請求上下文的 user 查，
+        # 背景執行緒查不到，所以由呼叫端先查好
+        kind_spec: dict | None = None,
     ) -> str:
         job_id = uuid.uuid4().hex[:12]
         self._prune_stored(user)
@@ -99,7 +102,7 @@ class MediaJobManager:
             target=self._run,
             args=(
                 job_id, Path(file_path), meeting_date, kind, features,
-                correct_typos, terms, user,
+                correct_typos, terms, user, kind_spec,
             ),
             daemon=True,
         )
@@ -210,6 +213,7 @@ class MediaJobManager:
         correct_typos: bool = False,
         terms: list[dict] | None = None,
         user: str = DEFAULT_USER,
+        kind_spec: dict | None = None,
     ) -> None:
         path = file_path
         try:
@@ -262,6 +266,7 @@ class MediaJobManager:
                 terms=terms,
                 # 背景執行緒沒有請求上下文，使用者在 submit 當下就捕捉好
                 user=user,
+                kind_spec=kind_spec,
             )
             # 校正過的話逐字稿會變，job 要換成校正後的版本（前端顯示的就是這份）
             self._update(

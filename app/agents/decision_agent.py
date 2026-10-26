@@ -424,7 +424,7 @@ class DecisionAgent:
             raw = self._generate(prompt)
             try:
                 analysis = MeetingAnalysis.model_validate_json(strip_code_fence(raw))
-                return self._enforce_features(analysis, features, kind)
+                return self._enforce_features(analysis, features, kind, kind_spec)
             except (ValidationError, ValueError) as exc:
                 last_error = exc
                 prompt = base_prompt + _RETRY_SUFFIX.format(error=exc)
@@ -435,12 +435,13 @@ class DecisionAgent:
 
     @staticmethod
     def _enforce_features(
-        analysis: MeetingAnalysis, features: set[str], kind: str | None = None
+        analysis: MeetingAnalysis, features: set[str], kind: str | None = None,
+        kind_spec: dict | None = None,
     ) -> MeetingAnalysis:
         """防禦性保護：不管 LLM 有沒有聽話，沒開的功能一律強制清空。"""
         # 區塊同理：只留這個種類真的定義過的 label，並照定義的順序排好，
         # 前端才不用防模型自己發明的欄位
-        allowed = sections_for_kind(kind)
+        allowed = kind_spec.get("sections", {}) if kind_spec else sections_for_kind(kind)
         if allowed:
             found = {sec.label: sec for sec in analysis.sections}
             analysis.sections = [found[label] for label in allowed if label in found]

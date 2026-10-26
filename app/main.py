@@ -1260,6 +1260,7 @@ def create_app(
                 kind=kind,
                 features=features,
                 extra_terms=stored_terms,
+                kind_spec=kind_spec_of(kind),
             )
         except DecisionAgentError as exc:
             raise HTTPException(status_code=502, detail=str(exc))
@@ -1276,6 +1277,8 @@ def create_app(
             "pending_items": dumped["pending_items"],
             "highlights": dumped.get("highlights", []),
             "tags": dumped.get("tags", []),
+            # 種類專屬區塊也要換新：漏掉的話重新分析後畫面上還是舊的區塊內容
+            "sections": dumped.get("sections", []),
         }
         if corrections:  # 逐字稿被改過才回寫，沒改就不動原紀錄
             updates["transcript"] = transcript
@@ -1686,6 +1689,7 @@ def create_app(
                 features=resolved_features,
                 correct_typos=correct,
                 terms=resolved_terms,
+                kind_spec=kind_spec_of(kind),
             )
         }
 
