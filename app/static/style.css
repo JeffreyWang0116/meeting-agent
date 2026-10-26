@@ -880,18 +880,7 @@
     .spinner { animation-duration: 1.6s; }
   }
   .status-line { font-size: .84rem; color: var(--muted); display: flex; align-items: center; gap: 8px; }
-  /* 分析進行中（新會議頁）。分析沒有可回報的刻度，所以是一條來回跑的跑馬燈：
-     它回答的不是「還要多久」，而是「它還在跑」——靜止的畫面跟當掉長得一樣 */
-  .analysing { display: flex; flex-direction: column; gap: 8px; margin-top: 4px; }
-  .progress.marquee > div {
-    width: 35%; background: var(--ink);
-    animation: marquee 1.4s ease-in-out infinite alternate; transition: none;
-  }
-  @keyframes marquee {
-    0% { margin-left: 0; }
-    100% { margin-left: 65%; }
-  }
-  @media (prefers-reduced-motion: reduce) { .progress.marquee > div { animation-duration: 3.2s; } }
+  #analysingBox { margin-top: 4px; }
   .transcript-box {
     background: var(--card-2); border: 1px solid var(--border); border-radius: var(--radius-md);
     padding: 14px; max-height: 240px; overflow-y: auto;

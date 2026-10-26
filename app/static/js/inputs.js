@@ -18,8 +18,8 @@ import { chatHtml, renderChat } from "./transcript.js";
 /* ---- 分析進行中：留在這一頁 ----------------------------------------
    原本一送出就跳到結果頁擺骨架。骨架是靜止的，貼上文字十幾秒還好，但即時
    聆聽結束後要整場做講者分離再分析，一小時的會議可以跑好幾分鐘——畫面什麼
-   都沒動，跟當掉長得一模一樣。現在留在送出的那一頁，跑馬燈＋每秒跳的計時器
-   明白表示還在跑，完成後再直接開那場會議的完整檢視。
+   都沒動，跟當掉長得一模一樣。現在留在送出的那一頁，每秒跳一次的計時器本身
+   就說明還在跑，完成後再直接開那場會議的完整檢視。
 
    計時器報的是「已經過多久」而不是「還要多久」：分析沒有可回報的刻度，估出來
    的數字會卡住不動，反而更像當掉。                                     */
@@ -67,8 +67,7 @@ async function openAnalysed(result) {
 $("btnAnalyzeText").addEventListener("click", async () => {
   clearError();
   const btn = $("btnAnalyzeText");
-  const original = btn.innerHTML;
-  btn.disabled = true; btn.textContent = "AI 分析中…";
+  btn.disabled = true;  // 「AI 分析中…」由下方的狀態列講，按鈕不用再說一次
   markAnalysisStart();
   startAnalysing("AI 分析中");
   try {
@@ -82,7 +81,7 @@ $("btnAnalyzeText").addEventListener("click", async () => {
         });
     await openAnalysed(result);
   } catch (e) { stopAnalysing(); showError(e.message); }
-  finally { btn.disabled = false; btn.innerHTML = original; }
+  finally { btn.disabled = false; }
 });
 
 // ---- 路徑 2：檔案上傳 ----

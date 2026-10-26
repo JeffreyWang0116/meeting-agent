@@ -417,10 +417,9 @@
           </div>
 
           <!-- 分析進行中：三條路都留在這一頁等，完成後直接開那場會議的完整檢視。
-               轉錄有真的段數可以算百分比（#fileProgress），分析沒有，所以是跑馬燈 -->
-          <div class="analysing" id="analysingBox" hidden>
-            <div class="progress marquee"><div></div></div>
-            <div class="status-line" id="analysingStatus"></div>
+               只報已經過多久——分析沒有可回報的刻度，而每秒跳的數字本身就說明還在跑 -->
+          <div class="status-line" id="analysingBox" hidden>
+            <span id="analysingStatus"></span>
           </div>
         </div>
       </section>
