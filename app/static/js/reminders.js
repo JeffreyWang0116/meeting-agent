@@ -2,6 +2,7 @@ import { api } from "./api.js";
 import { $, esc, icon, loadFail, pageNo, paginate, registerPager, registerRefresher, renderPager, showError } from "./core.js";
 import { renderHome } from "./home.js";
 import { allMeetings, meetingLabel } from "./meetings.js";
+import { showAppNotification } from "./notify.js";
 
 let remindersLoaded = false;
 
@@ -131,20 +132,22 @@ const notifyEnabled = () => localStorage.getItem(NOTIFY_KEY) === "1";
 function updateNotifyBtn() {
   $("btnNotifyToggle").textContent = notifyEnabled() ? "已開啟" : "開啟";
 }
-function maybeNotifyReminders(force) {
-  if (!notifyEnabled() || !("Notification" in window) || Notification.permission !== "granted") return;
-  if (!lastReminders) return;
+// 回傳 false 代表該發卻發不出來（瀏覽器不讓發）；沒有要提醒的事回傳 true
+async function maybeNotifyReminders(force) {
+  if (!notifyEnabled() || !lastReminders) return true;
   const urgent = lastReminders.reminders.filter(x => x.kind === "overdue" || x.kind === "due_soon");
-  if (!urgent.length) return;
+  if (!urgent.length) return true;
   const today = new Date().toLocaleDateString("sv");
-  if (!force && localStorage.getItem(NOTIFY_DATE_KEY) === today) return;  // 一天最多一次
-  localStorage.setItem(NOTIFY_DATE_KEY, today);
+  if (!force && localStorage.getItem(NOTIFY_DATE_KEY) === today) return true;  // 一天最多一次
   const overdue = urgent.filter(x => x.kind === "overdue").length;
   const soon = urgent.length - overdue;
   const parts = [overdue ? `${overdue} 項逾期` : "", soon ? `${soon} 項即將到期` : ""].filter(Boolean);
-  try {
-    new Notification("會議 Agent 待辦提醒", { body: parts.join("、") + "，點開看看吧。", icon: "/static/icon.svg" });
-  } catch (e) { /* 部分瀏覽器需由 service worker 發送，失敗就略過 */ }
+  const shown = await showAppNotification("會議 Agent 待辦提醒", {
+    body: parts.join("、") + "，點開看看吧。", icon: "/static/icon.svg",
+    tag: "daily-reminder", data: { url: "/#reminder" },
+  });
+  if (shown) localStorage.setItem(NOTIFY_DATE_KEY, today);  // 沒發出去就別記，下次開網站再試
+  return shown;
 }
 $("btnNotifyToggle").addEventListener("click", async () => {
   if (notifyEnabled()) { localStorage.setItem(NOTIFY_KEY, "0"); updateNotifyBtn(); return; }
@@ -154,7 +157,8 @@ $("btnNotifyToggle").addEventListener("click", async () => {
   if (perm !== "granted") { showError("尚未允許通知權限，請到瀏覽器網站設定開啟"); return; }
   localStorage.setItem(NOTIFY_KEY, "1");
   updateNotifyBtn();
-  maybeNotifyReminders(true);  // 開啟當下先示範一次
+  // 開啟當下先示範一次；發不出來就明講，不要讓使用者以為之後會收到
+  if (!(await maybeNotifyReminders(true))) showError("這個瀏覽器發不出通知，每日提醒不會出現");
 });
 updateNotifyBtn();
 

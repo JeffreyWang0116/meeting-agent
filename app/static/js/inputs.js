@@ -2,6 +2,7 @@ import { api } from "./api.js";
 import { createSilenceWatch, shouldFallbackToDefaultMic, silenceWarning, systemAudioGuide } from "./audioguide.js";
 import { $, clearError, currentWorkspace, esc, showError, showNotice } from "./core.js";
 import { hideResultSkeleton, markAnalysisStart, renderResult, showResultSkeleton } from "./result.js";
+import { showAppNotification } from "./notify.js";
 import { createEta, formatEta } from "./progress.js";
 import { refreshQuota } from "./settings.js";
 import { PLATFORM, chunkSeconds, correctTypos, meetingTerms, micConstraints, micDeviceId, populateMicDevices, selectedFeatures, sysSourceValue, wantSystemAudio } from "./setup.js";
@@ -129,10 +130,7 @@ function setTabProgress(pct) {
 // 轉錄完成時通知。只在頁面不在前景時發——正看著畫面還跳通知只是吵
 function notifyDone(body) {
   if (document.visibilityState === "visible") return;
-  if (!("Notification" in window) || Notification.permission !== "granted") return;
-  try {
-    new Notification("會議 Agent", { body, icon: "/static/icon.svg" });
-  } catch { /* 部分瀏覽器要由 service worker 發，失敗就算了 */ }
+  showAppNotification("會議 Agent", { body, icon: "/static/icon.svg", data: { url: "/#result" } });
 }
 
 async function pollMediaJob(job_id, options) {
