@@ -1305,6 +1305,8 @@
 /* 展開後的內容與標題之間，留白要和面板四周一樣寬：.panel 預設的 18px gap 配
    24px padding，展開時只有一句「垃圾桶是空的」，上窄下寬看起來就像版面歪了 */
 .side-panel { margin-top: 14px; gap: var(--panel-pad); }
+/* 收合時隱藏的內容區仍是 flex 子項，gap 會讓標題下方多一截空白、文字看起來偏上 */
+.side-panel:not([open]) { gap: 0; }
 /* 面板標題旁的說明字（「保留 30 天」「誰改了什麼」）：是註解不是標題 */
 .side-panel .panel-head h2 .aux {
   font-weight: 400; color: var(--faint); font-size: .76rem;
