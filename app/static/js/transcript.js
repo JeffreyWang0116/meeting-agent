@@ -8,7 +8,8 @@ import { parseChatMessages } from "./bubbles.js";
 // ---- 連續文件式逐字稿渲染 ----
 // 偵測行首「[1:02]」時間標記與「講者A：」「王小明：」等講者前綴（哪些算講者見 speakers.js）。
 // 帶時間標記的行自成一句（時間軸不能被合併吃掉）；沒有時間標記時維持
-// 「同講者連續行合併」——轉錄結果常常一句一行，不合併會太碎。
+// 「同講者連續行合併」——轉錄結果常常一句一行，不合併會太碎。合併只影響
+// 分色與講者名的分組，每一行仍舊各佔一行（見 bubbles.js 的 parts）。
 // 行首時間標記。各段放寬成 1~2 位數：模型會吐出 [00] 與 [0:1]（後端 segments.py 同一套規則）
 const TIME_RE = /^\[(\d{1,2}(?::\d{1,2}){0,2})\]\s*/;
 
@@ -49,7 +50,9 @@ function chatHtml(text, speakerMap, translation, knownNames = []) {
     html += `<div class="chat-line${gap} ${m.speaker ? `sp-${colorOf(m.speaker)}` : ""}" data-i="${i}"${
         m.time ? ` data-t="${timeLabelToSeconds(m.time)}"` : ""}>` +
       `<span class="line-time">${m.time ? esc(m.time) : ""}</span>` +
-      `<span class="line-body">${showName ? `<b class="line-speaker">${esc(m.speaker)}</b>` : ""}${esc(m.text)}` +
+      // 併進同一個泡泡的幾行各自佔一行：接成一長串會變成讀不動的一大塊
+      `<span class="line-body">${showName ? `<b class="line-speaker">${esc(m.speaker)}</b>` : ""}` +
+      `${(m.parts || [m.text]).map(esc).join("<br>")}` +
       (transTexts ? `<div class="line-trans">${esc(transTexts[i])}</div>` : "") +
       `</span></div>`;
   });

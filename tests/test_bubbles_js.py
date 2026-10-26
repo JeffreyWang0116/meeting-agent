@@ -95,3 +95,26 @@ def test_merged_bubble_reports_how_many_source_lines_it_holds():
     msgs = call("parseChatMessages", "\n".join(["講者A：甲", "乙", "丙"]), [])
 
     assert [m["lines"] for m in msgs] == [3]
+
+
+def test_merged_bubble_keeps_each_source_line_separately():
+    """轉錄模型沒逐行標時間時（後端只會在整段開頭補一個），同一個講者的
+    幾十行會全部併成一個泡泡。併起來是對的——分色與講者名要以段為單位——
+    但內容若接成一長串就變成一大塊讀不動的字，所以原本的每一行要留著。
+    """
+    msgs = call("parseChatMessages", "\n".join([
+        "[0:00] 講者A：今天要談預算",
+        "第一季的部分已經結清了",
+        "第二季還在等報價",
+    ]), [])
+
+    assert len(msgs) == 1
+    assert msgs[0]["parts"] == ["今天要談預算", "第一季的部分已經結清了", "第二季還在等報價"]
+    # text 仍是接起來的整句：引用句比對與「這段轉錄失敗」的判斷都讀它
+    assert msgs[0]["text"] == "今天要談預算 第一季的部分已經結清了 第二季還在等報價"
+
+
+def test_a_bubble_from_a_single_line_has_one_part():
+    msgs = call("parseChatMessages", "[0:01] 講者A：大家好", [])
+
+    assert msgs[0]["parts"] == ["大家好"]

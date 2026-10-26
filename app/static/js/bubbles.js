@@ -34,10 +34,14 @@ function parseChatMessages(text, knownNames = []) {
     const last = bubbles[bubbles.length - 1];
     if (!time && last && last.speaker === speaker) {
       last.text += (last.text ? " " : "") + content;
+      last.parts.push(content);
       last.lines += 1;
     } else {
+      // parts：併進來的每一行各自留著。轉錄模型沒逐行標時間時（後端只在整段
+      // 開頭補一個）同一個講者的幾十行會全部併成一個泡泡，內容接成一長串就
+      // 讀不動了——畫面照 parts 一行一行畫，text 則留給引用句比對用
       // lines：合併了幾行。譯文對齊要用——譯文沒有時間標記，只能靠行數分組
-      bubbles.push({ time, speaker, text: content, lines: 1 });
+      bubbles.push({ time, speaker, text: content, parts: [content], lines: 1 });
     }
   }
   return bubbles;
