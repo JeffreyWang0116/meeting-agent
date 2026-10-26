@@ -27,8 +27,6 @@ from tests.test_decision import valid_json
 
 
 class FakeTranscriber:
-    device = "cpu"
-    model_size = "fake"
 
     def transcribe(self, path, on_progress=None, user=None):
         return "Kevin 說週五要 demo。"

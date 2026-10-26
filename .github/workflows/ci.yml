@@ -1,4 +1,4 @@
-# 每次 push / PR 自動跑完整測試（不需要 GPU：Whisper 與 Gemini 都以假物件注入）
+# 每次 push / PR 自動跑完整測試（不需要 API 金鑰：Gemini 與 pyannote 都以假物件注入）
 name: tests
 
 on:

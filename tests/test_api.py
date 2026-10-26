@@ -1,6 +1,6 @@
 """FastAPI 端點整合測試。
 
-Gemini 以假 generate 取代、Whisper 以假 transcriber 取代，
+Gemini 以假 generate 取代、轉錄以假 transcriber 取代，
 其餘（store、live session、media job、pipeline）全部走真實程式碼。
 """
 import io
@@ -20,8 +20,6 @@ from tests.test_decision import valid_json
 
 
 class FakeTranscriber:
-    device = "cpu"
-    model_size = "fake"
 
     def transcribe(self, path, on_progress=None, user=None):
         if on_progress:
@@ -202,8 +200,6 @@ def test_live_chunk_transcribe_error_returns_502_with_reason(tmp_path):
     """轉錄後端（如 Gemini 額度爆掉）失敗時，前端要能看到真正原因，而非不明 500。"""
 
     class BrokenTranscriber:
-        device = "gemini"
-        model_size = "fake"
 
         def transcribe(self, path, on_progress=None, user=None):
             raise RuntimeError("429 quota exceeded")
@@ -748,19 +744,21 @@ def test_glossary_survives_backup_without_the_removed_person_flag(client):
 
 # ---- 其他 ----
 
-def test_gemini_engine_uses_transcribe_model_not_analysis_model(tmp_path):
+def test_transcription_uses_transcribe_model_not_analysis_model(tmp_path):
     """轉錄用高額度輕量模型、分析用聰明模型：兩者必須各走各的設定。"""
     settings = Settings(
         gemini_api_key="k",
-        transcribe_engine="gemini",
         gemini_model="gemini-3.5-flash",
         transcribe_model="gemini-3.5-flash-lite",
         data_dir=tmp_path,
     )
     app = create_app(settings)
     body = TestClient(app).get("/api/health").json()
-    assert body["whisper_model"] == "gemini-3.5-flash-lite"  # 轉錄模型
+    assert body["transcribe_model"] == "gemini-3.5-flash-lite"  # 轉錄模型
     assert body["gemini_model"] == "gemini-3.5-flash"  # 分析模型不受影響
+    # 本機 Whisper 已移除，轉錄一律是 Gemini，不再回報引擎與 Whisper 欄位
+    for gone in ("transcribe_engine", "whisper_device", "whisper_model"):
+        assert gone not in body
 
 
 def test_health(client):
@@ -1019,8 +1017,6 @@ def test_enrolled_voices_rename_the_speaker_labels(tmp_path):
     """預錄樣本的姓名是使用者自己填的，比對到就直接換上——這是唯一會自動填姓名的路徑。"""
 
     class LabelledTranscriber:
-        device = "cpu"
-        model_size = "fake"
 
         def transcribe(self, path, on_progress=None, hint=None, user=None):
             return "[0:01] 講者A：週五要 demo"
@@ -1052,8 +1048,6 @@ def test_enrolled_voices_rename_the_speaker_labels(tmp_path):
 class LabelledTranscriber:
     """回傳帶時間戳與講者代號的假逐字稿，讓聲紋比對的證據挑得出來。"""
 
-    device = "cpu"
-    model_size = "fake"
 
     def __init__(self, texts=None):
         self.texts = list(texts or [])
@@ -1298,14 +1292,12 @@ class RecordingGeminiTranscriber:
 
     def __init__(self, **kwargs):
         self.kwargs = kwargs
-        self.device = "gemini"
-        self.model_size = kwargs.get("model")
         RecordingGeminiTranscriber.instances.append(self)
 
 
 def _gemini_settings(tmp_path, **overrides):
     return Settings(
-        gemini_api_key="k", transcribe_engine="gemini", data_dir=tmp_path,
+        gemini_api_key="k", data_dir=tmp_path,
         voice_relay_max_speakers=20, **overrides,
     )
 

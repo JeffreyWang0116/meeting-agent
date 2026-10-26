@@ -93,7 +93,7 @@ def test_transcriber_failure_marks_job_error(tmp_path, audio_file):
 
 
 def test_video_without_ffmpeg_transcribes_directly(tmp_path, monkeypatch):
-    # 沒有 ffmpeg 時，影片直接交給 faster-whisper（PyAV 可解常見容器的音訊）
+    # 沒有 ffmpeg 時，影片原檔直接交給轉錄器
     from app.transcription import media
 
     monkeypatch.setattr(media, "ffmpeg_available", lambda: False)

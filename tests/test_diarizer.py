@@ -153,18 +153,14 @@ def test_unknown_duration_never_drops_lines(tmp_path):
 
 # ---- 建不建 ----
 
-def test_build_diarizer_needs_key_and_gemini_engine():
-    assert build_diarizer(Settings(pyannote_api_key=None, transcribe_engine="gemini")) is None
-    # 本地 Whisper 輸出沒有時間戳，對齊不起來，送去分群只是白花錢
-    assert build_diarizer(Settings(pyannote_api_key="k", transcribe_engine="local")) is None
-    assert isinstance(
-        build_diarizer(Settings(pyannote_api_key="k", transcribe_engine="gemini")), Diarizer
-    )
+def test_build_diarizer_needs_key():
+    assert build_diarizer(Settings(pyannote_api_key=None)) is None
+    assert isinstance(build_diarizer(Settings(pyannote_api_key="k")), Diarizer)
 
 
 def test_build_diarizer_passes_model_and_timeout():
     diarizer = build_diarizer(Settings(
-        pyannote_api_key="k", transcribe_engine="gemini",
+        pyannote_api_key="k",
         pyannote_model="community-1", diarize_timeout_seconds=120,
     ))
     assert diarizer.client.model == "community-1"
@@ -304,7 +300,7 @@ def test_relabel_session_raises_so_the_caller_can_fall_back(tmp_path):
 
 def test_build_diarizer_passes_voiceprint_threshold():
     diarizer = build_diarizer(Settings(
-        pyannote_api_key="k", transcribe_engine="gemini", voiceprint_match_threshold=65,
+        pyannote_api_key="k", voiceprint_match_threshold=65,
     ))
     assert diarizer.voiceprint_threshold == 65
 
@@ -328,8 +324,8 @@ def test_voiceprints_are_disabled_by_default():
 
 def test_build_diarizer_passes_voiceprint_switch():
     on = build_diarizer(Settings(
-        pyannote_api_key="k", transcribe_engine="gemini", pyannote_voiceprint_enabled=True,
+        pyannote_api_key="k", pyannote_voiceprint_enabled=True,
     ))
-    off = build_diarizer(Settings(pyannote_api_key="k", transcribe_engine="gemini"))
+    off = build_diarizer(Settings(pyannote_api_key="k"))
     assert on.voiceprints_enabled is True
     assert off.voiceprints_enabled is False

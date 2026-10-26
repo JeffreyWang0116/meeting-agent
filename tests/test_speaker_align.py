@@ -151,7 +151,7 @@ def test_relabel_leaves_mid_sentence_colon_alone():
 
 
 def test_relabel_without_timestamps_returns_transcript_unchanged():
-    # Whisper 本地引擎的輸出沒有時間戳，無從對齊
+    # 模型偶爾整段不標時間戳，這時無從對齊
     transcript = "大家好\n今天開會"
     text, stats = relabel(transcript, [seg("SPEAKER_00", 0, 5)], duration=10)
     assert text == transcript

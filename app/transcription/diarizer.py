@@ -146,11 +146,8 @@ class Diarizer:
 
 
 def build_diarizer(settings, on_call: Callable[[], None] | None = None) -> Diarizer | None:
-    """有金鑰、且轉錄引擎是 Gemini 才建。
-
-    本地 Whisper 的逐字稿沒有時間戳，分群結果對不回任何一行，送去只是白花試用額度。
-    """
-    if not settings.pyannote_api_key or settings.transcribe_engine != "gemini":
+    """有金鑰才建；沒金鑰時講者由轉錄模型自己標。"""
+    if not settings.pyannote_api_key:
         return None
     client = PyannoteClient(
         settings.pyannote_api_key,

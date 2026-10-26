@@ -44,7 +44,7 @@ def test_extract_audio_builds_correct_command(monkeypatch, tmp_path):
     cmd = captured["cmd"]
     assert Path(cmd[0]).stem == "ffmpeg"
     assert str(video) in cmd
-    # 去影像、單聲道、16kHz —— whisper 的標準輸入格式
+    # 去影像、單聲道、16kHz —— 語音模型的標準輸入格式
     assert "-vn" in cmd
     assert cmd[cmd.index("-ac") + 1] == "1"
     assert cmd[cmd.index("-ar") + 1] == "16000"

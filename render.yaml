@@ -15,8 +15,6 @@ services:
       # 暫用額度高又穩定的 lite 版；配額充足或升級付費後可改用 gemini-3.6-flash 提高品質
       - key: GEMINI_MODEL
         value: gemini-3.5-flash-lite
-      - key: TRANSCRIBE_ENGINE
-        value: gemini
       # 轉錄專用模型：吃掉絕大多數請求，用免費額度高的輕量版
       - key: TRANSCRIBE_MODEL
         value: gemini-3.5-flash-lite

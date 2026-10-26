@@ -41,7 +41,7 @@
 ① 文字貼上 ─────────────────────────────────┐
 ② 音檔/影片上傳                                │
    影片 → ffmpeg 抽音軌 →                      ├→ 正規化（換行、零寬字元、空行）
-   faster-whisper 轉錄（GPU，進度即時回報）      │   → Corrector Agent（校正錯字，選用）
+   Gemini 轉錄（進度即時回報）                   │   → Corrector Agent（校正錯字，選用）
 ③ 即時聆聽                                     │   → Decision Agent（Gemini → 結構化 JSON）
    瀏覽器錄音，每 45 秒一段即時轉逐字稿 ─────────┘   → 存進任務庫（store）
                                                    → 確認信草稿＋行事曆事件（跟著回應回傳，不另外寫檔）
@@ -49,19 +49,12 @@
 
 | 模組 | 位置 | 目前實作 | 之後升級 |
 |------|------|----------|----------|
-| 輸入與解析 | `app/orchestrator.py`、`app/transcription/` | 本地 faster-whisper（GPU）或雲端 Gemini 轉錄，可切換 | — |
+| 輸入與解析 | `app/orchestrator.py`、`app/transcription/` | Gemini 轉錄；選用 pyannote 重標講者 | — |
 | 錯字校正（選用） | `app/agents/corrector_agent.py` | Gemini 找出同音錯字，回傳修正清單在本地套用 | — |
 | 檢索與決策 | `app/agents/decision_agent.py` | Gemini 產出結構化 JSON | — |
 | 跨會議問答（RAG） | `app/rag.py`、`app/ask_planner.py` | Gemini 解析條件（日期／種類／人名）→ 本地篩會議 → 向量＋關鍵字混合檢索 → 回答並標引用段落；索引與會議／任務同一個 store（本地 JSON 或 Firestore） | — |
 | 資料庫與任務分發 | `app/stores/` | 本地 JSON（`data/output/db.json`）；填 Firebase 金鑰即自動改用 Firestore 雲端持久化 | ✅ Firestore 已接（`FirestoreStore` 實作同一 `TaskStore` 介面） |
 | 時程同步與通知 | `app/agents/notifier_agent.py` | 產生確認信草稿與行事曆事件 | ✅ 已接（Gmail 一鍵開信；開了 Google 登入後可一鍵加入 Google 行事曆）|
-
-### 轉錄後端可切換
-
-`TRANSCRIBE_ENGINE` 決定轉錄怎麼做，兩者共用同一組介面（`transcribe / device / model_size`），靠 `create_app` 的依賴注入互換：
-
-- `local`（預設）：本地 **faster-whisper**，需要 NVIDIA GPU，完全離線、不耗 API 額度——本機開發用這個
-- `gemini`：把音訊丟給 **Gemini** 直接轉錄，不需要 GPU——雲端部署用這個（見下方「部署到雲端」）
 
 ### 用到的模型與免費額度
 
@@ -115,7 +108,7 @@
 
 ### 專門的講者分離（pyannoteAI，選用）
 
-設了 `PYANNOTE_API_KEY`（且 `TRANSCRIBE_ENGINE=gemini`）就改成**混合式講者辨識**：專門的聲學模型 [pyannoteAI](https://www.pyannote.ai) Precision-2 負責「誰在何時講話」，Gemini 照舊負責把話轉成文字，兩者依時間戳對齊。沒設金鑰時一切照舊，講者由 Gemini 自己標。
+設了 `PYANNOTE_API_KEY` 就改成**混合式講者辨識**：專門的聲學模型 [pyannoteAI](https://www.pyannote.ai) Precision-2 負責「誰在何時講話」，Gemini 照舊負責把話轉成文字，兩者依時間戳對齊。沒設金鑰時一切照舊，講者由 Gemini 自己標。
 
 **為什麼**：分段轉錄每段都是 Gemini 的全新呼叫、沒有跨段記憶，上面那些重疊提示、標註率重試、聲紋接力，本質上都是請 LLM 用聽的去猜同一個人。pyannote 對**整份音檔一次**分群，代號天生全場一致。用 77 分鐘《無人機特別條例》黨團協商實測（`eval/diarize_poc.py`）：
 
@@ -132,7 +125,6 @@
 - **預錄聲音辨識人**：**預設不使用 voiceprint**（`PYANNOTE_VOICEPRINT_ENABLED=0`）——結束時照樣用 pyannote 整場重標，之後把重標後的逐字稿切回各段錄音，交給 Gemini 聲紋比對，姓名直接對上 pyannote 的代號（聆聽中 Gemini 提早認出的名字掛在舊代號上，重標後會被這次結果取代）。實測同一段協商，與 voiceprint 認出的是同一個人，且不消耗 voiceprint。設成 1 才改用 pyannote voiceprint 比對。門檻 `VOICEPRINT_MATCH_THRESHOLD=50`：實測本人 89 分、不是本人 16~28 分；API 預設 0 時，片段裡根本沒出現的人被硬配給一位只講 4 秒的人
 - 聲紋接力在這個模式下自動跳過（代號反正會被整份重標蓋掉）
 - **任何失敗都退回 Gemini 的代號**：pyannote 當掉、額度用完、逾時、ffmpeg 壓不動，轉錄與分析照常完成
-- 本地 Whisper 引擎不啟用：它的輸出沒有時間戳，對不回任何一行
 
 **費用**：新帳號 30 天試用含 150 小時與 10 個 voiceprint（需公司或學校信箱註冊，Gmail 不行）；之後要訂閱（Developer 方案 €19/月起），沒訂閱 API 會回 402，系統就自動退回 Gemini 標註。voiceprint 按**建立次數**計費：開啟時預錄 4 個人＝用掉 4 個，所以預設關閉（姓名改由 Gemini 比對，每場多 1 次強模型請求）。
 
@@ -156,7 +148,7 @@
 
 ## 快速開始
 
-Windows、macOS、Linux 都能跑。CI 每次 push 都在 Ubuntu 上跑完整測試；Windows 是主要開發機；macOS 依同一套步驟，但沒有 NVIDIA GPU，建議直接用 Gemini 轉錄（見下方「轉錄引擎怎麼選」）。
+Windows、macOS、Linux 都能跑。CI 每次 push 都在 Ubuntu 上跑完整測試；Windows 是主要開發機；macOS 依同一套步驟。轉錄一律用 Gemini，不需要 GPU。
 
 ### 1. 前置需求
 
@@ -182,18 +174,13 @@ python3 -m venv .venv
 .venv/bin/python -m pip install -r requirements.txt
 ```
 
-`requirements.txt` 含本地 Whisper 轉錄（faster-whisper）。只打算用 Gemini 轉錄的話，改裝精簡版 `requirements-cloud.lock` 再補 `pip install pytest httpx ruff`——雲端部署與 CI 用的就是這份，安裝快很多。
+`requirements.txt` 就是雲端那份依賴（`requirements-cloud.txt`）再加上 pytest、ruff。想要跟雲端部署與 CI 完全相同的版本，改裝鎖定版 `requirements-cloud.lock` 再補 `pip install pytest ruff`。
 
 ### 3. 設定 Gemini API 金鑰
 
 1. 到 <https://aistudio.google.com/apikey> 建立金鑰（免費）
 2. 複製 `.env.example` 為 `.env`，填入 `GEMINI_API_KEY=你的金鑰`
    （有多把想輪替，改填 `GEMINI_API_KEYS=key1,key2,...`，逗號分隔）
-
-**轉錄引擎怎麼選**（`.env` 的 `TRANSCRIBE_ENGINE`）：
-
-- 有 NVIDIA GPU（Windows／Linux）：`local`，本地 faster-whisper，離線、不耗 API 額度。Windows 上 pip 裝的 CUDA DLL 會自動註冊；偵測不到 CUDA 會退回 CPU（功能不變，速度較慢）
-- 沒有 NVIDIA GPU（包含所有 Mac）：`gemini`。CPU 跑 Whisper 可行但很慢，一小時的會議可能要轉很久
 
 ### 4. 啟動
 
@@ -207,9 +194,9 @@ python3 -m venv .venv
 .venv/bin/python -m uvicorn app.main:app --port 8000
 ```
 
-打開 <http://localhost:8000> ，頁面上方會顯示環境狀態（金鑰、ffmpeg、Whisper 裝置）。
+打開 <http://localhost:8000> ，`/api/health` 可看環境狀態（金鑰、ffmpeg、轉錄與分析模型、講者分離有沒有啟用）。
 
-不想在本機裝 Python：repo 附的 `Dockerfile` 就是雲端部署用的映像（已含 ffmpeg、預設 Gemini 轉錄），`docker build -t meeting-agent . && docker run -p 8000:8000 --env-file .env meeting-agent` 在任何作業系統都一樣。
+不想在本機裝 Python：repo 附的 `Dockerfile` 就是雲端部署用的映像（已含 ffmpeg），`docker build -t meeting-agent . && docker run -p 8000:8000 --env-file .env meeting-agent` 在任何作業系統都一樣。
 
 ### 5. 測試
 
@@ -223,20 +210,20 @@ python3 -m venv .venv
 .venv/bin/python -m pytest tests -q
 ```
 
-所有測試都不需要網路、不需要 API 金鑰、不會載入 Whisper 模型（Gemini 與 Whisper 皆以注入的假物件測試）。
+所有測試都不需要網路、不需要 API 金鑰、不會呼叫真的 API（Gemini 與 pyannote 皆以注入的假物件測試）。
 
 ## 部署到雲端（給別人試用）
 
-雲端主機沒有 GPU，所以部署版把轉錄從本地 Whisper 換成 Gemini（設定 `TRANSCRIBE_ENGINE=gemini`，`Dockerfile` 已預設）。文字貼上、檔案上傳、即時聆聽三種輸入都可用。
+雲端與本機跑的是同一套：轉錄用 Gemini，不需要 GPU。文字貼上、檔案上傳、即時聆聽三種輸入都可用。
 
-repo 已附 `Dockerfile`（含 ffmpeg）、`requirements-cloud.txt`（精簡依賴，不含 faster-whisper；實際安裝的是完整鎖定版本 `requirements-cloud.lock`）與 `render.yaml` 藍圖。以 [Render](https://render.com) 免費方案為例：
+repo 已附 `Dockerfile`（含 ffmpeg）、`requirements-cloud.txt`（依賴宣告；實際安裝的是完整鎖定版本 `requirements-cloud.lock`）與 `render.yaml` 藍圖。以 [Render](https://render.com) 免費方案為例：
 
 1. 到 Render → **New → Blueprint**，連上這個 GitHub repo，它會自動讀 `render.yaml`
 2. 部署過程會要你填 `GEMINI_API_KEY`（金鑰只存在 Render 後台，不進 repo）；多把 key 就改設 `GEMINI_API_KEYS`
 3. 等 Docker build 完成，就會拿到一個公開網址（如 `https://meeting-agent.onrender.com`）
 4. （選填）要用專門的講者分離：在 Render 後台 **Environment** 新增 `PYANNOTE_API_KEY`，存檔後會自動重新部署；打開 `https://你的網址/api/health` 看到 `"speaker_diarization": "pyannote"` 就是生效了
 
-`render.yaml` 已預設好雲端需要的環境變數（`TRANSCRIBE_ENGINE=gemini`、轉錄與分析模型皆為 `gemini-3.5-flash-lite`）；金鑰類（`GEMINI_API_KEY`、`FIREBASE_CREDENTIALS_JSON`）標記 `sync: false`，不進 repo、由你在 Render 後台填。`API_TOKEN` 例外：標記 `generateValue: true`，由 Render 自己產一串隨機值，所以**新部署一開始就是鎖上的**——要登入時到後台 Environment 分頁把值複製出來。
+`render.yaml` 已預設好雲端需要的環境變數（轉錄與分析模型皆為 `gemini-3.5-flash-lite`）；金鑰類（`GEMINI_API_KEY`、`FIREBASE_CREDENTIALS_JSON`）標記 `sync: false`，不進 repo、由你在 Render 後台填。`API_TOKEN` 例外：標記 `generateValue: true`，由 Render 自己產一串隨機值，所以**新部署一開始就是鎖上的**——要登入時到後台 Environment 分頁把值複製出來。
 
 > 免費方案注意：閒置一段時間後容器會休眠，下次連線需等約 30 秒冷啟動；檔案系統是暫時性的（重啟後 `db.json` 會清空）。要**永久保存任務資料**，加設 `FIREBASE_CREDENTIALS_JSON` 環境變數（見下方）即可切成 Firestore——跨會議問答的向量索引也一起存進去，所以重新部署之後不必把所有會議重新向量化。
 
@@ -418,7 +405,6 @@ repo 已附 `Dockerfile`（含 ffmpeg）、`requirements-cloud.txt`（精簡依�
 - **聆聽 session 遺失時用瀏覽器的逐字稿副本救援**：session 只存在伺服器記憶體，行程一重啟（雲端重新部署、當掉重生）就永遠找不回來，`finish` 會一直回 404，重試幾次都一樣。所以前端每收到一段轉錄就留一份逐字稿副本，`finish` 撞到 404 時改走「貼上文字」既有的 `POST /api/meetings` 把整場救回來。重啟後送出的錄音段也會一起失敗，救回來的逐字稿可能缺後半段，因此會明白提示使用者核對結尾
 - **詢問會議先解析條件、篩選在本地做**：向量檢索聽不懂「上個月」「跟客戶那場」「王小明負責過什麼」——那不是語意相近，而是對會議本身的篩選。所以第 1 次呼叫只請模型把問題拆成日期範圍、種類、人名與檢索句（`ask_planner.py`），哪場會議符合由本地判斷（人名比對出席者、任務負責人與逐字稿）。解析失敗就不套條件照常檢索，不讓提問跟著失敗；條件篩完一場都沒有就直說，不放寬條件去別的會議硬找——那樣的答案來自使用者沒問的會議。條件顯示在回答上方，AI 理解錯了一眼就看得出來
 - **逐字稿依行切塊、每段挑焦點行**：舊版固定 400 字切塊，會把一句話切斷，也不知道片段在逐字稿的哪裡。改成依行切（重疊一行）並記時間戳；回答後再從每段挑出命中最多關鍵詞、與回答用字最接近的那一行（`focus_line`，本地計算、不花額度），列表顯示它、點了也跳到它——實測一段 4 行的片段，原本跳到開場的 0:05，改後落在真正講報價日期的 2:40。舊格式索引載入時自動作廢重建
-- **Whisper 首次執行會下載模型**（medium 約 1.5GB），之後走本地快取；轉錄完全離線、不耗 API 額度
 
 ## 程式碼地圖（哪個功能在哪裡）
 
@@ -427,7 +413,7 @@ repo 已附 `Dockerfile`（含 ffmpeg）、`requirements-cloud.txt`（精簡依�
 ```
 app/
 ├── main.py               # FastAPI 入口：所有 API 端點、features 解析、API 認證
-├── config.py             # .env 設定（金鑰、轉錄引擎、儲存後端…）
+├── config.py             # .env 設定（金鑰、模型、儲存後端…）
 ├── models.py             # MeetingAnalysis JSON schema（LLM 產出契約，含 Highlight）
 ├── orchestrator.py       # 正規化 →（校正）→ Decision → 存檔 → 確認信 串接
 ├── agents/
@@ -436,8 +422,7 @@ app/
 │   ├── notifier_agent.py     # 確認信草稿 + 行事曆事件（純函式，不寫檔）
 │   └── reminder_agent.py     # 主動提醒（逾期/將到期/未指派掃描）
 ├── transcription/
-│   ├── transcriber.py        # 本地 faster-whisper 轉錄
-│   ├── gemini_transcriber.py # 雲端 Gemini 轉錄（時間戳 prompt、長音檔自動分段、聲紋接力）
+│   ├── gemini_transcriber.py # Gemini 轉錄（時間戳 prompt、長音檔自動分段、聲紋接力）
 │   ├── pyannote_client.py    # pyannoteAI REST 客戶端：上傳、分群、voiceprint、identify、輪詢
 │   ├── diarizer.py           # 講者分離接進上傳轉錄（並行）與即時聆聽（結束時整場重標）
 │   ├── speaker_align.py      # 依時間戳把 pyannote 講者填回逐字稿每一行
@@ -462,8 +447,8 @@ app/
 ├── atomicio.py           # 原子寫檔（斷電不壞資料）
 └── evaluation.py         # 任務抽取 precision/recall（供 eval/run.py）
 eval/                     # 量化評估：標注資料集 + 評估腳本；diarize_poc.py 講者分離實測
-tests/                    # pytest 測試（1024，全部離線、不需金鑰；前端純函式模組的測試另需 node）
-Dockerfile                # 雲端部署映像（Python + ffmpeg，轉錄用 Gemini）
+tests/                    # pytest 測試（全部離線、不需金鑰；前端純函式模組的測試另需 node）
+Dockerfile                # 雲端部署映像（Python + ffmpeg）
 requirements-cloud.lock   # 雲端完整鎖定版本（Dockerfile 與 CI 共用）
 ruff.toml                 # lint 規則（CI 跑 ruff check .）
 render.yaml               # Render 一鍵部署藍圖

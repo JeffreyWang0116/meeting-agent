@@ -1,8 +1,4 @@
-"""用 Gemini 直接聽音訊產生逐字稿（雲端無 GPU 時的轉錄後端）。
-
-介面與本地 faster-whisper 的 Transcriber 完全一致（transcribe / device /
-model_size），因此可透過 create_app 的依賴注入直接互換：本地開發用 GPU
-Whisper，雲端部署設 TRANSCRIBE_ENGINE=gemini 就換成這個。
+"""用 Gemini 直接聽音訊產生逐字稿（唯一的轉錄後端）。
 
 流程：把任何輸入（影片、m4a、webm 錄音段）先正規化成 Gemini 支援的音訊格式
 （必要時用 ffmpeg 轉 wav），上傳 Files API，再請模型逐字轉錄。
@@ -140,9 +136,6 @@ class GeminiTranscriber:
         self._on_call = on_call
         self.api_key = self._pool.first
         self.model = model
-        # 供 /api/health 顯示；命名對齊 Whisper Transcriber 以免前端分歧
-        self.device = "gemini"
-        self.model_size = model
         self._upload = upload
         self._generate = generate
         # callable() -> list[dict]：自訂詞彙表，每次轉錄時讀最新內容
@@ -179,7 +172,7 @@ class GeminiTranscriber:
             prompt += hint
         return prompt
 
-    # ---- 對外介面（與 Whisper Transcriber 相同簽名）----
+    # ---- 對外介面 ----
 
     def transcribe(self, path, on_progress=None, hint: str | None = None,
                    user: str = DEFAULT_USER) -> str:

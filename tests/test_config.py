@@ -19,7 +19,7 @@ def clean_env(monkeypatch):
     填回去——測試會因為 .env 剛好設對而假性通過，等到沒有 .env 的 CI 才爆開。
     """
     monkeypatch.setattr("app.config.load_dotenv", lambda *a, **k: None)
-    for name in ("GEMINI_MODEL", "TRANSCRIBE_MODEL", "CORRECT_MODEL", "TRANSCRIBE_ENGINE"):
+    for name in ("GEMINI_MODEL", "TRANSCRIBE_MODEL", "CORRECT_MODEL"):
         monkeypatch.delenv(name, raising=False)
 
 
@@ -248,7 +248,7 @@ def test_app_logger_emits_info_so_cloud_logs_are_not_silent(tmp_path, monkeypatc
 
     monkeypatch.setattr("app.config.load_dotenv", lambda *a, **k: None)
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    create_app(Settings(data_dir=tmp_path, transcribe_engine="gemini"))
+    create_app(Settings(data_dir=tmp_path))
 
     app_logger = logging.getLogger("app")
     assert app_logger.handlers, "app logger 要有自己的 handler，否則記錄無處可去"
@@ -265,4 +265,12 @@ def test_flash_fallback_settings_are_gone():
         "transcribe_max_fallback_chunks",
         "transcribe_long_file_threshold_seconds",
     ):
+        assert gone not in fields
+
+
+def test_local_whisper_settings_are_gone():
+    from app.config import Settings
+
+    fields = Settings.__dataclass_fields__ if hasattr(Settings, "__dataclass_fields__") else Settings.model_fields
+    for gone in ("transcribe_engine", "whisper_model", "whisper_device"):
         assert gone not in fields

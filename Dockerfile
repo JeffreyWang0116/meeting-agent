@@ -8,15 +8,13 @@ RUN apt-get update \
 
 WORKDIR /app
 
-# 先裝依賴，讓 Docker 快取這一層（只用精簡的雲端依賴，不含 faster-whisper）。
+# 先裝依賴，讓 Docker 快取這一層。
 # 裝的是完整鎖定版本：與 CI 測過的完全一致，重新建置不會突然換到新的大版本
 COPY requirements-cloud.lock .
 RUN pip install --no-cache-dir -r requirements-cloud.lock
 
 COPY app ./app
 
-# 雲端沒有 GPU，轉錄後端切成 Gemini
-ENV TRANSCRIBE_ENGINE=gemini
 ENV PYTHONUNBUFFERED=1
 
 # 平台會用 $PORT 指定對外埠（Render/Railway 皆然），預設 8000 供本地測試

@@ -68,7 +68,6 @@ from app.transcription.diarizer import build_diarizer
 from app.transcription.gemini_transcriber import GeminiTranscriber
 from app.transcription.live_session import LiveSessionManager, SessionNotFound
 from app.transcription.voice_match import VoiceMatcher
-from app.transcription.transcriber import Transcriber
 from app.ratelimit import GUEST_DEFAULT_LIMITS, RateLimited, RateLimiter, parse_limits
 from app.usage import UsageTracker
 
@@ -556,38 +555,30 @@ def create_app(
         settings, on_call=lambda: usage.record("diarize")
     )
     if transcriber is None:
-        if settings.transcribe_engine == "gemini":
-            # 雲端無 GPU：用 Gemini 直接聽音訊轉錄
-            transcriber = GeminiTranscriber(
-                api_key=settings.gemini_api_key,
-                api_keys=settings.gemini_api_keys,
-                on_call=record_call,
-                model=settings.transcribe_model,
-                glossary=glossary.terms,
-                chunk_seconds=settings.transcribe_chunk_seconds,
-                label_retries=settings.transcribe_label_retries,
-                overlap_seconds=settings.transcribe_overlap_seconds,
-                max_retry_calls=settings.transcribe_max_retry_calls,
-                # 聲紋跨段接力：分段轉錄時把已確立的講者聲音樣本接力餵給後續
-                # 分段，讓模型靠嗓音沿用同一代號，而不是靠純文字提示憑空猜。
-                # 只影響長檔分段轉錄——即時聆聽每段是獨立的短檔，走 _transcribe_whole
-                # 不經過接力。代價是每段都要重傳全部樣本（重試也會重傳），一支
-                # 77 分鐘的檔約多 240~400 次上傳往返、多花數分鐘。要關掉設
-                # VOICE_RELAY_MAX_SPEAKERS=0。
-                # 有 pyannote 時跳過：講者會被整份重標，接力標出的代號最後都被蓋掉，
-                # 那幾百次上傳往返就白付了。沒金鑰時照原本的設定
-                voice_relay_max_speakers=(
-                    0 if diarizer else settings.voice_relay_max_speakers
-                ),
-                # 同理：講者標籤標得再差也會被重標，只為整段放棄轉錄重跑
-                speaker_labels_needed=diarizer is None,
-            )
-        else:
-            transcriber = Transcriber(
-                model_size=settings.whisper_model,
-                device=settings.whisper_device,
-                glossary=glossary.terms,
-            )
+        transcriber = GeminiTranscriber(
+            api_key=settings.gemini_api_key,
+            api_keys=settings.gemini_api_keys,
+            on_call=record_call,
+            model=settings.transcribe_model,
+            glossary=glossary.terms,
+            chunk_seconds=settings.transcribe_chunk_seconds,
+            label_retries=settings.transcribe_label_retries,
+            overlap_seconds=settings.transcribe_overlap_seconds,
+            max_retry_calls=settings.transcribe_max_retry_calls,
+            # 聲紋跨段接力：分段轉錄時把已確立的講者聲音樣本接力餵給後續
+            # 分段，讓模型靠嗓音沿用同一代號，而不是靠純文字提示憑空猜。
+            # 只影響長檔分段轉錄——即時聆聽每段是獨立的短檔，走 _transcribe_whole
+            # 不經過接力。代價是每段都要重傳全部樣本（重試也會重傳），一支
+            # 77 分鐘的檔約多 240~400 次上傳往返、多花數分鐘。要關掉設
+            # VOICE_RELAY_MAX_SPEAKERS=0。
+            # 有 pyannote 時跳過：講者會被整份重標，接力標出的代號最後都被蓋掉，
+            # 那幾百次上傳往返就白付了。沒金鑰時照原本的設定
+            voice_relay_max_speakers=(
+                0 if diarizer else settings.voice_relay_max_speakers
+            ),
+            # 同理：講者標籤標得再差也會被重標，只為整段放棄轉錄重跑
+            speaker_labels_needed=diarizer is None,
+        )
     # 翻譯與轉錄同樣高頻（即時聆聽逐段翻），用高額度的轉錄模型
     translator = translator or Translator(
         api_key=settings.gemini_api_key,
@@ -870,12 +861,8 @@ def create_app(
             "ffmpeg": media.ffmpeg_available(),
             "gemini_key_set": bool(settings.gemini_api_key),
             "gemini_model": settings.gemini_model,
-            "transcribe_engine": settings.transcribe_engine,
+            "transcribe_model": settings.transcribe_model,
             "store_backend": getattr(store, "backend", "unknown"),
-            "whisper_device": transcriber.device,
-            "whisper_model": transcriber.model_size
-            or settings.whisper_model
-            or "auto（首次轉錄時載入）",
             "live_chunk_seconds": settings.live_chunk_seconds,
             # 前端據此決定「預錄聲音辨識人」最多能列幾個人（0＝不顯示這個功能）
             "live_enroll_max_speakers": settings.live_enroll_max_speakers,

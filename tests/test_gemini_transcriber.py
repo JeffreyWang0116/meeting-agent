@@ -1,8 +1,4 @@
-"""GeminiTranscriber 測試：注入假的 upload/generate，不呼叫真 API。
-
-雲端沒有 GPU，改用 Gemini 直接聽音訊產生逐字稿。介面與本地 Whisper
-Transcriber 完全一致（transcribe / device / model_size），可直接互換注入。
-"""
+"""GeminiTranscriber 測試：注入假的 upload/generate，不呼叫真 API。"""
 from pathlib import Path
 
 import pytest
@@ -83,12 +79,6 @@ def test_progress_callback_reaches_one(tmp_path):
     t.transcribe(wav, on_progress=lambda frac, text: calls.append((frac, text)))
     assert calls[-1][0] == 1.0
     assert calls[-1][1] == "文字"
-
-
-def test_device_and_model_exposed_for_health():
-    t = GeminiTranscriber(api_key="k", model="gemini-3.5-flash")
-    assert t.device == "gemini"
-    assert t.model_size == "gemini-3.5-flash"
 
 
 def test_missing_api_key_raises(tmp_path):

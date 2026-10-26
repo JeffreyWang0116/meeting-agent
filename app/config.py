@@ -39,17 +39,12 @@ class Settings:
     # Lite 有 500 次，預設值選 Flash 會讓照著 README 部署的人很快撞牆。
     # 想要更強的推理再用 .env 覆蓋（如 gemini-3.6-flash），代價是額度剩 1/25
     gemini_model: str = "gemini-3.5-flash-lite"
-    # 轉錄後端：local = 本地 faster-whisper（需 GPU）；gemini = 雲端用 Gemini 聽音訊
-    transcribe_engine: str = "local"
-    # Gemini 轉錄專用模型：轉錄吃掉絕大多數請求（即時聆聽每段一次）但不需要
+    # 轉錄專用模型：轉錄吃掉絕大多數請求（即時聆聽每段一次）但不需要
     # 聰明模型，預設用免費額度高的輕量版，與分析模型（gemini_model）脫鉤
     transcribe_model: str = "gemini-3.5-flash-lite"
     # 錯字校正專用模型：機械性工作（找同音錯字），不需要聰明模型，
     # 與分析模型脫鉤才不會在 GEMINI_MODEL 換成高階模型時一起吃掉稀有額度
     correct_model: str = "gemini-3.5-flash-lite"
-    # None 代表自動：有 CUDA 用 GPU（依 VRAM 選 medium），否則 CPU + small
-    whisper_model: str | None = None
-    whisper_device: str | None = None
     live_chunk_seconds: int = 45
     # 預錄聲音辨識人：最多幾個人可以錄樣本（0＝停用整個功能）。上限讓送進比對
     # 的音訊量有界；人再多時嗓音相近的機率也上升，比對本來就不該當唯一依據
@@ -153,11 +148,8 @@ def get_settings() -> Settings:
         gemini_api_key=keys[0] if keys else None,
         gemini_api_keys=keys,
         gemini_model=os.environ.get("GEMINI_MODEL", "gemini-3.5-flash-lite"),
-        transcribe_engine=os.environ.get("TRANSCRIBE_ENGINE", "local").lower(),
         transcribe_model=os.environ.get("TRANSCRIBE_MODEL", "gemini-3.5-flash-lite"),
         correct_model=os.environ.get("CORRECT_MODEL", "gemini-3.5-flash-lite"),
-        whisper_model=os.environ.get("WHISPER_MODEL") or None,
-        whisper_device=os.environ.get("WHISPER_DEVICE") or None,
         live_chunk_seconds=int(os.environ.get("LIVE_CHUNK_SECONDS", "45")),
         live_enroll_max_speakers=int(
             os.environ.get("LIVE_ENROLL_MAX_SPEAKERS", "4")

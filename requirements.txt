@@ -1,11 +1,4 @@
-fastapi>=0.115
-uvicorn[standard]>=0.30
-pydantic>=2.8
-python-dotenv>=1.0
-python-multipart>=0.0.9
-google-genai>=1.0
-firebase-admin>=6.5
-faster-whisper>=1.1
+# 本機開發：執行所需的套件與雲端部署同一份，另外加上測試與 lint 工具
+-r requirements-cloud.txt
 pytest>=8.0
-httpx>=0.27
 ruff>=0.15

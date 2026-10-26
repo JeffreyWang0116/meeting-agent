@@ -1,6 +1,6 @@
 """自訂詞彙表：人名、產品名等專有名詞。
 
-轉錄（Gemini / Whisper）與分析（Decision Agent）的 prompt 都會帶上這份
+轉錄與分析（Decision Agent）的 prompt 都會帶上這份
 詞彙表，「林佳蓉」才不會被聽成「林家容」，省去事後人工校正。
 
 持久化交給 TaskStore（get_glossary / save_glossary）——本地走 JSON 檔、

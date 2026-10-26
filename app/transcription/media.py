@@ -58,7 +58,7 @@ def is_video(path: str | Path) -> bool:
 
 
 def extract_audio(input_path: str | Path, output_path: str | Path | None = None) -> Path:
-    """抽出單聲道 16kHz WAV（whisper 的標準輸入格式）。"""
+    """抽出單聲道 16kHz WAV（語音模型的標準輸入格式）。"""
     input_path = Path(input_path)
     output_path = (
         Path(output_path)

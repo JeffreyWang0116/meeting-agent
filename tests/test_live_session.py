@@ -255,7 +255,7 @@ def test_chunk_without_offset_strips_relative_timestamps(tmp_path):
 
 
 def test_chunk_without_markers_gets_offset_prefix(tmp_path):
-    """轉錄後端沒標時間（如本地 Whisper）：段首補開始時間，保住段落級時間軸。"""
+    """轉錄後端沒標時間（模型偶爾整段不標）：段首補開始時間，保住段落級時間軸。"""
     mgr = LiveSessionManager(FakeTranscriber(["講者A：哈囉"]), tmp_path)
     sid = mgr.start()
     r = mgr.add_chunk(sid, b"a", offset_seconds=90)

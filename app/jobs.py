@@ -220,7 +220,7 @@ class MediaJobManager:
             if media.is_video(path) and media.ffmpeg_available():
                 self._update(job_id, status="extracting")
                 path = media.extract_audio(path)
-            # 沒有 ffmpeg 時直接交給 faster-whisper（PyAV 可解常見影片容器的音訊）
+            # 沒有 ffmpeg 時把影片原檔交給轉錄器，由 Gemini 自己判斷
 
             # 分群在轉錄開始前就送出、背景並行：上傳＋分群只要一分鐘左右，
             # 轉錄卻要好幾分鐘，排在後面等於讓使用者多等
