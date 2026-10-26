@@ -1,4 +1,6 @@
 # 本機開發：執行所需的套件與雲端部署同一份，另外加上測試與 lint 工具
 -r requirements-cloud.txt
 pytest>=8.0
+# 測試用：把產出的 PDF 讀回來，確認中文真的是原本那些字（見 tests/test_docexport.py）
+pypdf>=6.0
 ruff>=0.15

@@ -26,12 +26,13 @@ class FakeOrchestrator:
 
     def process_transcript(
         self, text, meeting_date=None, kind=None, features=None,
-        correct_typos=False, terms=None, user=None, kind_spec=None,
+        correct_typos=False, terms=None, user=None, kind_spec=None, **extra,
     ):
         self.received.append(
             (text, meeting_date, kind, features, correct_typos, terms, user)
         )
         self.kind_spec = kind_spec
+        self.extra = extra  # 會前準備等後來加的參數，個別測試自己斷言
         return {
             "meeting_id": "m123",
             "analysis": {},

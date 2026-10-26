@@ -255,6 +255,46 @@
             </div>
           </div>
         </div>
+
+        <!-- 跨會議追蹤：一場一場翻會議紀錄回答不了的三個問題 -->
+        <details class="panel side-panel" id="openItemsPanel">
+          <summary class="panel-head">
+            <h2>
+              <svg class="i" aria-hidden="true"><use href="/static/icons.svg#circle-help"/></svg>
+              未決事項
+              <span class="aux">跨會議追蹤：這件事提了幾次、後來誰回答了它</span>
+            </h2>
+            <span class="nav-badge" id="openItemsCount" hidden></span>
+          </summary>
+          <div id="openItemsRows"></div>
+        </details>
+
+        <details class="panel side-panel" id="peoplePanel">
+          <summary class="panel-head">
+            <h2>
+              <svg class="i" aria-hidden="true"><use href="/static/icons.svg#users"/></svg>
+              成員概況
+              <span class="aux">出席場次、手上的事、完成率</span>
+            </h2>
+          </summary>
+          <div id="peopleRows"></div>
+        </details>
+
+        <details class="panel side-panel" id="reportPanel">
+          <summary class="panel-head">
+            <h2>
+              <svg class="i" aria-hidden="true"><use href="/static/icons.svg#clipboard-list"/></svg>
+              週報／月報
+              <span class="aux">這段期間開了幾場、決定了什麼、誰最忙</span>
+            </h2>
+          </summary>
+          <div class="report-switch">
+            <button class="ghost active" data-days="7">最近 7 天</button>
+            <button class="ghost" data-days="30">最近 30 天</button>
+            <button class="ghost" id="btnCopyReport" style="margin-left:auto">複製純文字</button>
+          </div>
+          <div id="reportBody"></div>
+        </details>
       </section>
 
       <!-- ============ 新會議：三種輸入路徑 ============ -->
@@ -301,6 +341,36 @@
               <input type="checkbox" id="termsToGlossary"> 一併加入全域詞彙表
             </label>
           </div>
+
+          <!-- 會議前準備：貼議程讓 AI 逐項對照，並把同系列上一場沒做完的帶過來 -->
+          <details class="prep-box" id="prepBox">
+            <summary class="prep-head">
+              <svg class="i-sm" aria-hidden="true"><use href="/static/icons.svg#clipboard-list"/></svg>
+              會議前準備
+              <span class="lbl-aux">貼議程讓 AI 逐項對照、把上次沒做完的帶過來</span>
+            </summary>
+            <div class="field">
+              <label class="lbl" for="prepAgenda">
+                議程
+                <span class="lbl-aux">一行一項。分析完會逐項告訴你討論過、帶過，還是完全沒談到</span>
+              </label>
+              <textarea id="prepAgenda" rows="4" placeholder="1. 預算審查&#10;2. 期程確認&#10;3. 場地"></textarea>
+            </div>
+            <div class="field-row">
+              <div class="field">
+                <label class="lbl" for="prepSeries">
+                  會議系列
+                  <span class="lbl-aux">同一個名字的會議會串成一條線</span>
+                </label>
+                <input type="text" id="prepSeries" list="prepSeriesList" placeholder="例：專題週會">
+                <datalist id="prepSeriesList"></datalist>
+              </div>
+            </div>
+            <label class="chk" id="prepCarryRow" hidden>
+              <input type="checkbox" id="prepCarry"> 把上次沒做完的一起交給 AI
+            </label>
+            <div class="prep-carry" id="prepCarryList" hidden></div>
+          </details>
 
           <!-- 每個種類都有自己的預設區塊，所以這列一律顯示，讓使用者可以自己調 -->
           <div class="field-row feature-row" id="featureRow">
@@ -529,6 +599,13 @@
               </h3>
               <ol class="highlight-list" id="rHighlights"></ol>
 
+              <h3 class="sub" id="hAgenda" style="display:none">
+                <svg class="i-sm" aria-hidden="true"><use href="/static/icons.svg#clipboard-list"/></svg>
+                議程對照
+                <span class="aux" id="agendaCoverage"></span>
+              </h3>
+              <div class="agenda-review" id="rAgenda"></div>
+
               <h3 class="sub" id="hDecisions">
                 <svg class="i-sm" aria-hidden="true"><use href="/static/icons.svg#circle-check-big"/></svg>
                 決議事項
@@ -674,6 +751,10 @@
               任務庫
             </h2>
             <div class="panel-actions">
+              <span class="view-switch" role="group" aria-label="檢視方式">
+                <button class="ghost active" id="btnViewList" data-taskview="list">清單</button>
+                <button class="ghost" id="btnViewBoard" data-taskview="board">看板</button>
+              </span>
               <button class="ghost" id="btnAddTask">
                 <svg class="i-sm" aria-hidden="true"><use href="/static/icons.svg#plus"/></svg>
                 新增任務
@@ -697,7 +778,8 @@
           </div>
           <div class="task-add" id="taskAddRow" style="display:none">
             <input type="text" id="newTaskName" placeholder="任務名稱">
-            <input type="text" id="newTaskOwner" placeholder="負責人（選填）">
+            <input type="text" id="newTaskOwner" list="ownerList" placeholder="負責人（選填）">
+            <datalist id="ownerList"></datalist>
             <input type="date" id="newTaskDue" title="期限（選填）">
             <select id="newTaskPriority" class="status-sel">
               <option value="high">高</option>
@@ -707,6 +789,7 @@
             <button class="primary" id="btnAddTaskSave">新增</button>
             <button class="ghost" id="btnAddTaskCancel">取消</button>
           </div>
+          <div class="kanban" id="kanban" hidden></div>
           <div class="mtg-groups" id="taskGroups">
             <div class="skel-list">
               <div class="skel-block"><span class="skel" style="width:44%"></span><span class="skel" style="width:22%"></span></div>
@@ -737,6 +820,31 @@
           </div>
           <div class="pager" id="meetingsPager" data-pager="meetings"></div>
         </div>
+
+        <!-- 垃圾桶：刪除的會議先進這裡，30 天內救得回來 -->
+        <details class="panel side-panel" id="trashPanel">
+          <summary class="panel-head">
+            <h2>
+              <svg class="i" aria-hidden="true"><use href="/static/icons.svg#trash-2"/></svg>
+              垃圾桶
+              <span class="aux" id="trashNote">刪除的會議會在這裡保留 30 天</span>
+            </h2>
+            <span class="nav-badge" id="trashCount" hidden></span>
+          </summary>
+          <div id="trashRows"></div>
+        </details>
+
+        <!-- 群組活動紀錄：誰在什麼時候改了什麼。個人工作區沒有這一塊 -->
+        <details class="panel side-panel" id="activityPanel" hidden>
+          <summary class="panel-head">
+            <h2>
+              <svg class="i" aria-hidden="true"><use href="/static/icons.svg#clock"/></svg>
+              群組活動紀錄
+              <span class="aux">誰在什麼時候改了什麼</span>
+            </h2>
+          </summary>
+          <div id="activityRows"></div>
+        </details>
       </section>
 
       <!-- 隱私與資料處理 -->
@@ -792,6 +900,23 @@
 </div>
 
 <!-- 自訂會議範本：種類名稱、要哪些區塊、每個區塊抓什麼 -->
+<div class="modal-overlay" id="commentModal">
+  <div class="modal">
+    <div class="panel-head">
+      <h2 id="cmtWhere">留言</h2>
+      <button class="panel-x" id="btnCmtClose" aria-label="關閉">
+        <svg class="i-sm" aria-hidden="true"><use href="/static/icons.svg#x"/></svg>
+      </button>
+    </div>
+    <p class="hint" id="cmtQuote"></p>
+    <div class="cmt-thread" id="cmtThread"></div>
+    <div class="cmt-compose">
+      <textarea id="cmtInput" rows="2" placeholder="說點什麼…（群組成員都看得到）"></textarea>
+      <button class="primary" id="btnCmtSend">送出</button>
+    </div>
+  </div>
+</div>
+
 <div class="modal-overlay" id="templateModal">
   <div class="modal">
     <div class="panel-head">

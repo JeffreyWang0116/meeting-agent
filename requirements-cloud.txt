@@ -9,4 +9,7 @@ google-genai>=1.0
 firebase-admin>=6.5
 # 手機推播（Web Push / VAPID）。見 app/push.py
 pywebpush>=2.0
+# 匯出 Word 與 PDF。見 app/docexport.py；PDF 的中文字型由 Dockerfile 的 fonts-noto-cjk 提供
+python-docx>=1.1
+reportlab>=4.2
 httpx>=0.27

@@ -3,6 +3,9 @@ import { $, PRIORITY_ZH, esc, icon, loadFail, pageNo, paginate, registerPager, r
 import { renderHome } from "./home.js";
 import { allMeetings, meetingLabel, refreshMeetings } from "./meetings.js";
 import { refreshReminders } from "./reminders.js";
+import { taskCommentBtn } from "./commentsui.js";
+import { bindBoard, renderBoard } from "./kanban.js";
+import { RECURRENCE_ZH, bindSubtasks, refreshOwners, subtaskRowHtml, toggleSubtasks } from "./subtasks.js";
 
 let tasksLoaded = false;
 
@@ -26,18 +29,24 @@ function taskRowHtml(t) {
   if (t.id === editingTaskId) {
     return `<tr>
         <td><input class="cell-input" id="editTask" value="${esc(t.task)}"></td>
-        <td><input class="cell-input" id="editOwner" value="${esc(t.owner || "")}" placeholder="未指派"></td>
+        <td><input class="cell-input" id="editOwner" list="ownerList" value="${esc(t.owner || "")}" placeholder="未指派"></td>
         <td><input class="cell-input" id="editDue" type="date" value="${esc(t.due_date || "")}"></td>
         <td><span class="pr-dot ${t.priority}"></span>${PRIORITY_ZH[t.priority] || esc(t.priority)}</td>
-        <td>${STATUS_ZH[t.status] || esc(t.status)}</td>
+        <td><select class="cell-input" id="editRepeat" title="重複任務：完成一筆就自動排下一筆">
+          <option value="">不重複</option>
+          ${Object.entries(RECURRENCE_ZH).map(([v, zh]) =>
+            `<option value="${v}" ${v === t.recurrence ? "selected" : ""}>${zh}</option>`).join("")}
+        </select></td>
         <td><div class="row-ops">
           <button class="edit-btn save save-edit" data-id="${esc(t.id)}" title="儲存" aria-label="儲存">✓</button>
           <button class="del-btn cancel-edit" title="取消" aria-label="取消">${icon("x", "i-sm")}</button>
         </div></td>
       </tr>`;
   }
-  return `<tr class="${t.status === "done" ? "row-done" : ""}">
-        <td>${esc(t.task)}</td>
+  const [done, total] = [(t.subtasks || []).filter(s => s.done).length, (t.subtasks || []).length];
+  return `<tr class="${t.status === "done" ? "row-done" : ""}" data-row="${esc(t.id)}">
+        <td>${esc(t.task)}${total ? `<span class="sub-chip">${done}/${total}</span>` : ""}${
+          t.recurrence ? `<span class="rep-chip" title="完成後自動排下一筆">${esc(RECURRENCE_ZH[t.recurrence] || "")}</span>` : ""}</td>
         <td>${t.owner ? esc(t.owner) : `<span class="unassigned">未指派</span>`}</td>
         <td class="mono">${esc(t.due_date || "—")}${
           t.due_phrase ? `<span class="from-phrase">原話：${esc(t.due_phrase)}</span>` : ""}</td>
@@ -47,12 +56,16 @@ function taskRowHtml(t) {
             `<option value="${v}" ${v === t.status ? "selected" : ""}>${zh}</option>`).join("")}
         </select></td>
         <td><div class="row-ops">
-          <button class="edit-btn start-edit" data-id="${esc(t.id)}" title="編輯名稱、負責人、期限" aria-label="編輯">
+          ${taskCommentBtn(t)}
+          <button class="edit-btn sub-toggle" data-id="${esc(t.id)}" title="子項目（把一句話拆成幾件事）" aria-label="子項目">
+            ${icon("list-todo", "i-sm")}
+          </button>
+          <button class="edit-btn start-edit" data-id="${esc(t.id)}" title="編輯名稱、負責人、期限、重複" aria-label="編輯">
             ${icon("square-pen", "i-sm")}
           </button>
           <button class="del-btn" data-id="${esc(t.id)}" title="刪除此任務" aria-label="刪除">${icon("x", "i-sm")}</button>
         </div></td>
-      </tr>`;
+      </tr>` + subtaskRowHtml(t);
 }
 
 // 依會議把任務分組並排序：會議照 allMeetings 的新到舊，接著放 allMeetings 裡
@@ -109,6 +122,7 @@ function renderTasks() {
     ? p.items.map(g => groupHeadHtml(g, searching || soloGroup || openTaskGroups.has(g.key))).join("")
     : `<p class="empty-note tasks-empty">${allTasks.length ? "沒有符合條件的任務" : "尚無任務"}</p>`;
   renderPager("tasks", p);
+  renderBoard();  // 看板讀的是同一份 allTasks，兩個檢視不會各自過期
   renderHome();
 }
 
@@ -148,6 +162,11 @@ groups.addEventListener("change", async e => {
 });
 
 groups.addEventListener("click", async e => {
+  if (e.target.closest(".sub-toggle")) {
+    toggleSubtasks(e.target.closest(".sub-toggle").dataset.id);
+    renderTasks();
+    return;
+  }
   const start = e.target.closest(".start-edit");
   if (start) {
     editingTaskId = start.dataset.id;
@@ -166,6 +185,7 @@ groups.addEventListener("click", async e => {
       task: $("editTask").value.trim(),
       owner: $("editOwner").value.trim() || null,
       due_date: $("editDue").value || null,
+      recurrence: $("editRepeat").value || null,
     };
     if (!fields.task) { showError("任務名稱不可為空"); return; }
     try {
@@ -192,6 +212,30 @@ groups.addEventListener("click", async e => {
   renderTasks();
   refreshReminders();
   if (gone) showNotice("這筆任務已經不存在（可能已在其他裝置或分頁刪除），已從列表移除。");
+});
+
+// 子項目的勾選／刪除／新增。改完就地換掉那一筆，不重抓整份清單
+bindSubtasks(groups, {
+  taskById: id => allTasks.find(t => t.id === id) || {},
+  applyUpdate: updated => {
+    const i = allTasks.findIndex(t => t.id === updated.id);
+    if (i >= 0) allTasks[i] = updated;
+    renderTasks();
+  },
+});
+
+refreshOwners();
+
+// 看板：用同一份資料與同一支更新端點，只是換個排法
+bindBoard({
+  tasks: () => allTasks,
+  move: async (id, status) => {
+    const updated = await api.updateTask(id, { status });
+    const i = allTasks.findIndex(t => t.id === updated.id);
+    if (i >= 0) allTasks[i] = updated;
+    renderTasks();
+    refreshReminders();
+  },
 });
 
 // 編輯列快捷鍵：Enter 儲存、Esc 取消

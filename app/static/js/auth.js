@@ -247,10 +247,18 @@ function signedInUser() {
     : null));
 }
 
+// 雲端硬碟：只要 drive.file。那個範圍只看得到「這個 App 自己建立的檔案」，
+// 拿不到使用者既有的任何東西——匯出一份會議紀錄不該換來整個雲端硬碟的鑰匙
+const DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.file";
+
 async function requestCalendarToken() {
+  return requestGoogleToken(CALENDAR_SCOPE);
+}
+
+async function requestGoogleToken(scope) {
   if (!sdk || !auth?.currentUser) return null;
   const provider = new sdk.GoogleAuthProvider();
-  provider.addScope(CALENDAR_SCOPE);
+  provider.addScope(scope);
   // 用 reauthenticate 而不是 signInWithPopup：使用者在 popup 裡選到另一個
   // Google 帳號時，前者丟 auth/user-mismatch，後者會默默把整個 app 切換成
   // 另一個帳號的資料——畫面上毫無提示，只會發現東西全不見了。
@@ -260,4 +268,4 @@ async function requestCalendarToken() {
 
 start();
 
-export { googleSignedIn, requestCalendarToken, signedInUser };
+export { DRIVE_SCOPE, googleSignedIn, requestCalendarToken, requestGoogleToken, signedInUser };

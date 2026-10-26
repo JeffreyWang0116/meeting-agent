@@ -1,6 +1,6 @@
 import { api } from "./api.js";
 import { renderAskScope } from "./ask.js";
-import { $, PAGE_SIZE, esc, icon, loadFail, pageNo, paginate, registerPager, registerRefresher, renderPager, showError, showNotice } from "./core.js";
+import { $, PAGE_SIZE, REFRESHERS, esc, icon, loadFail, pageNo, paginate, registerPager, registerRefresher, renderPager, showError, showNotice } from "./core.js";
 import { renderHome } from "./home.js";
 import { refreshReminders, remindersLoaded, renderReminders } from "./reminders.js";
 import { copyWithFeedback, renderResult } from "./result.js";
@@ -189,8 +189,13 @@ function renderMeetings() {
               <button class="ghost export-toggle" aria-haspopup="menu" aria-expanded="false">分享／匯出</button>
               <span class="export-menu" role="menu" hidden>
                 <button class="ws-item share-detail" data-id="${esc(m.id)}" role="menuitem">${icon("share-2", "i-sm")}分享摘要與逐字稿</button>
-                <a class="ws-item" href="/api/meetings/${esc(m.id)}/report.md" download role="menuitem">${icon("download", "i-sm")}下載 Markdown</a>
-                <a class="ws-item" href="/api/meetings/${esc(m.id)}/events.ics" download role="menuitem">${icon("calendar", "i-sm")}代辦加入行事曆（.ics）</a>
+                <a class="ws-item" href="/api/meetings/${esc(m.id)}/report.md" role="menuitem">${icon("download", "i-sm")}下載 Markdown</a>
+                <a class="ws-item" href="/api/meetings/${esc(m.id)}/report.pdf" role="menuitem">${icon("file-text", "i-sm")}下載 PDF</a>
+                <a class="ws-item" href="/api/meetings/${esc(m.id)}/report.docx" role="menuitem">${icon("file-text", "i-sm")}下載 Word（.docx）</a>
+                <button class="ws-item to-gdocs" data-id="${esc(m.id)}" data-title="${esc(m.meeting.title)}" role="menuitem">${icon("external-link", "i-sm")}存成 Google 文件</button>
+                <a class="ws-item" href="/api/meetings/${esc(m.id)}/transcript.srt" role="menuitem">${icon("download", "i-sm")}字幕檔 .srt</a>
+                <a class="ws-item" href="/api/meetings/${esc(m.id)}/transcript.vtt" role="menuitem">${icon("download", "i-sm")}字幕檔 .vtt</a>
+                <a class="ws-item" href="/api/meetings/${esc(m.id)}/events.ics" role="menuitem">${icon("calendar", "i-sm")}代辦加入行事曆（.ics）</a>
               </span>
             </span>
             <button class="del-btn del-meeting" data-id="${esc(m.id)}" title="刪除此會議與其任務" aria-label="刪除">${icon("x", "i-sm")}</button>
@@ -312,7 +317,10 @@ $("meetingRows").addEventListener("click", async e => {
     delete meetingDetailCache[del.dataset.id];
     if (expandedMeetingId === del.dataset.id) expandedMeetingId = null;
     refreshMeetings(); refreshTasks(); refreshReminders();
+    // 刪除是丟進垃圾桶，底下那塊要跟著更新——不然使用者會以為東西真的沒了
+    REFRESHERS.trash?.(); REFRESHERS.activity?.();
     if (gone) showNotice("這場會議已經不存在（可能已在其他裝置或分頁刪除），已從列表移除。");
+    else showNotice("已移到垃圾桶，30 天內可以在歷史會議最下方救回來。");
     return;
   }
   // 會議重點 → 跳到逐字稿的時間節點

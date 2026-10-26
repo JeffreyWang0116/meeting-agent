@@ -46,6 +46,7 @@ class FirestoreStore(TaskStore):
         feedback: str = "feedback",
         templates: str = "templates",
         push_subscriptions: str = "push_subscriptions",
+        comments: str = "comments",
     ):
         self._db = db
         self._meetings = meetings
@@ -57,6 +58,7 @@ class FirestoreStore(TaskStore):
         self._feedback = feedback
         self._templates = templates
         self._push = push_subscriptions
+        self._comments = comments
         self._lock = threading.Lock()
         self._backfill_lock = threading.Lock()  # 與 _lock 分開，才能在鎖內安全呼叫
         self._backfilled = False
@@ -131,6 +133,9 @@ class FirestoreStore(TaskStore):
         kind: str | None = None,
         terms: list[dict] | None = None,
         user: str = DEFAULT_USER,
+        # 會前準備（見 app/agenda.py）：貼的議程、這場屬於哪個系列
+        agenda: list[str] | None = None,
+        series: str | None = None,
     ) -> str:
         meeting_id = uuid.uuid4().hex[:12]
         dumped = analysis.model_dump(mode="json")
@@ -150,6 +155,10 @@ class FirestoreStore(TaskStore):
                 # 本次專用詞彙：存起來「重新分析」才不會把使用者會前打的詞弄丟
                 "terms": terms or [],
                 "tags": dumped.get("tags", []),
+                "agenda": agenda or [],
+                "agenda_review": dumped.get("agenda_review", []),
+                "off_agenda": dumped.get("off_agenda", []),
+                "series": series,
             })
             for todo in dumped["todos"]:
                 task_id = uuid.uuid4().hex[:12]
@@ -168,12 +177,14 @@ class FirestoreStore(TaskStore):
         if not snap.exists:
             return None
         record = snap.to_dict()
-        return record if owns(record, user) else None
+        if not owns(record, user) or record.get("deleted_at"):
+            return None  # 垃圾桶裡的一律當作不存在
+        return record
 
     def list_meetings(
         self, *, user: str = DEFAULT_USER, include_transcript: bool = False
     ) -> list[dict]:
-        docs = self._user_docs(self._meetings, user)
+        docs = [m for m in self._user_docs(self._meetings, user) if not m.get("deleted_at")]
         docs.sort(key=lambda m: m.get("created_at", ""), reverse=True)  # 新到舊
         if include_transcript:
             return docs  # 這一次查詢本來就讀回完整文件，不必再逐場讀
@@ -187,7 +198,7 @@ class FirestoreStore(TaskStore):
             if not snap.exists:
                 return None
             merged = snap.to_dict()
-            if not owns(merged, user):
+            if not owns(merged, user) or merged.get("deleted_at"):
                 return None
             f = dict(fields)
             nested = f.pop("meeting", None)
@@ -196,6 +207,43 @@ class FirestoreStore(TaskStore):
             merged.update(f)
             ref.set(merged)
             return merged
+
+    # ---- 垃圾桶：刪除先進回收區，30 天內救得回來 ----
+
+    def _mark_deleted(self, meeting_id: str, user: str, at: str | None) -> bool:
+        with self._lock:
+            ref = self._db.collection(self._meetings).document(meeting_id)
+            snap = ref.get()
+            if not snap.exists:
+                return False
+            record = snap.to_dict()
+            if not owns(record, user) or bool(record.get("deleted_at")) == bool(at):
+                return False
+            if at:
+                record["deleted_at"] = at
+            else:
+                record.pop("deleted_at", None)
+            ref.set(record)
+            for task in self._user_docs(self._tasks, user):
+                if task.get("meeting_id") != meeting_id:
+                    continue
+                if at:
+                    task["deleted_at"] = at
+                else:
+                    task.pop("deleted_at", None)
+                self._db.collection(self._tasks).document(task["id"]).set(task)
+            return True
+
+    def trash_meeting(self, meeting_id: str, at: str, *, user: str = DEFAULT_USER) -> bool:
+        return self._mark_deleted(meeting_id, user, at)
+
+    def restore_meeting(self, meeting_id: str, *, user: str = DEFAULT_USER) -> bool:
+        return self._mark_deleted(meeting_id, user, None)
+
+    def list_trash(self, user: str = DEFAULT_USER) -> list[dict]:
+        docs = [m for m in self._user_docs(self._meetings, user) if m.get("deleted_at")]
+        docs.sort(key=lambda m: m.get("deleted_at", ""), reverse=True)
+        return [{k: v for k, v in m.items() if k != "transcript"} for m in docs]
 
     def delete_meeting(self, meeting_id: str, *, user: str = DEFAULT_USER) -> bool:
         with self._lock:
@@ -210,7 +258,8 @@ class FirestoreStore(TaskStore):
             return True
 
     def list_tasks(self, meeting_id: str | None = None, *, user: str = DEFAULT_USER) -> list[dict]:
-        docs = self._user_docs(self._tasks, user)
+        # 垃圾桶裡的會議的任務也要跟著消失，不然提醒還是會叫你去做已刪會議裡的事
+        docs = [t for t in self._user_docs(self._tasks, user) if not t.get("deleted_at")]
         if meeting_id is not None:
             docs = [t for t in docs if t.get("meeting_id") == meeting_id]
         docs.sort(key=lambda t: t.get("created_at", ""))  # 建立順序
@@ -228,7 +277,8 @@ class FirestoreStore(TaskStore):
             "status": task.get("status") or "todo",
             "priority": task.get("priority") or "medium",
         }
-        for field_name in ("task", "owner", "due_date", "source_quote"):
+        # 重複任務自動排的下一輪也走這裡，recurrence／subtasks 要帶得過去
+        for field_name in ("task", "owner", "due_date", "source_quote", "recurrence", "subtasks"):
             record[field_name] = task.get(field_name)
         with self._lock:
             self._db.collection(self._tasks).document(task_id).set(record)
@@ -278,9 +328,10 @@ class FirestoreStore(TaskStore):
     # ---- 備份 / 還原 ----
 
     def export_all(self, *, user: str = DEFAULT_USER) -> dict:
+        # 垃圾桶裡的不進備份：備份是「我的資料」，不是「我刪掉的東西」
         return {
-            "meetings": self._user_docs(self._meetings, user),
-            "tasks": self._user_docs(self._tasks, user),
+            "meetings": [m for m in self._user_docs(self._meetings, user) if not m.get("deleted_at")],
+            "tasks": [t for t in self._user_docs(self._tasks, user) if not t.get("deleted_at")],
             "glossary": self.get_glossary(user=user),
         }
 
@@ -305,6 +356,34 @@ class FirestoreStore(TaskStore):
     def _meta_doc(self, name: str) -> dict:
         snap = self._db.collection(self._meta).document(name).get()
         return snap.to_dict() if snap.exists else {}
+
+    # ---- 留言 ----
+
+    def save_comment(self, comment: dict) -> None:
+        self._db.collection(self._comments).document(comment["id"]).set(dict(comment))
+
+    def list_comments(self, user: str, meeting_id: str | None = None) -> list[dict]:
+        query = self._db.collection(self._comments).where(filter=_user_filter(user))
+        items = [snap.to_dict() for snap in query.stream()]
+        if meeting_id is not None:
+            items = [c for c in items if c.get("meeting_id") == meeting_id]
+        return sorted(items, key=lambda c: c.get("at", ""))
+
+    def delete_comment(self, comment_id: str, user: str) -> None:
+        ref = self._db.collection(self._comments).document(comment_id)
+        snap = ref.get()
+        if snap.exists and (snap.to_dict() or {}).get("user") == user:
+            ref.delete()
+
+    # ---- 群組活動紀錄 ----
+
+    def get_activity(self, user: str) -> list[dict]:
+        return scoped_read(self._meta_doc("activity"), user, "entries")
+
+    def save_activity(self, user: str, entries: list[dict]) -> None:
+        with self._lock:
+            doc = scoped_write(self._meta_doc("activity"), user, "entries", entries)
+            self._db.collection(self._meta).document("activity").set(doc)
 
     def get_glossary(self, *, user: str = DEFAULT_USER) -> list[dict]:
         return scoped_read(self._meta_doc("glossary"), user, "terms")

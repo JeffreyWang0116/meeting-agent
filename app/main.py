@@ -6,11 +6,13 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import re
 import sys
 import uuid
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
+from urllib.parse import quote
 from typing import Optional
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
@@ -37,6 +39,8 @@ from app.agents.notifier_agent import (
     notifications_from_record,
 )
 from app.agents.reminder_agent import scan as scan_reminders
+from app import activity as activity_log
+from app.agenda import carry_over_lines, clean_agenda, coverage_summary
 from app import groups as group_svc
 from app.auth import (
     CURRENT_ACCOUNT,
@@ -49,10 +53,13 @@ from app.auth import (
     identity_of,
     verify_firebase_id_token,
 )
+from app.comments import CommentError, author_name, clean_text, normalize_target
 from app.config import Settings, get_settings
+from app.docexport import PdfFontMissing, meeting_to_docx, meeting_to_pdf
 from app.export import meeting_report_md, tasks_to_csv, tasks_to_ics
 from app.gemini_keys import is_quota_error
 from app.glossary import Glossary, clean_terms
+from app.insights import open_items, people_stats, period_report
 from app.jobs import MediaJobManager
 from app.orchestrator import Orchestrator
 from app.push import (
@@ -69,6 +76,13 @@ from app.push import (
 from app.rag import AskAgent, GeminiEmbedder, RagIndex
 from app.speaker_rename import name_problem, rename_meeting_fields, rename_task_fields
 from app.stores import make_store
+from app.taskextras import (
+    RECURRENCES,
+    TaskExtraError,
+    clean_subtasks,
+    next_occurrence,
+)
+from app.subtitles import to_srt, to_vtt
 from app.transcription import media
 from app.transcription.segments import parse_time_label, replace_term_in_range
 from app.refine import RefineError, Refiner, apply_patch, parse_patch
@@ -120,11 +134,26 @@ class NoCacheStatic(StaticFiles):
 # 不需要登入的 API：健康檢查（外部監控要打得到）與登入設定本身
 # （還沒登入的人正是要靠它才知道怎麼登入）
 # /api/push/run 沒有登入者：它是排程（GitHub Actions）打進來的，改用共用密語把關
+# 垃圾桶保留幾天。再長就只是讓誤刪的資料在資料庫裡堆著
+TRASH_DAYS = 30
+
 PUBLIC_API_PATHS = {"/api/health", "/api/auth/config", "/api/push/run"}
 
 # 群組裡「只能看」的成員還是可以用的 POST：問答、翻譯只讀資料、不改資料
 VIEWER_ALLOWED_POSTS = {"/api/ask", "/api/translate"}
+# 留言是例外中的例外：「只能看」是不能改資料，不是不能說話——
+# 討論本來就是看的人最需要的。自己的留言也要刪得掉，所以 DELETE 一併放行
+VIEWER_ALLOWED_SUFFIXES = ("/comments",)
+VIEWER_ALLOWED_PREFIXES = ("/api/comments/",)
 SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
+
+
+def viewer_may(path: str) -> bool:
+    return (
+        path in VIEWER_ALLOWED_POSTS
+        or path.endswith(VIEWER_ALLOWED_SUFFIXES)
+        or path.startswith(VIEWER_ALLOWED_PREFIXES)
+    )
 
 
 class RequireFirebaseLogin:
@@ -176,7 +205,7 @@ class RequireFirebaseLogin:
                     scope, receive, send, "你不是這個群組的成員（可能已被移出或群組已解散）",
                     status=403, workspace_denied=True,
                 )
-            if role == "viewer" and scope.get("method") not in SAFE_METHODS and path not in VIEWER_ALLOWED_POSTS:
+            if role == "viewer" and scope.get("method") not in SAFE_METHODS and not viewer_may(path):
                 return await self._deny(
                     scope, receive, send, "你在這個群組的角色是「只能看」，無法新增或修改資料", status=403,
                 )
@@ -340,6 +369,11 @@ class MeetingRequest(BaseModel):
     # 聆聽 session 遺失時會改走這支端點救援，標記與筆記不該跟著不見
     marks: Optional[list[str]] = None
     notes: Optional[str] = Field(default=None, max_length=20000)
+    # 會前準備（見 app/agenda.py）：貼進來的議程（一行一項）、這場屬於哪個系列、
+    # 以及要不要把同系列上一場沒做完的事一起餵給模型
+    agenda: Optional[str] = Field(default=None, max_length=5000)
+    series: Optional[str] = Field(default=None, max_length=60)
+    carry_over: bool = False
 
 
 class FinishRequest(BaseModel):
@@ -348,6 +382,10 @@ class FinishRequest(BaseModel):
     features: Optional[list[str]] = None
     correct_typos: bool = False
     terms: Optional[list[dict]] = None
+    # 會前準備（見 app/agenda.py）
+    agenda: Optional[str] = Field(default=None, max_length=5000)
+    series: Optional[str] = Field(default=None, max_length=60)
+    carry_over: bool = False
     # 聆聽中按「標記這一刻」的時間點（"5:23"）。不是時間格式的會在提示詞那層丟掉
     marks: Optional[list[str]] = None
     # 會議中自己打的筆記。直接進提示詞，所以要有長度上限
@@ -437,6 +475,20 @@ class TranslateRequest(BaseModel):
     target: str
 
 
+def _title_of(record: dict) -> str:
+    return (record.get("meeting") or {}).get("title") or "（未命名會議）"
+
+
+def _task_action(before: dict | None, after: dict) -> str:
+    """任務怎麼變的。「完成」與「改回未完成」在紀錄上長得一樣就沒有意義了。"""
+    was, now = (before or {}).get("status"), after.get("status")
+    if was == now:
+        return "task.edit"
+    if now == "done":
+        return "task.done"
+    return "task.reopen" if was == "done" else "task.edit"
+
+
 def current_user(request: Request | None = None) -> str:
     """這個請求屬於誰。
 
@@ -508,7 +560,7 @@ def create_app(
     delete_auth_user=None,
     refine_generate=None,
     push_send=None,
-    push_now=None,
+    clock=None,
 ) -> FastAPI:
     _configure_logging()
     settings = settings or get_settings()
@@ -644,6 +696,17 @@ def create_app(
             on_call=record_call,
             model=settings.gemini_model,
             kinds=[k for _, kinds in KIND_GROUPS for k in kinds],
+        )
+
+    # 「現在幾點」的唯一入口。垃圾桶的 30 天、推播的當地時間都讀它，
+    # 測試才有辦法把時間推到 31 天後而不用等
+    now_utc = clock or (lambda: datetime.now(timezone.utc))
+
+    def log_activity(action: str, label: str, target_id: str | None = None) -> None:
+        """記一筆群組活動。個人工作區會被 activity.record 自己擋掉。"""
+        activity_log.record(
+            store, current_user(), action=action, target_label=label, target_id=target_id,
+            actor_uid=current_account(), actor_email=CURRENT_EMAIL.get(), at=now_utc().isoformat(),
         )
 
     def drop_from_rag(meeting_id: str) -> None:
@@ -798,13 +861,16 @@ def create_app(
         attendees: list[str] | None = None,
         marks: list[str] | None = None,
         notes: str | None = None,
+        agenda: list[str] | None = None,
+        series: str | None = None,
+        carry_over: list[str] | None = None,
     ) -> dict:
         usage.record("analysis")
         spec = kind_spec_of(kind)
         if correct_typos:
             usage.record("correct")  # 校正是額外一次請求，用量面板要分開看得到
         try:
-            return orchestrator.process_transcript(
+            result = orchestrator.process_transcript(
                 text,
                 meeting_date=meeting_date,
                 kind=kind,
@@ -817,7 +883,17 @@ def create_app(
                 marks=marks,
                 notes=notes,
                 kind_spec=spec,
+                agenda=agenda,
+                series=series,
+                carry_over=carry_over,
             )
+            log_activity("meeting.create", _title_of(result), result.get("meeting_id"))
+            if agenda:
+                # 前端要畫「3 項討論過、1 項沒談到」的那一列，不必自己再掃一遍
+                result["agenda_coverage"] = coverage_summary(
+                    result.get("analysis", {}).get("agenda_review")
+                )
+            return result
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc))
         except DecisionAgentError as exc:
@@ -894,6 +970,7 @@ def create_app(
     def analyze_meeting(req: MeetingRequest):
         kind = validate_kind(req.kind)
         limit("analyze")
+        series = (req.series or "").strip() or None
         return run_analysis(
             req.text,
             req.meeting_date,
@@ -903,6 +980,10 @@ def create_app(
             terms=validate_terms(req.terms),
             marks=req.marks,
             notes=req.notes,
+            agenda=clean_agenda(req.agenda),
+            series=series,
+            # 帶上次沒做完的是選配：沒有系列可參照時，勾了也沒東西可帶
+            carry_over=carryover_for(series)["lines"] if (req.carry_over and series) else None,
         )
 
     @app.get("/api/meeting-kinds")
@@ -990,6 +1071,7 @@ def create_app(
         updated = store.update_meeting(meeting_id, update, user=current_user())
         if updated is None:
             raise HTTPException(status_code=404, detail=f"找不到會議：{meeting_id}")
+        log_activity("meeting.edit", _title_of(updated), meeting_id)
         drop_from_rag(meeting_id)
         return updated
 
@@ -1137,12 +1219,139 @@ def create_app(
             headers={"Content-Disposition": 'attachment; filename="ai-feedback.jsonl"'},
         )
 
+    # ---- 跨會議追蹤（見 app/insights.py）。全部是既有資料的彙整，不打 AI ----
+
+    def _window(days: int) -> tuple[str, str]:
+        end = now_utc().date()
+        return (end - timedelta(days=days - 1)).isoformat(), end.isoformat()
+
+    @app.get("/api/insights/open-items")
+    def insights_open_items():
+        """未決事項看板：同一件事在哪幾場出現過、後來哪一條決議回答了它。"""
+        return {"items": open_items(store.list_meetings(user=current_user()))}
+
+    @app.get("/api/insights/people")
+    def insights_people():
+        user = current_user()
+        return {"people": people_stats(
+            store.list_meetings(user=user), store.list_tasks(user=user),
+            today=now_utc().date().isoformat(),
+        )}
+
+    @app.get("/api/insights/report")
+    def insights_report(days: int = 7):
+        """週報（7）／月報（30）。days 只開放這兩種：中間的數字沒有人會想看，
+        但每一種都要在前端多一個按鈕。"""
+        if days not in (7, 30):
+            raise HTTPException(status_code=400, detail="days 只能是 7 或 30")
+        user = current_user()
+        start, end = _window(days)
+        return period_report(
+            store.list_meetings(user=user), store.list_tasks(user=user), start=start, end=end
+        )
+
+    # ---- 會議前準備：系列與「上次沒做完的」（見 app/agenda.py）----
+
+    def carryover_for(series: str) -> dict:
+        """同系列上一場會議留下來的事。第一次開這個系列的會時也會被呼叫到，
+        所以沒有歷史不是錯誤，是空清單。"""
+        user = current_user()
+        previous = next(
+            (m for m in store.list_meetings(user=user) if (m.get("series") or "") == series), None
+        )
+        if previous is None:
+            return {"from": None, "lines": []}
+        return {
+            "from": {"id": previous["id"],
+                     "title": (previous.get("meeting") or {}).get("title"),
+                     "date": (previous.get("meeting") or {}).get("date")},
+            "lines": carry_over_lines(
+                store.list_tasks(meeting_id=previous["id"], user=user),
+                previous.get("pending_items") or [],
+            ),
+        }
+
+    @app.get("/api/series")
+    def list_series():
+        """已經用過的系列名稱（新到舊）。新會議表單的下拉選單用這個。"""
+        names: list[str] = []
+        for m in store.list_meetings(user=current_user()):
+            name = (m.get("series") or "").strip()
+            if name and name not in names:
+                names.append(name)
+        return {"series": names}
+
+    @app.get("/api/series/{series}/carryover")
+    def series_carryover(series: str):
+        return carryover_for(series)
+
+    # ---- 留言：對摘要、決議、任務的討論 ----
+
+    def with_author(comment: dict) -> dict:
+        # mine 讓前端知道哪幾則畫得出刪除鈕。只比對 uid，不比 email——
+        # 訪客沒有 email，全部都會變成「我的」
+        return {
+            **comment,
+            "author_name": author_name(comment),
+            "mine": comment.get("author_uid") == current_account(),
+        }
+
+    @app.post("/api/meetings/{meeting_id}/comments")
+    def add_comment(meeting_id: str, req: dict):
+        user = current_user()
+        record = store.get_meeting(meeting_id, user=user)
+        if record is None:
+            raise HTTPException(status_code=404, detail=f"找不到會議：{meeting_id}")
+        try:
+            target, text = normalize_target(req.get("target")), clean_text(req.get("text"))
+        except CommentError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        comment = {
+            "id": uuid.uuid4().hex[:12],
+            "user": user,
+            "meeting_id": meeting_id,
+            "target": target,
+            "text": text,
+            "author_uid": current_account(),
+            "author_email": CURRENT_EMAIL.get(),
+            "at": now_utc().isoformat(),
+        }
+        store.save_comment(comment)
+        log_activity("comment.add", _title_of(record), meeting_id)
+        return {"comment": with_author(comment)}
+
+    @app.get("/api/meetings/{meeting_id}/comments")
+    def list_meeting_comments(meeting_id: str):
+        comments = store.list_comments(current_user(), meeting_id=meeting_id)
+        counts: dict[str, int] = {}
+        for c in comments:
+            counts[c["target"]] = counts.get(c["target"], 0) + 1
+        # counts 讓前端一次畫出「摘要旁 2 則、第 3 條決議旁 1 則」，不必自己再掃一遍
+        return {"comments": [with_author(c) for c in comments], "counts": counts}
+
+    @app.delete("/api/comments/{comment_id}")
+    def delete_comment(comment_id: str):
+        user = current_user()
+        comment = next((c for c in store.list_comments(user) if c["id"] == comment_id), None)
+        if comment is None:
+            raise HTTPException(status_code=404, detail="找不到這則留言")
+        if comment.get("author_uid") != current_account():
+            # 群組裡可編輯的人很多，但別人說過的話不該被默默抹掉
+            raise HTTPException(status_code=403, detail="只能刪除自己的留言")
+        store.delete_comment(comment_id, user)
+        return {"deleted": comment_id}
+
+    @app.get("/api/activity")
+    def list_activity():
+        """誰在什麼時候改了什麼。個人工作區一律是空的（見 app/activity.py）。"""
+        entries = store.get_activity(current_user())
+        return {"activity": [{**e, "text": activity_log.describe(e)} for e in entries]}
+
     # ---- 手機推播提醒：App 關著、手機鎖著也跳得出來（見 docs/plans/2026-10-26-phase4-push.md）----
 
     push_sender = push_send if push_send is not None else make_sender(
         settings.vapid_public_key, settings.vapid_private_key, settings.vapid_subject
     )
-    push_clock = push_now or (lambda: datetime.now(timezone.utc))
 
     def require_push() -> None:
         if push_sender is None:
@@ -1217,7 +1426,7 @@ def create_app(
         if push_sender is None:
             return {"enabled": False, "checked": 0, "sent": 0, "quiet": 0, "dropped": 0}
 
-        now = push_clock()
+        now = now_utc()
         payloads: dict[str, dict | None] = {}  # 同一個工作區的多支手機只掃一次
         checked = sent = quiet = dropped = 0
         for sub in store.all_push_subscriptions():
@@ -1319,8 +1528,61 @@ def create_app(
 
     @app.delete("/api/meetings/{meeting_id}")
     def delete_meeting(meeting_id: str):
-        if not store.delete_meeting(meeting_id, user=current_user()):
+        """刪除＝丟進垃圾桶。群組裡一個人誤刪會影響所有人，而這在以前是不可逆的。"""
+        title = _title_of(store.get_meeting(meeting_id, user=current_user()) or {})
+        if not store.trash_meeting(meeting_id, now_utc().isoformat(), user=current_user()):
             raise HTTPException(status_code=404, detail=f"找不到會議：{meeting_id}")
+        log_activity("meeting.trash", title, meeting_id)
+        drop_from_rag(meeting_id)
+        return {"deleted": meeting_id, "trashed": True, "days_to_recover": TRASH_DAYS}
+
+    # ---- 垃圾桶 ----
+
+    def sweep_trash(user: str) -> None:
+        """清掉超過 30 天的。排程已經有一支了（推播），不值得再加一支——
+        開垃圾桶的時候順手清，反正沒人看的時候清不清都一樣。"""
+        cutoff = (now_utc() - timedelta(days=TRASH_DAYS)).isoformat()
+        for item in store.list_trash(user):
+            if (item.get("deleted_at") or "") <= cutoff:
+                store.delete_meeting(item["id"], user=user)
+
+    def days_left(item: dict) -> int:
+        """還剩幾天可以救。無條件進位：剩 10 小時要說「1 天」，不是「0 天」。"""
+        try:
+            gone = datetime.fromisoformat(item["deleted_at"])
+        except (KeyError, TypeError, ValueError):
+            return TRASH_DAYS
+        used = (now_utc() - gone).total_seconds() / 86400
+        return max(0, math.ceil(TRASH_DAYS - used))
+
+    @app.get("/api/trash")
+    def list_trash():
+        user = current_user()
+        sweep_trash(user)
+        return {
+            "trash": [{**item, "days_left": days_left(item)} for item in store.list_trash(user)],
+            "days": TRASH_DAYS,
+        }
+
+    @app.post("/api/trash/{meeting_id}/restore")
+    def restore_meeting(meeting_id: str):
+        if not store.restore_meeting(meeting_id, user=current_user()):
+            raise HTTPException(status_code=404, detail="垃圾桶裡沒有這場會議")
+        log_activity("meeting.restore", _title_of(store.get_meeting(meeting_id, user=current_user()) or {}), meeting_id)
+        drop_from_rag(meeting_id)  # 內容回來了，索引要重建
+        return {"restored": meeting_id}
+
+    @app.delete("/api/trash/{meeting_id}")
+    def purge_meeting(meeting_id: str):
+        """永久刪除。這一步才是真的沒有了。"""
+        user = current_user()
+        item = next((m for m in store.list_trash(user) if m["id"] == meeting_id), None)
+        if item is None:
+            raise HTTPException(status_code=404, detail="垃圾桶裡沒有這場會議")
+        store.delete_meeting(meeting_id, user=user)
+        for c in store.list_comments(user, meeting_id=meeting_id):
+            store.delete_comment(c["id"], user)
+        log_activity("meeting.purge", _title_of(item), meeting_id)
         drop_from_rag(meeting_id)
         return {"deleted": meeting_id}
 
@@ -1355,6 +1617,8 @@ def create_app(
                 features=features,
                 extra_terms=stored_terms,
                 kind_spec=kind_spec_of(kind),
+                # 當初貼的議程跟著會議存著。不帶的話重新分析會把對照結果整個弄丟
+                agenda=record.get("agenda") or None,
             )
         except DecisionAgentError as exc:
             raise HTTPException(status_code=502, detail=str(exc))
@@ -1366,6 +1630,8 @@ def create_app(
 
         dumped = analysis.model_dump(mode="json")
         updates = {
+            "agenda_review": dumped.get("agenda_review", []),
+            "off_agenda": dumped.get("off_agenda", []),
             "meeting": dumped["meeting"],
             "decisions": dumped["decisions"],
             "pending_items": dumped["pending_items"],
@@ -1514,7 +1780,8 @@ def create_app(
 
     # ---- 任務管理 ----
 
-    _EDITABLE_FIELDS = {"status", "task", "owner", "due_date", "priority"}
+    _EDITABLE_FIELDS = {"status", "task", "owner", "due_date", "priority",
+                        "subtasks", "recurrence"}
     _VALID_STATUS = {"todo", "doing", "done"}
 
     @app.post("/api/tasks")
@@ -1527,13 +1794,66 @@ def create_app(
             raise HTTPException(status_code=400, detail="priority 只能是 high / medium / low")
         if req.due_date not in (None, "") and not _is_iso_date(req.due_date):
             raise HTTPException(status_code=400, detail="due_date 必須是 YYYY-MM-DD 格式或留空")
-        return store.add_task({
+        created = store.add_task({
             "task": task,
             "owner": (req.owner or "").strip() or None,
             "due_date": req.due_date or None,
             "priority": req.priority,
             "meeting_id": None,
         }, user=current_user())
+        log_activity("task.add", task, created.get("id"))
+        return created
+
+    def repeat_if_due(before: dict | None, after: dict) -> None:
+        """重複任務一被標成完成，就把下一輪排進去。
+
+        只在「這一次才變成 done」時排，不然每按一次完成都會多生一筆。
+        """
+        if after.get("status") != "done" or (before or {}).get("status") == "done":
+            return
+        due = next_occurrence(after.get("due_date"), after.get("recurrence"))
+        if not due:
+            return
+        store.add_task({
+            "task": after.get("task"),
+            "owner": after.get("owner"),
+            "due_date": due,
+            "priority": after.get("priority") or "medium",
+            "meeting_id": after.get("meeting_id"),
+            "recurrence": after.get("recurrence"),
+            # 上一輪勾完的子項目帶過來的話，這一輪一開始就是全部完成
+            "subtasks": [{"text": s["text"], "done": False} for s in after.get("subtasks") or []],
+        }, user=current_user())
+
+    @app.get("/api/owners")
+    def list_owners():
+        """負責人建議：用過的負責人、出席過的人，群組工作區再加上成員。
+
+        自動補全與「指派給成員」用的是同一份名單——那本來就是同一個問題。
+        """
+        user = current_user()
+        names: list[str] = []
+
+        def add(name) -> None:
+            name = str(name or "").strip()
+            if name and name not in names:
+                names.append(name)
+
+        for task in store.list_tasks(user=user):
+            add(task.get("owner"))
+        for meeting in store.list_meetings(user=user):
+            for who in (meeting.get("meeting") or {}).get("attendees") or []:
+                add(who)
+
+        members = []
+        if in_group_workspace():
+            group = store.get_group(user.split(":", 1)[1]) or {}
+            for m in group.get("members") or []:
+                email = m.get("email") or ""
+                label = email.split("@", 1)[0] if "@" in email else (m.get("uid") or "")
+                members.append({"uid": m.get("uid"), "email": email, "name": label})
+                add(label)
+        return {"owners": names, "members": members}
 
     @app.patch("/api/tasks/{task_id}")
     def patch_task(task_id: str, fields: dict):
@@ -1550,15 +1870,35 @@ def create_app(
             and not _is_iso_date(fields["due_date"])
         ):
             raise HTTPException(status_code=400, detail="due_date 必須是 YYYY-MM-DD 格式或留空")
+        # 複製一份：LocalJsonStore 回的是儲存層裡同一個 dict，update_task 會就地改掉它，
+        # 直接留著參照的話前後比對永遠相等
+        if "recurrence" in fields and fields["recurrence"] not in (None, "", *RECURRENCES):
+            raise HTTPException(
+                status_code=400, detail=f"recurrence 只能是：{'、'.join(RECURRENCES)}"
+            )
+        if "subtasks" in fields:
+            try:
+                fields["subtasks"] = clean_subtasks(fields["subtasks"])
+            except TaskExtraError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+        # 複製一份：LocalJsonStore 回的是儲存層裡同一個 dict，update_task 會就地改掉它，
+        # 直接留著參照的話前後比對永遠相等
+        before = next(
+            (dict(t) for t in store.list_tasks(user=current_user()) if t["id"] == task_id), None
+        )
         updated = store.update_task(task_id, user=current_user(), **fields)
         if updated is None:
             raise HTTPException(status_code=404, detail=f"找不到任務：{task_id}")
+        log_activity(_task_action(before, updated), updated.get("task") or "", task_id)
+        repeat_if_due(before, updated)
         return updated
 
     @app.delete("/api/tasks/{task_id}")
     def delete_task(task_id: str):
+        before = next((t for t in store.list_tasks(user=current_user()) if t["id"] == task_id), None)
         if not store.delete_task(task_id, user=current_user()):
             raise HTTPException(status_code=404, detail=f"找不到任務：{task_id}")
+        log_activity("task.delete", (before or {}).get("task") or "", task_id)
         return {"deleted": task_id}
 
     # ---- 群組工作區（需要 Google 登入：沒有帳號就沒有「誰」可以邀請） ----
@@ -1707,11 +2047,67 @@ def create_app(
         record = store.get_meeting(meeting_id, user=current_user())
         if record is None:
             raise HTTPException(status_code=404, detail=f"找不到會議：{meeting_id}")
-        return Response(
-            content=meeting_report_md(record, store.list_tasks(meeting_id=meeting_id, user=current_user())),
-            media_type="text/markdown; charset=utf-8",
-            headers={"Content-Disposition": f'attachment; filename="meeting-{meeting_id}.md"'},
+        return download(
+            meeting_report_md(record, store.list_tasks(meeting_id=meeting_id, user=current_user())),
+            "text/markdown; charset=utf-8", (record.get("meeting") or {}).get("title"), "md",
         )
+
+    def download(content, media_type: str, title: str, ext: str) -> Response:
+        """帶上會議標題的下載回應。下載資料夾裡躺著五個 meeting-a1b2c3.pdf 的時候，
+        誰也認不出哪個是哪個——所以檔名用標題，並照 RFC 5987 編中文。"""
+        safe = re.sub(r'[\/:*?"<>|]', "_", (title or "會議紀錄")).strip() or "會議紀錄"
+        quoted = quote(f"{safe}.{ext}")
+        return Response(
+            content=content,
+            media_type=media_type,
+            headers={"Content-Disposition":
+                     f"attachment; filename=\"meeting.{ext}\"; filename*=UTF-8''{quoted}"},
+        )
+
+    def export_record(meeting_id: str) -> tuple[dict, list[dict]]:
+        user = current_user()
+        record = store.get_meeting(meeting_id, user=user)
+        if record is None:
+            raise HTTPException(status_code=404, detail=f"找不到會議：{meeting_id}")
+        return record, store.list_tasks(meeting_id=meeting_id, user=user)
+
+    @app.get("/api/meetings/{meeting_id}/report.docx")
+    def meeting_report_docx(meeting_id: str):
+        record, tasks = export_record(meeting_id)
+        return download(
+            meeting_to_docx(record, tasks),
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            (record.get("meeting") or {}).get("title"), "docx",
+        )
+
+    @app.get("/api/meetings/{meeting_id}/report.pdf")
+    def meeting_report_pdf(meeting_id: str):
+        record, tasks = export_record(meeting_id)
+        try:
+            blob = meeting_to_pdf(record, tasks)
+        except PdfFontMissing as exc:
+            # 產出亂碼 PDF 比產不出來更糟：使用者會把它寄出去才發現
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        return download(blob, "application/pdf", (record.get("meeting") or {}).get("title"), "pdf")
+
+    @app.get("/api/meetings/{meeting_id}/transcript.srt")
+    def meeting_srt(meeting_id: str):
+        return _subtitles(meeting_id, to_srt, "srt")
+
+    @app.get("/api/meetings/{meeting_id}/transcript.vtt")
+    def meeting_vtt(meeting_id: str):
+        return _subtitles(meeting_id, to_vtt, "vtt")
+
+    def _subtitles(meeting_id: str, render, ext: str) -> Response:
+        record, _ = export_record(meeting_id)
+        content = render(record.get("transcript") or "")
+        if not content:
+            raise HTTPException(
+                status_code=422, detail="這場會議的逐字稿沒有時間戳，做不出字幕檔"
+            )
+        media = "application/x-subrip" if ext == "srt" else "text/vtt"
+        return download(content.encode("utf-8"), f"{media}; charset=utf-8",
+                        (record.get("meeting") or {}).get("title"), ext)
 
     @app.get("/api/meetings/{meeting_id}/notifications")
     def meeting_notifications(meeting_id: str):
@@ -1736,11 +2132,8 @@ def create_app(
             record.get("meeting", {}).get("title", ""),
             store.list_tasks(meeting_id=meeting_id, user=current_user()),
         )
-        return Response(
-            content=content,
-            media_type="text/calendar; charset=utf-8",
-            headers={"Content-Disposition": f'attachment; filename="meeting-{meeting_id}.ics"'},
-        )
+        return download(content, "text/calendar; charset=utf-8",
+                        record.get("meeting", {}).get("title"), "ics")
 
     # ---- 輸入路徑 2：音檔 / 影片上傳（背景轉錄） ----
 
@@ -1752,6 +2145,9 @@ def create_app(
         features: Optional[str] = Form(None),
         correct_typos: Optional[str] = Form(None),
         terms: Optional[str] = Form(None),
+        agenda: Optional[str] = Form(None),
+        series: Optional[str] = Form(None),
+        carry_over: Optional[str] = Form(None),
     ):
         limit("media")  # 在存檔之前擋：被擋下的上傳不佔暫存磁碟
         try:
@@ -1784,6 +2180,12 @@ def create_app(
                 correct_typos=correct,
                 terms=resolved_terms,
                 kind_spec=kind_spec_of(kind),
+                agenda=clean_agenda(agenda),
+                series=(series or "").strip() or None,
+                # 背景執行緒沒有請求上下文，上次沒做完的事現在就查好
+                carry_over=(carryover_for(series.strip())["lines"]
+                            if (str(carry_over or "").lower() in _truthy and series
+                                and series.strip()) else None),
             )
         }
 
@@ -1888,6 +2290,7 @@ def create_app(
             )
         kind = validate_kind(req.kind if req else None)
         features = resolve_features(req.features if req else None, kind)
+        live_series = ((req.series if req else None) or "").strip() or None
         result = run_analysis(
             transcript,
             req.meeting_date if req else None,
@@ -1901,6 +2304,10 @@ def create_app(
             # 會議當下才有的資訊：按下的標記時間點、手打的筆記
             marks=req.marks if req else None,
             notes=req.notes if req else None,
+            agenda=clean_agenda(req.agenda if req else None),
+            series=live_series,
+            carry_over=(carryover_for(live_series)["lines"]
+                        if (req and req.carry_over and live_series) else None),
         )
         # result 帶著校正後的 transcript，放在後面覆蓋原始版本。
         # speakers_matched/unmatched 讓前端說得出「預錄的 4 位認出了哪 2 位」——
