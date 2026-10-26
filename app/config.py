@@ -61,35 +61,17 @@ class Settings:
     # 上傳的長音檔分段轉錄的每段秒數（0＝不分段，整份送出）。
     # 實測整份送出 17 分鐘錄音時，Gemini 會整份放棄講者標註、時間戳也會漂掉
     transcribe_chunk_seconds: int = 240
-    # 較強的轉錄模型：長檔整份單次轉錄、以及某段講者標註率過低時重跑那一段
-    # （空字串＝不啟用）。同樣是釘死版本，理由見 gemini_model 上方那段。
-    transcribe_fallback_model: str | None = "gemini-3.6-flash"
-    # 單一檔案最多幾段可以動用備援模型。免費層實測額度：Flash Lite 每日 500 次、
-    # Flash 每日只有 20 次——備援跑一次就吃掉每日 Flash 額度的 5%，遠高於重試
-    # 的成本上限，所以預設 0（不啟用），把預算全花在便宜的 lite 重試，稀有的
-    # Flash 額度留給長檔整份轉錄（見 transcribe_long_file_threshold_seconds，
-    # 那才是它真正划算的地方）。需要極致品質再設成 1
-    transcribe_max_fallback_chunks: int = 0
     # 單一檔案總共最多幾次重試。只設每段上限的話總量會隨影片長度線性膨脹
     # （60 分鐘＝15 段 × 2 次＝30 次，佔每日 500 次額度的 6%）；設每檔上限
     # 讓重試成本與長度脫鉤，10 次＝額度的 2%
     transcribe_max_retry_calls: int = 10
     # 標註率不足時，用同一個 lite 模型重跑幾次。失敗是執行間的變異（同一輸入
     # 標註率可能 20% 也可能 100%），多試幾次的累積成功率遠比換模型划算：
-    # lite 一次只佔每日額度 0.2%，Flash 一次佔 5%
+    # lite 一次只佔每日額度 0.2%
     transcribe_label_retries: int = 2
     # 每段往前多抓幾秒當重疊：模型沒聽過前一段，光給講者名單無從對應嗓音，
     # 同一個人跨段就會換標籤。重疊＋提示裡的對照樣本才接得起來（0＝不重疊）
     transcribe_overlap_seconds: int = 20
-    # 超過這個長度（秒）的檔案改用強模型（transcribe_fallback_model=flash）整份
-    # 單次轉錄、不分段。實測 14 分鐘台語質詢：強模型一次聽完整場的語者分辨遠優
-    # 於 lite 分段（分段會破壞它賴以分辨講者的全局脈絡）。
-    #
-    # 預設 0（停用，一律 lite 分段）：那顆強模型每日只有 20 次，且實測連打 5 次
-    # 會中 1 次 503；長檔是「整份一次大呼叫」，在高峰期比小請求更容易被 Google
-    # 端丟棄，撞上就整份失敗、使用者白等十分鐘。講者分辨差一點可以接受，白等
-    # 一場然後報錯不行。額度充裕或升級付費後設 600（10 分鐘）即可換回。
-    transcribe_long_file_threshold_seconds: int = 0
     # 聲紋跨段接力（approach A）：分段轉錄時邊轉邊建「聲音簿」，把已確立的
     # 講者聲音樣本接力餵給後續分段，模型才有真的聽得到的依據去沿用同一個
     # 代號，不必再靠純文字提示憑空猜測。這是額度邊際成本很低的功能——樣本
@@ -184,21 +166,12 @@ def get_settings() -> Settings:
             os.environ.get("VOICE_MATCH_MODEL", "gemini-3.6-flash") or None
         ),
         transcribe_chunk_seconds=int(os.environ.get("TRANSCRIBE_CHUNK_SECONDS", "240")),
-        transcribe_fallback_model=(
-            os.environ.get("TRANSCRIBE_FALLBACK_MODEL", "gemini-3.6-flash") or None
-        ),
-        transcribe_max_fallback_chunks=int(
-            os.environ.get("TRANSCRIBE_MAX_FALLBACK_CHUNKS", "0")
-        ),
         transcribe_max_retry_calls=int(
             os.environ.get("TRANSCRIBE_MAX_RETRY_CALLS", "10")
         ),
         transcribe_label_retries=int(os.environ.get("TRANSCRIBE_LABEL_RETRIES", "2")),
         transcribe_overlap_seconds=int(
             os.environ.get("TRANSCRIBE_OVERLAP_SECONDS", "20")
-        ),
-        transcribe_long_file_threshold_seconds=int(
-            os.environ.get("TRANSCRIBE_LONG_FILE_THRESHOLD_SECONDS", "0")
         ),
         voice_relay_max_speakers=int(
             os.environ.get("VOICE_RELAY_MAX_SPEAKERS", "20")

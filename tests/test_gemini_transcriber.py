@@ -150,101 +150,21 @@ def test_transcribe_prompt_asks_for_timestamps():
     assert "時間" in _TRANSCRIBE_PROMPT
 
 
-# ---- 長檔改用強模型整份單次轉錄 ----
-# 實測 14 分鐘台語質詢：lite 分段會把同一位講者拆成多個代號、官員與委員混在
-# 一起；同一支檔用強模型（flash）整份單次轉錄，講者A/B/C/D 前後一致且分得開。
-# 強模型的優勢來自「一次聽完整場」的全局脈絡，分段反而會破壞它，所以長檔走
-# 強模型整份、不分段；短檔仍用便宜的 lite 分段（省額度）。
-
-def _long_file_setup(monkeypatch, tmp_path, duration):
-    """只借用 FakeChunkedSetup 的 media 打樁（ffmpeg 可用、回傳指定長度）。"""
-    return FakeChunkedSetup(monkeypatch, tmp_path, duration=duration, chunk_texts=["x"])
-
-
-def test_long_file_uses_strong_model_whole_pass(monkeypatch, tmp_path):
-    src = tmp_path / "long.wav"
-    src.write_bytes(b"RIFF-fake")
-    _long_file_setup(monkeypatch, tmp_path, duration=900)  # 15 分鐘 > 10 分鐘門檻
-    used = []
-
-    class Tracking(GeminiTranscriber):
-        def _transcribe_one(self, audio_path, hint, model=None, on_partial=None,
-                            voice_refs=None, user=None):
-            used.append(model or self.model)
-            return "[0:00] 講者A：整場一次轉完\n[5:00] 講者B：分得很清楚"
-
-    t = Tracking(
-        api_key="k", chunk_seconds=240, model="gemini-flash-lite-latest",
-        strong_model="gemini-flash-latest", strong_whole_threshold=600,
-    )
-    text = t.transcribe(src)
-    assert used == ["gemini-flash-latest"]  # 只呼叫一次，且用強模型
-    assert "整場一次轉完" in text
-
-
-def test_medium_file_still_uses_lite_chunking(monkeypatch, tmp_path):
-    """6~10 分鐘的檔仍走便宜的 lite 分段，不動用強模型。"""
+def test_medium_file_uses_lite_chunking(monkeypatch, tmp_path):
+    """超過 6 分鐘的檔一律用 lite 分段，每段一次。"""
     src = tmp_path / "long.wav"
     src.write_bytes(b"RIFF-fake")
     FakeChunkedSetup(monkeypatch, tmp_path, duration=480, chunk_texts=["a", "b"])
     used = []
 
     class Tracking(GeminiTranscriber):
-        def _transcribe_one(self, audio_path, hint, model=None, on_partial=None,
+        def _transcribe_one(self, audio_path, hint, on_partial=None,
                             voice_refs=None, user=None):
-            used.append(model or self.model)
+            used.append(self.model)
             return "[0:00] 講者A：內容"
 
-    t = Tracking(
-        api_key="k", chunk_seconds=240, model="gemini-flash-lite-latest",
-        strong_model="gemini-flash-latest", strong_whole_threshold=600,
-    )
-    t.transcribe(src)
-    assert used == ["gemini-flash-lite-latest"] * 2  # 兩段各一次、全 lite
-    assert "gemini-flash-latest" not in used
-
-
-def test_long_file_without_strong_model_falls_back_to_chunking(monkeypatch, tmp_path):
-    """沒設定強模型時，長檔仍退回 lite 分段，不會整個轉錄失敗。"""
-    src = tmp_path / "long.wav"
-    src.write_bytes(b"RIFF-fake")
-    FakeChunkedSetup(monkeypatch, tmp_path, duration=900, chunk_texts=["a", "b", "c", "d"])
-    used = []
-
-    class Tracking(GeminiTranscriber):
-        def _transcribe_one(self, audio_path, hint, model=None, on_partial=None,
-                            voice_refs=None, user=None):
-            used.append(model or self.model)
-            return "[0:00] 講者A：內容"
-
-    t = Tracking(
-        api_key="k", chunk_seconds=240, model="gemini-flash-lite-latest",
-        strong_model=None, strong_whole_threshold=600,
-    )
-    t.transcribe(src)
-    assert set(used) == {"gemini-flash-lite-latest"}  # 全 lite、分段
-    assert len(used) >= 4
-
-
-def test_strong_whole_disabled_when_threshold_zero(monkeypatch, tmp_path):
-    """門檻設 0＝停用長檔強模式，一律照舊 lite 分段。"""
-    src = tmp_path / "long.wav"
-    src.write_bytes(b"RIFF-fake")
-    FakeChunkedSetup(monkeypatch, tmp_path, duration=900, chunk_texts=["a", "b", "c", "d"])
-    used = []
-
-    class Tracking(GeminiTranscriber):
-        def _transcribe_one(self, audio_path, hint, model=None, on_partial=None,
-                            voice_refs=None, user=None):
-            used.append(model or self.model)
-            return "[0:00] 講者A：內容"
-
-    t = Tracking(
-        api_key="k", chunk_seconds=240, model="gemini-flash-lite-latest",
-        strong_model="gemini-flash-latest", strong_whole_threshold=0,
-    )
-    t.transcribe(src)
-    assert "gemini-flash-latest" not in used  # 停用 → 不動用強模型
+    Tracking(api_key="k", chunk_seconds=240, model="gemini-flash-lite-latest").transcribe(src)
+    assert used == ["gemini-flash-lite-latest"] * 2
 
 
 # ---- 長音檔分段轉錄 ----
@@ -704,163 +624,6 @@ def test_retry_disabled_when_label_retries_zero(monkeypatch, tmp_path):
     assert setup.calls["n"] == 1
 
 
-# ---- 重試用盡後改用較強模型 ----
-# 實測同一段連跑兩次都只有 20% 標註率，但換 gemini-flash-latest 就 100%。
-# 只在失敗的段落動用，額度較低的模型才不會被整場錄音吃光。
-
-def test_falls_back_to_stronger_model_when_retries_all_fail(monkeypatch, tmp_path):
-    src = tmp_path / "long.wav"
-    src.write_bytes(b"RIFF-fake")
-    # 分段路徑要 2 段以上才會啟動
-    FakeChunkedSetup(monkeypatch, tmp_path, duration=600, chunk_texts=["", ""])
-    used_models = []
-
-    class Tracking(GeminiTranscriber):
-        def _transcribe_one(self, audio_path, hint, model=None, on_partial=None,
-                            voice_refs=None, user=None):
-            used_models.append(model or self.model)
-            if model == "gemini-flash-latest":
-                return "[0:00] 講者A：強模型標得好\n[0:05] 講者B：也標了"
-            return "[0:00] 沒標\n[0:05] 也沒標"
-
-    # 明確指定參數，不受預設值調整影響（預設的取捨見 config.py）
-    t = Tracking(api_key="k", chunk_seconds=240, label_retries=1,
-                 model="gemini-flash-lite-latest", fallback_model="gemini-flash-latest",
-                 max_fallback_chunks=2)
-    text = t.transcribe(src)
-    assert "講者A" in text and "講者B" in text
-    # 每段：先用便宜模型試 2 次（初次＋重試），失敗才動用強模型 1 次
-    per_chunk = ["gemini-flash-lite-latest"] * 2 + ["gemini-flash-latest"]
-    assert used_models == per_chunk * 2
-
-
-def test_stronger_model_not_used_when_labels_are_fine(monkeypatch, tmp_path):
-    """標得好就不該動用額度較低的模型。"""
-    src = tmp_path / "long.wav"
-    src.write_bytes(b"RIFF-fake")
-    FakeChunkedSetup(monkeypatch, tmp_path, duration=600, chunk_texts=["", ""])
-    used_models = []
-
-    class Tracking(GeminiTranscriber):
-        def _transcribe_one(self, audio_path, hint, model=None, on_partial=None,
-                            voice_refs=None, user=None):
-            used_models.append(model or self.model)
-            return "[0:00] 講者A：標得很好\n[0:05] 講者B：也是"
-
-    Tracking(api_key="k", chunk_seconds=240, model="gemini-flash-lite-latest",
-             fallback_model="gemini-flash-latest").transcribe(src)
-    assert used_models == ["gemini-flash-lite-latest"] * 2  # 兩段各一次，沒動用強模型
-
-
-def test_fallback_result_discarded_if_worse(monkeypatch, tmp_path):
-    """強模型那次反而更差時，保留原本最好的結果。"""
-    src = tmp_path / "long.wav"
-    src.write_bytes(b"RIFF-fake")
-    FakeChunkedSetup(monkeypatch, tmp_path, duration=600, chunk_texts=["", ""])
-
-    class Tracking(GeminiTranscriber):
-        def _transcribe_one(self, audio_path, hint, model=None, on_partial=None,
-                            voice_refs=None, user=None):
-            if model:
-                return "[0:00] 完全沒標\n[0:05] 也沒標"
-            return "[0:00] 講者A：至少有一行\n[0:05] 沒標"
-
-    # 備援預設關閉，這裡明確開啟才測得到「降級結果較差」的行為
-    text = Tracking(api_key="k", chunk_seconds=240, label_retries=0,
-                    fallback_model="gemini-flash-latest",
-                    max_fallback_chunks=1).transcribe(src)
-    assert "講者A" in text
-
-
-def test_fallback_is_disabled_by_default():
-    """備援模型每跑一次就佔 Flash 每日 20 次額度的 5%，預設不啟用：
-    重試預算花在額度充裕的 lite 上，Flash 留給分析與名字對應。"""
-    assert GeminiTranscriber(api_key="k").max_fallback_chunks == 0
-
-
-def test_no_fallback_when_not_configured(monkeypatch, tmp_path):
-    src = tmp_path / "long.wav"
-    src.write_bytes(b"RIFF-fake")
-    FakeChunkedSetup(monkeypatch, tmp_path, duration=600, chunk_texts=["", ""])
-    calls = []
-
-    class Tracking(GeminiTranscriber):
-        def _transcribe_one(self, audio_path, hint, model=None, on_partial=None,
-                            voice_refs=None, user=None):
-            calls.append(model)
-            return "[0:00] 沒標\n[0:05] 也沒標"
-
-    Tracking(api_key="k", chunk_seconds=240, label_retries=1,
-             fallback_model=None).transcribe(src)
-    # 每段只有初次＋重試，沒有第三次（兩段共 4 次）
-    assert calls == [None] * 4
-
-
-# ---- 強模型用量上限 ----
-# 降級是「每段」獨立判斷的，不設上限的話一個 5 段的難搞檔案就會吃掉 5 次
-# 強模型額度（它的每日額度比 lite 低得多）。
-
-def _all_failing(monkeypatch, tmp_path, chunks, **kw):
-    """建一個每段都標不好的情境，回傳 (transcriber, 用到的模型清單)。"""
-    src = tmp_path / "long.wav"
-    src.write_bytes(b"RIFF-fake")
-    FakeChunkedSetup(monkeypatch, tmp_path, duration=chunks * 240, chunk_texts=[""] * chunks)
-    used = []
-
-    class Tracking(GeminiTranscriber):
-        def _transcribe_one(self, audio_path, hint, model=None, on_partial=None,
-                            voice_refs=None, user=None):
-            used.append(model or self.model)
-            return "[0:00] 沒標\n[0:05] 也沒標"
-
-    t = Tracking(api_key="k", chunk_seconds=240, label_retries=1,
-                 model="lite", fallback_model="strong", **kw)
-    return src, t, used
-
-
-def test_fallback_capped_per_file(monkeypatch, tmp_path):
-    """4 段全部標不好，但最多只有 2 段能動用強模型。"""
-    src, t, used = _all_failing(monkeypatch, tmp_path, chunks=4, max_fallback_chunks=2)
-    t.transcribe(src)
-    assert used.count("strong") == 2
-    assert used.count("lite") == 8  # 4 段 × (初次 + 重試)
-
-
-def test_fallback_cap_can_be_disabled(monkeypatch, tmp_path):
-    src, t, used = _all_failing(monkeypatch, tmp_path, chunks=3, max_fallback_chunks=0)
-    t.transcribe(src)
-    assert used.count("strong") == 0  # 完全不動用強模型
-
-
-def test_fallback_cap_allows_all_when_high(monkeypatch, tmp_path):
-    src, t, used = _all_failing(monkeypatch, tmp_path, chunks=3, max_fallback_chunks=99)
-    t.transcribe(src)
-    assert used.count("strong") == 3
-
-
-def test_successful_chunks_do_not_consume_fallback_budget(monkeypatch, tmp_path):
-    """標得好的段落不該佔用強模型的配額。"""
-    src = tmp_path / "long.wav"
-    src.write_bytes(b"RIFF-fake")
-    FakeChunkedSetup(monkeypatch, tmp_path, duration=720, chunk_texts=["", "", ""])
-    used = []
-    seen = {"n": 0}
-
-    class Tracking(GeminiTranscriber):
-        def _transcribe_one(self, audio_path, hint, model=None, on_partial=None,
-                            voice_refs=None, user=None):
-            used.append(model or self.model)
-            seen["n"] += 1
-            # 第一段標得好，之後兩段都失敗
-            if seen["n"] == 1:
-                return "[0:00] 講者A：好的\n[0:05] 講者B：也好"
-            return "[0:00] 沒標\n[0:05] 也沒標"
-
-    Tracking(api_key="k", chunk_seconds=240, label_retries=1, model="lite",
-             fallback_model="strong", max_fallback_chunks=2).transcribe(src)
-    assert used.count("strong") == 2  # 兩段失敗的都用得到，額度沒被成功的那段吃掉
-
-
 # ---- 重疊分段（跨段講者一致性）----
 # 模型沒聽過前一段，光給講者名單無從對應嗓音，同一個人跨段就會換標籤。
 # 每段往前多抓一小段音訊，並把前一段結尾的逐字稿當對照樣本給它。
@@ -1276,3 +1039,13 @@ def test_voice_sample_skipped_when_timestamp_drifts_past_the_chunk(monkeypatch, 
 
     assert all(start < 240 for start, _ in cut_spans), f"剪到音檔範圍外：{cut_spans}"
     assert all(end <= 240 for _, end in cut_spans), f"結束點超出音檔：{cut_spans}"
+
+
+def test_flash_fallback_paths_are_gone():
+    """強模型備援（失敗段改用 Flash、長檔整份給 Flash）預設本來就關著，
+    開了也只是把每日 20 次的 Flash 額度吃掉。整條路徑拿掉，不留沒人用的開關。"""
+    import inspect
+
+    params = inspect.signature(GeminiTranscriber.__init__).parameters
+    for gone in ("fallback_model", "max_fallback_chunks", "strong_model", "strong_whole_threshold"):
+        assert gone not in params

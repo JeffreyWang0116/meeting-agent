@@ -129,12 +129,8 @@ class GeminiTranscriber:
         glossary=None,
         chunk_seconds: int = 0,
         label_retries: int = 2,
-        fallback_model: str | None = None,
-        max_fallback_chunks: int = 0,
         overlap_seconds: int = 20,
         max_retry_calls: int = 10,
-        strong_model: str | None = None,
-        strong_whole_threshold: int = 0,
         voice_relay_max_speakers: int = 0,
         speaker_labels_needed: bool = True,
     ):
@@ -155,14 +151,6 @@ class GeminiTranscriber:
         self.chunk_seconds = chunk_seconds
         # 一段的講者標註率過低時，最多再重跑幾次（0＝不重試）
         self.label_retries = label_retries
-        # 重試用盡仍標不好時，改用這個較強的模型跑最後一次（None＝不啟用）。
-        # 只在真的失敗的那一段動用，免費額度較低的模型才不會被整場吃光
-        self.fallback_model = fallback_model
-        # 單一檔案最多幾段可以動用強模型。免費層實測：Flash Lite 每日 500 次，
-        # Flash 只有 20 次——備援跑一次就佔掉每日 Flash 額度的 5%，而 lite 重試
-        # 一次只佔 0.2%。預設 0（不啟用）：把預算全花在額度充裕的 lite 重試，
-        # 稀有的 Flash 額度留給分析與名字對應
-        self.max_fallback_chunks = max_fallback_chunks
         # 單一檔案總共最多幾次重試。只設每段上限的話，總量會隨影片長度線性
         # 膨脹（60 分鐘＝15 段 × 2 次＝30 次額外請求，佔每日額度 6%）；
         # 設每檔上限才能讓重試成本與影片長度脫鉤，維持在額度的 2% 以內
@@ -171,16 +159,10 @@ class GeminiTranscriber:
         # 嗓音，只能從自己這段重新編號——同一個人跨段就會換標籤。重疊讓它
         # 聽得到前一段結尾，配合提示裡的對照樣本才能接得起來
         self.overlap_seconds = overlap_seconds
-        # 長檔（duration > strong_whole_threshold 秒）改用這顆強模型整份單次
-        # 轉錄、不分段。實測台語質詢：強模型一次聽完整場的語者分辨遠優於 lite
-        # 分段，而分段會破壞它賴以分辨講者的全局脈絡。strong_whole_threshold
-        # 設 0，或 strong_model 為 None，就停用這條路徑（一律照舊 lite 分段）
-        self.strong_model = strong_model
-        self.strong_whole_threshold = strong_whole_threshold
         # 分段轉錄時邊轉邊建「聲音簿」{代號: 樣本音檔}，接力餵給後續分段當
         # 參考音訊（approach A：見 voice_relay_parts）。0＝停用，不剪任何樣本、
         # 不產生額外的 ffmpeg／上傳成本——這是會加成本的功能，class 層級預設關，
-        # 「預設開」由 Settings 層的預設值負責（與 max_fallback_chunks 同一慣例）
+        # 「預設開」由 Settings 層的預設值負責
         self.voice_relay_max_speakers = voice_relay_max_speakers
         # 講者標籤要不要靠 Gemini 標好。有 pyannote 時講者會依時間戳整份重標，
         # 為標籤重跑整段純屬浪費（實測 10.5 分鐘檔 9 次呼叫裡有 6 次是這種重跑）；
@@ -204,38 +186,22 @@ class GeminiTranscriber:
         audio_path = self._ensure_audio(Path(path))
         duration = media.audio_duration(audio_path) if media.ffmpeg_available() else None
 
-        # 長檔：強模型整份單次轉錄（見 strong_model 的說明）
-        if self._use_strong_whole(duration):
-            return self._transcribe_whole(
-                audio_path, on_progress, hint, self.strong_model, duration, user
-            )
-
         chunks = self._plan_chunks(audio_path, duration)
         if chunks:
             return self._transcribe_chunked(chunks, on_progress, hint, user)
-        return self._transcribe_whole(audio_path, on_progress, hint, None, duration, user)
+        return self._transcribe_whole(audio_path, on_progress, hint, duration, user)
 
     # ---- 內部 ----
-
-    def _use_strong_whole(self, duration: float | None) -> bool:
-        return bool(
-            self.strong_whole_threshold > 0
-            and self.strong_model
-            and duration is not None
-            and duration > self.strong_whole_threshold
-        )
 
     def _transcribe_whole(
         self,
         audio_path: Path,
         on_progress,
         hint: str | None,
-        model: str | None,
         duration: float | None = None,
         user: str = DEFAULT_USER,
     ) -> str:
-        """整份單次轉錄（不分段）。model=None 用預設模型（短檔走 lite），
-        指定 model 則用該模型（長檔走強模型）。
+        """整份單次轉錄（不分段）。
 
         串流收字：整份轉錄是一次長呼叫，不串流的話進度條會卡在 10% 好幾分鐘
         再瞬間跳完成，使用者無從判斷是還在跑還是已經掛了。進度依「最後一個
@@ -261,7 +227,7 @@ class GeminiTranscriber:
         text = drop_empty_lines(
             normalize_timestamps(
                 self._transcribe_one(
-                    audio_path, hint, model=model, on_partial=report, user=user
+                    audio_path, hint, on_partial=report, user=user
                 )
             )
         )
@@ -301,7 +267,6 @@ class GeminiTranscriber:
         """逐段轉錄再縫合：時間戳平移回整場時間，講者標籤跨段沿用同一組。"""
         parts: list[str] = []
         speakers: list[str] = []
-        fallback_used = 0  # 這個檔案已經用掉幾次強模型（受 max_fallback_chunks 限制）
         retries_left = self.max_retry_calls  # 整個檔案共用的重試預算
         chunk_dir = chunks[0].parent
         previous_tail = ""
@@ -358,10 +323,9 @@ class GeminiTranscriber:
                 )
                 logger.info("開始轉錄第 %d/%d 段", index + 1, len(chunks))
                 try:
-                    text, used_fallback, retries_used = self._transcribe_labelled(
+                    text, retries_used = self._transcribe_labelled(
                         chunk,
                         this_hint,
-                        allow_fallback=fallback_used < self.max_fallback_chunks,
                         retry_budget=retries_left,
                         on_partial=inner_reporter(index),
                         voice_refs=voice_refs,
@@ -387,8 +351,6 @@ class GeminiTranscriber:
                             marker if index == 0 else "\n" + marker,
                         )
                     continue
-                if used_fallback:
-                    fallback_used += 1
                 retries_left -= retries_used
                 if not text:
                     continue
@@ -477,12 +439,11 @@ class GeminiTranscriber:
         self,
         chunk: Path,
         hint: str | None,
-        allow_fallback: bool = True,
         retry_budget: int | None = None,
         on_partial=None,
         voice_refs: list[dict] | None = None,
         user: str = DEFAULT_USER,
-    ) -> tuple[str, bool, int]:
+    ) -> tuple[str, int]:
         """轉錄一段，講者標註率太低就重跑，取標得最好的那次。
 
         retry_budget 是整個檔案剩餘的重試次數（None＝不限）；本段最多只能用掉
@@ -491,8 +452,7 @@ class GeminiTranscriber:
         voice_refs：聲紋接力的聲音簿（見 voice_relay_parts），每次重試都帶
         上——重試換的是「這次夠不夠標好」，樣本音訊該不該給是另一件事。
 
-        回傳 (逐字稿, 有沒有動用強模型, 用掉幾次重試)——呼叫端據此控管整個
-        檔案的強模型與重試用量。
+        回傳 (逐字稿, 用掉幾次重試)——呼叫端據此控管整個檔案的重試用量。
 
         模型偶爾會整段放棄標講者（同一輸入重跑一次就正常），沒有重試的話
         那一段在畫面上就整片沒有講者，前端的續行沿用也會把話歸錯人。
@@ -512,7 +472,7 @@ class GeminiTranscriber:
             if ratio > best_ratio:
                 best, best_ratio = text, ratio
             if ratio >= MIN_SPEAKER_LABEL_RATIO:
-                return best, False, retries_used
+                return best, retries_used
             if attempt < allowed_retries:
                 logger.info(
                     "%s %s只有 %.0f%%，重跑一次", chunk.name,
@@ -520,18 +480,7 @@ class GeminiTranscriber:
                     ratio * 100,
                 )
 
-        # 同一個模型重試用盡還是標不好（實測會連兩次都失敗），換較強的模型再試
-        # 一次。allow_fallback 由呼叫端控管，避免一個難搞的檔案把強模型額度用光
-        if allow_fallback and self.fallback_model and self.fallback_model != self.model:
-            logger.info("%s 改用 %s 重跑", chunk.name, self.fallback_model)
-            text = self._transcribe_one(
-                chunk, hint, model=self.fallback_model, on_partial=on_partial,
-                voice_refs=voice_refs, user=user,
-            )
-            if self._quality(text) > best_ratio:
-                best = text
-            return best, True, retries_used
-        return best, False, retries_used
+        return best, retries_used
 
     def _quality(self, text: str) -> float:
         """這一輪轉錄合不合格（0~1）：要不要重跑、多次結果取哪一份都看它。"""
@@ -543,7 +492,6 @@ class GeminiTranscriber:
         self,
         audio_path: Path,
         hint: str | None,
-        model: str | None = None,
         on_partial=None,
         voice_refs: list[dict] | None = None,
         user: str = DEFAULT_USER,
@@ -571,7 +519,7 @@ class GeminiTranscriber:
             # 過載時自動改用另一個模型（見 call_with_model_fallback）
             call_with_model_fallback(
                 self._pool,
-                model or self.model,
+                self.model,
                 lambda key, chosen: self._transcribe_with_key(
                     key, audio_path, hint, chosen, on_partial, voice_refs, user
                 ),

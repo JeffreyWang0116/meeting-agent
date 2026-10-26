@@ -27,13 +27,9 @@ def test_no_deprecated_generation_params_in_requests():
 
 
 def test_strong_model_defaults_are_pinned_to_3_6(monkeypatch):
-    for name in ("VOICE_MATCH_MODEL", "TRANSCRIBE_FALLBACK_MODEL"):
-        monkeypatch.delenv(name, raising=False)
-    s = get_settings()
-    assert s.voice_match_model == "gemini-3.6-flash"
-    assert s.transcribe_fallback_model == "gemini-3.6-flash"
+    monkeypatch.delenv("VOICE_MATCH_MODEL", raising=False)
+    assert get_settings().voice_match_model == "gemini-3.6-flash"
     assert Settings().voice_match_model == "gemini-3.6-flash"
-    assert Settings().transcribe_fallback_model == "gemini-3.6-flash"
 
 
 def test_overload_alternates_pair_lite_with_3_6():

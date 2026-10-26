@@ -389,14 +389,11 @@ def test_settings_transcribe_model_overridable(monkeypatch):
     assert s.transcribe_model == "gemini-3.5-flash"
 
 
-def test_transcribe_defaults_favour_cheap_retries_over_fallback():
-    """免費層實測：Flash Lite 每日 500 次、Flash 只有 20 次。
-    所以預設要多花便宜的 lite 重試，稀有的 Flash 只留一次保底。"""
+def test_transcribe_defaults_favour_cheap_retries():
+    """免費層實測：Flash Lite 每日 500 次，失敗是執行間的變異，多試幾次 lite 最划算。"""
     from app.config import Settings
 
-    s = Settings()
-    assert s.transcribe_label_retries >= 2      # lite 重試（每次佔額度 0.2%）
-    assert s.transcribe_max_fallback_chunks <= 1  # Flash 降級（每次佔額度 5%）
+    assert Settings().transcribe_label_retries >= 2  # lite 重試（每次佔額度 0.2%）
 
 
 # ---- 每打一次 API 就記一次（用量統計要準） ----

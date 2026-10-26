@@ -565,14 +565,9 @@ def create_app(
                 model=settings.transcribe_model,
                 glossary=glossary.terms,
                 chunk_seconds=settings.transcribe_chunk_seconds,
-                fallback_model=settings.transcribe_fallback_model,
-                max_fallback_chunks=settings.transcribe_max_fallback_chunks,
                 label_retries=settings.transcribe_label_retries,
                 overlap_seconds=settings.transcribe_overlap_seconds,
                 max_retry_calls=settings.transcribe_max_retry_calls,
-                # 長檔改用強模型整份單次轉錄：語者分辨遠優於 lite 分段
-                strong_model=settings.transcribe_fallback_model,
-                strong_whole_threshold=settings.transcribe_long_file_threshold_seconds,
                 # 聲紋跨段接力：分段轉錄時把已確立的講者聲音樣本接力餵給後續
                 # 分段，讓模型靠嗓音沿用同一代號，而不是靠純文字提示憑空猜。
                 # 只影響長檔分段轉錄——即時聆聽每段是獨立的短檔，走 _transcribe_whole
