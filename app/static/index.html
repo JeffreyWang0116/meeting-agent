@@ -62,10 +62,6 @@
         <svg class="i" aria-hidden="true"><use href="/static/icons.svg#circle-plus"/></svg>
         <span class="nav-text">新會議</span>
       </button>
-      <button class="nav-item" data-view="result" id="navResult" hidden>
-        <svg class="i" aria-hidden="true"><use href="/static/icons.svg#file-text"/></svg>
-        <span class="nav-text">分析結果</span>
-      </button>
       <button class="nav-item" data-view="reminder">
         <svg class="i" aria-hidden="true"><use href="/static/icons.svg#bell"/></svg>
         <span class="nav-text">主動提醒</span>
@@ -418,6 +414,13 @@
               <span class="status-line" id="liveStatus"></span>
             </div>
             <div class="transcript-box" id="liveTranscript"></div>
+          </div>
+
+          <!-- 分析進行中：三條路都留在這一頁等，完成後直接開那場會議的完整檢視。
+               轉錄有真的段數可以算百分比（#fileProgress），分析沒有，所以是跑馬燈 -->
+          <div class="analysing" id="analysingBox" hidden>
+            <div class="progress marquee"><div></div></div>
+            <div class="status-line" id="analysingStatus"></div>
           </div>
         </div>
       </section>

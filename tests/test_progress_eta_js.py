@@ -93,3 +93,34 @@ def test_no_estimate_shows_nothing_rather_than_zero():
 ])
 def test_estimates_are_rounded_because_they_are_estimates(seconds, expected):
     assert fmt(seconds) == expected
+
+
+# ---- 分析中的「已經過多久」 ----
+
+def elapsed(seconds) -> str:
+    script = f"""
+import {{ formatElapsed }} from {json.dumps(MODULE.as_uri())};
+process.stdout.write(JSON.stringify(formatElapsed({json.dumps(seconds)})));
+"""
+    proc = subprocess.run(
+        [NODE, "--input-type=module", "-e", script],
+        capture_output=True, text=True, encoding="utf-8", timeout=30,
+    )
+    assert proc.returncode == 0, proc.stderr
+    return json.loads(proc.stdout)
+
+
+@pytest.mark.parametrize("seconds,expected", [
+    (0, "0:00"),
+    (7, "0:07"),
+    (65, "1:05"),
+    (600, "10:00"),
+    (3661, "61:01"),   # 超過一小時照樣用分鐘數，不另外進位成「1:01:01」
+])
+def test_elapsed_is_exact_because_it_is_not_a_guess(seconds, expected):
+    """剩餘時間是估算所以要模糊化，已經過的時間是事實，報準確的。
+
+    使用者真正想確認的是「它到底還有沒有在跑」，一個每秒都在動的數字
+    就回答了這件事——估算做不到，它常常卡在同一個數字不動。
+    """
+    assert elapsed(seconds) == expected

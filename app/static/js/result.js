@@ -1,6 +1,6 @@
 import { api } from "./api.js";
 import { setCalendarEvents } from "./calendar.js";
-import { $, PRIORITY_ZH, esc, icon, showError, showNotice, skelBlocks, skelLine } from "./core.js";
+import { $, PRIORITY_ZH, esc, icon, showError, showNotice } from "./core.js";
 import { askSpeakerName, detectSpeakers, refreshMeetings, renameSpeaker } from "./meetings.js";
 import { refreshReminders } from "./reminders.js";
 import { WIDE, showView } from "./router.js";
@@ -31,49 +31,6 @@ let currentTranscript = "";
 let analysisStartTime = null;
 // 三條輸入路徑都要在送出當下記時間；imported binding 不能賦值，所以給一個 setter
 function markAnalysisStart() { analysisStartTime = Date.now(); }
-
-// AI 分析要跑十幾秒到一分鐘。與其讓人盯著一顆 disabled 的按鈕，不如先把報告的
-// 版面輪廓擺出來：既回饋「系統在做事」，也預告等一下會拿到哪些區塊。
-// renderResult 會把每一格覆蓋掉，所以這裡填什麼都不會殘留。
-function showResultSkeleton() {
-  if ($("result").classList.contains("is-loading")) return;  // 輪詢會重複呼叫，別一直把畫面捲回頂端
-  const lines = n => Array.from({ length: n }, (_, i) => skelLine(`${94 - i * 12}%`)).join("");
-  $("btnBackHistory").hidden = true;  // 新分析開始了，畫面不再是那場歷史會議
-  $("rTitle").innerHTML = skelLine("46%");
-  $("rMeta").innerHTML = `${skelLine("92px")}${skelLine("64px")}${skelLine("120px")}`;
-  $("rSummary").innerHTML = lines(3);
-  $("rHighlights").innerHTML = skelBlocks(3);
-  $("rDecisions").innerHTML = skelBlocks(2);
-  $("rTodos").innerHTML = skelBlocks(3);
-  $("rPending").innerHTML = skelBlocks(1);
-  $("rEvents").innerHTML = skelBlocks(1);
-  $("rDraft").innerHTML = lines(4);
-  ["hSummary", "hHighlights", "hDecisions", "hTodos"].forEach(id => ($(id).style.display = "flex"));
-  $("rSummary").style.display = "block";
-  $("rHighlights").style.display = "flex";
-  $("rDecisions").style.display = "flex";
-  $("rTodos").style.display = "flex";
-  $("rSummaryTrans").style.display = "none";
-  $("hSections").style.display = "none";
-  $("rSections").style.display = "none";
-  $("rTransSec").style.display = "none";
-  $("rCorrSec").style.display = "none";
-  $("rSpeakers").hidden = true;
-  $("result").classList.add("is-loading");
-  $("result").style.display = "flex";
-  $("navResult").hidden = false;
-  showView("result");
-}
-
-// 分析失敗：骨架整個收掉退回「新會議」。上一份結果這時也已經過期了，一併清掉，
-// 免得使用者以為那是這次跑出來的
-function hideResultSkeleton() {
-  if (!$("result").classList.contains("is-loading")) return;
-  $("result").classList.remove("is-loading");
-  $("result").style.display = "none";
-  $("navResult").hidden = true;
-  showView("new");
-}
 
 // 種類專屬區塊：後端已經把 label 與順序排好了，前端只負責渲染，
 // 不認得任何特定欄位名稱——之後新增種類不用再改這裡
@@ -173,7 +130,6 @@ function renderPending(items) {
 // fromHistory：從歷史會議點「完整檢視」進來。那不是一次新分析，所以不把這次的專用詞彙
 // 升級進詞彙表、不重整各清單，種類用會議自己存的（不是新會議表單上目前選的）
 function renderResult(result, transcript, { kind = null, fromHistory = false } = {}) {
-  $("result").classList.remove("is-loading");
   historyMeetingId = fromHistory ? result.meeting_id : null;
   $("btnBackHistory").hidden = !fromHistory;
   currentResult = result;
@@ -223,7 +179,6 @@ function renderResult(result, transcript, { kind = null, fromHistory = false } =
   $("rDraft").textContent = result.notifications.email_draft || "";
   draftSubject = result.notifications.email_subject || "";
   $("result").style.display = "flex";
-  $("navResult").hidden = false;
   showView("result");
   if (fromHistory) return;
   refreshTasks();
@@ -388,8 +343,8 @@ $("rHighlights").addEventListener("click", e => {
 window.addEventListener("workspacechange", () => {
   currentResult = null;
   historyMeetingId = null;
-  $("navResult").hidden = true;
+  $("result").style.display = "none";
   if (location.hash === "#result") showView("home");
 });
 
-export { GMAIL_URL_LIMIT, MAILTO_URL_LIMIT, analysisStartTime, copyWithFeedback, currentTranscript, draftSubject, draftSubjectAndBody, hideResultSkeleton, markAnalysisStart, openCompose, renderCorrections, renderResult, renderSections, showResultSkeleton };
+export { GMAIL_URL_LIMIT, MAILTO_URL_LIMIT, analysisStartTime, copyWithFeedback, currentTranscript, draftSubject, draftSubjectAndBody, markAnalysisStart, openCompose, renderCorrections, renderResult, renderSections };

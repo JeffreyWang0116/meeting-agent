@@ -880,6 +880,18 @@
     .spinner { animation-duration: 1.6s; }
   }
   .status-line { font-size: .84rem; color: var(--muted); display: flex; align-items: center; gap: 8px; }
+  /* 分析進行中（新會議頁）。分析沒有可回報的刻度，所以是一條來回跑的跑馬燈：
+     它回答的不是「還要多久」，而是「它還在跑」——靜止的畫面跟當掉長得一樣 */
+  .analysing { display: flex; flex-direction: column; gap: 8px; margin-top: 4px; }
+  .progress.marquee > div {
+    width: 35%; background: var(--ink);
+    animation: marquee 1.4s ease-in-out infinite alternate; transition: none;
+  }
+  @keyframes marquee {
+    0% { margin-left: 0; }
+    100% { margin-left: 65%; }
+  }
+  @media (prefers-reduced-motion: reduce) { .progress.marquee > div { animation-duration: 3.2s; } }
   .transcript-box {
     background: var(--card-2); border: 1px solid var(--border); border-radius: var(--radius-md);
     padding: 14px; max-height: 240px; overflow-y: auto;
@@ -909,12 +921,6 @@
     background: var(--card-2); padding: 13px 14px;
   }
   .skel-row td { padding: 13px 12px; }
-  /* 骨架期間把還沒有資料可操作的按鈕藏起來，免得按了沒反應 */
-  #result.is-loading #btnTransSummary,
-  #result.is-loading #icsLink,
-  #result.is-loading .draft-tools,
-  #result.is-loading h3.sub .aux { display: none; }
-
   /* ---- 清單分頁 ----
      資料少於一頁時 renderPager 會把內容清空，:empty 讓整條連同間距一起消失 */
   .pager {

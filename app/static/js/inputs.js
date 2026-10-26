@@ -1,9 +1,12 @@
 import { api } from "./api.js";
 import { createSilenceWatch, shouldFallbackToDefaultMic, silenceWarning, systemAudioGuide } from "./audioguide.js";
 import { $, clearError, currentWorkspace, esc, showError, showNotice } from "./core.js";
-import { hideResultSkeleton, markAnalysisStart, renderResult, showResultSkeleton } from "./result.js";
+import { markAnalysisStart } from "./result.js";
+import { openMeetingFull, refreshMeetings } from "./meetings.js";
+import { refreshReminders } from "./reminders.js";
+import { refreshTasks } from "./tasks.js";
 import { showAppNotification } from "./notify.js";
-import { createEta, formatEta } from "./progress.js";
+import { createEta, formatElapsed, formatEta } from "./progress.js";
 import { refreshQuota } from "./settings.js";
 import { PLATFORM, chunkSeconds, correctTypos, meetingTerms, micConstraints, micDeviceId, populateMicDevices, selectedFeatures, sysSourceValue, wantSystemAudio } from "./setup.js";
 import { chatHtml, renderChat } from "./transcript.js";
@@ -11,6 +14,55 @@ import { chatHtml, renderChat } from "./transcript.js";
 /* ==================================================================
    9. 輸入路徑：純文字貼上、檔案上傳（含拖曳）、即時聆聽
    ================================================================== */
+
+/* ---- 分析進行中：留在這一頁 ----------------------------------------
+   原本一送出就跳到結果頁擺骨架。骨架是靜止的，貼上文字十幾秒還好，但即時
+   聆聽結束後要整場做講者分離再分析，一小時的會議可以跑好幾分鐘——畫面什麼
+   都沒動，跟當掉長得一模一樣。現在留在送出的那一頁，跑馬燈＋每秒跳的計時器
+   明白表示還在跑，完成後再直接開那場會議的完整檢視。
+
+   計時器報的是「已經過多久」而不是「還要多久」：分析沒有可回報的刻度，估出來
+   的數字會卡住不動，反而更像當掉。                                     */
+let analysingTimer = null, analysingLabel = "";
+
+function startAnalysing(label) {
+  // 上傳輪詢每幾秒就會叫一次，重新起算的話數字會一直跳回 0:00，比不顯示還糟
+  if (analysingTimer && label === analysingLabel) return;
+  stopAnalysing();
+  analysingLabel = label;
+  const since = Date.now();
+  const tick = () => {
+    $("analysingStatus").textContent =
+      `${label}　已經過 ${formatElapsed((Date.now() - since) / 1000)}`;
+  };
+  $("analysingBox").hidden = false;
+  tick();
+  // 表單長的時候（尤其即時聆聽那一頁）它會落在畫面外，捲進來才看得到
+  $("analysingBox").scrollIntoView({ behavior: "smooth", block: "nearest" });
+  analysingTimer = setInterval(tick, 1000);
+}
+
+function stopAnalysing() {
+  clearInterval(analysingTimer);
+  analysingTimer = null;
+  analysingLabel = "";
+  $("analysingBox").hidden = true;
+}
+
+// 分析完成：清單先更新，再用「完整檢視」開剛剛那場會議——與從歷史會議點進去
+// 完全同一條路（openMeetingFull），所以畫面與返回鍵的行為必定一致
+async function openAnalysed(result) {
+  stopAnalysing();
+  refreshTasks();
+  refreshMeetings();
+  refreshReminders();
+  if (!result?.meeting_id) {  // 理論上不會發生；真沒有 id 就沒有完整檢視可開
+    showError("分析完成了，但沒拿到這場會議的編號，請到「歷史會議」查看。");
+    return;
+  }
+  await openMeetingFull(result.meeting_id);
+}
+
 // ---- 路徑 1：純文字 ----
 $("btnAnalyzeText").addEventListener("click", async () => {
   clearError();
@@ -18,7 +70,7 @@ $("btnAnalyzeText").addEventListener("click", async () => {
   const original = btn.innerHTML;
   btn.disabled = true; btn.textContent = "AI 分析中…";
   markAnalysisStart();
-  showResultSkeleton();
+  startAnalysing("AI 分析中");
   try {
     const result = await api.analyze({
         text: $("textInput").value,
@@ -28,8 +80,8 @@ $("btnAnalyzeText").addEventListener("click", async () => {
         correct_typos: correctTypos(),
         terms: meetingTerms(),
         });
-    renderResult(result, $("textInput").value);
-  } catch (e) { hideResultSkeleton(); showError(e.message); }
+    await openAnalysed(result);
+  } catch (e) { stopAnalysing(); showError(e.message); }
   finally { btn.disabled = false; btn.innerHTML = original; }
 });
 
@@ -98,7 +150,7 @@ function failMediaJob(e) {
   clearPendingJob();
   setTabProgress(null);
   notifyDone("轉錄失敗了，回來看一下訊息。");
-  hideResultSkeleton();
+  stopAnalysing();
   // 走到這裡的 404 代表輪詢裡的退路也救不了：工作沒了，而且還沒轉出任何逐字稿。
   // 原始檔案還在使用者手上，講清楚「重傳就好」比丟一句 404 有用得多
   showError(e.status === 404
@@ -110,7 +162,7 @@ function failMediaJob(e) {
 // 伺服器重啟、工作中斷時，用已經轉好的部分改走純文字分析——與聆聽 session
 // 遺失時同一條路（finishLiveSession 的 404 退路）
 async function rescueFromTranscript(text, options) {
-  showResultSkeleton();
+  startAnalysing("AI 分析中");
   setTabProgress(null);
   const rescued = await api.analyze({ text, ...options });
   clearPendingJob();
@@ -118,7 +170,7 @@ async function rescueFromTranscript(text, options) {
   // 寧可講清楚要不要重傳，也不要讓人以為分析的是完整的一場會議
   showNotice("轉錄中途伺服器重新啟動，已改用轉好的部分逐字稿分析。這份可能不完整，需要完整結果請重新上傳原檔。");
   resetFilePanel();
-  renderResult(rescued, text);
+  await openAnalysed(rescued);
 }
 
 // 分頁標題顯示進度：切到別的分頁也看得到還要多久
@@ -174,15 +226,14 @@ async function pollMediaJob(job_id, options) {
       await rescueFromTranscript(job.transcript, options);
       return;
     }
-    // 轉錄階段的進度條與逐字稿在「新會議」畫面，看得到才有意義；
-    // 進到分析階段才切去結果頁擺骨架
-    if (job.status === "analyzing") showResultSkeleton();
+    // 轉錄有段數可以算百分比，走 #fileProgress；分析沒有，換成跑馬燈
+    if (job.status === "analyzing") startAnalysing("AI 分析中");
     if (job.status === "done") {
       clearPendingJob();
       setTabProgress(null);
       notifyDone("會議分析完成，可以回來看結果了。");
       resetFilePanel();
-      renderResult(job.result, job.transcript);
+      await openAnalysed(job.result);
       return;
     }
     if (job.status === "error") throw new Error(job.error || "轉錄失敗");
@@ -1198,7 +1249,7 @@ async function finishLiveSession() {
   $("btnLiveRetry").disabled = true;
   $("liveStatus").textContent = "AI 分析整場會議中…";
   markAnalysisStart();
-  showResultSkeleton();
+  startAnalysing("整理講者並分析整場會議");
   const options = {
     meeting_date: $("meetingDate").value || null,
     kind: $("meetingKind").value,
@@ -1216,7 +1267,7 @@ async function finishLiveSession() {
       // 但逐字稿在瀏覽器這邊還有一份，改走純文字分析把它救回來——這條路是「貼上
       // 文字」既有的流程，不需要 session。
       if (e.status !== 404 || !liveTranscriptText.trim()) throw e;
-      result = await api.analyze({ text: liveTranscriptText, ...options, ...extras });
+      result = await api.analyze({ text: liveTranscriptText, ...options });
       // 重啟之後送出的錄音段也會一起 404，所以這份逐字稿可能缺了後半段——
       // 寧可講清楚，也不要讓使用者以為分析的是完整的一場會議
       showNotice("聆聽 session 已遺失（伺服器可能重啟過），已改用瀏覽器保留的逐字稿分析。請核對逐字稿結尾是否完整。");
@@ -1227,12 +1278,12 @@ async function finishLiveSession() {
     $("btnLiveStart").disabled = false;
     // 逐字稿已經進到結果頁與歷史會議；留在聆聽區，下次回來開新的一場時看到的是上一場
     resetLivePanel();
-    renderResult(result, result.transcript);
+    await openAnalysed(result);
   } catch (e) {
     // 404 走到這裡代表上面的退路也救不了：session 沒了、瀏覽器這份逐字稿又是空的。
     // 這種情況重試永遠是同一個 404，不該再擺一顆按不出結果的按鈕給使用者按
     const unrecoverable = e.status === 404;
-    hideResultSkeleton();  // 退回「新會議」，重試分析的按鈕也在那裡
+    stopAnalysing();  // 本來就在「新會議」頁，重試分析的按鈕也在那裡
     showError("分析失敗：" + e.message + (unrecoverable
       ? "（這場聆聽沒有留下任何逐字稿，無法分析）"
       : "（逐字稿仍在，可按「重試分析」再試一次）"));

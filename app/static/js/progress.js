@@ -53,4 +53,11 @@ function formatEta(seconds) {
   return `約還要 ${m} 分鐘`;
 }
 
-export { createEta, formatEta };
+// 秒數 → 「1:05」。剩餘時間是估算所以要模糊化，已經過的時間是事實，報準確的：
+// 等待時真正想確認的是「它到底還有沒有在跑」，一個每秒都在動的數字就回答了
+function formatElapsed(seconds) {
+  const s = Math.max(0, Math.round(Number(seconds) || 0));
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+}
+
+export { createEta, formatElapsed, formatEta };

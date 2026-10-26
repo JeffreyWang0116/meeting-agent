@@ -9,16 +9,20 @@ import { $, clearError } from "./core.js";
 // 結果頁的雙欄斷點，和 style.css 的 @media (max-width: 1180px) 對齊
 const WIDE = window.matchMedia("(min-width: 1181px)");
 const VIEW_TITLES = {
-  home: "首頁", new: "新會議", result: "分析結果",
+  home: "首頁", new: "新會議", result: "會議內容",
   reminder: "主動提醒", ask: "詢問會議", task: "任務庫", meeting: "歷史會議",
 };
 function showView(name) {
   if (!VIEW_TITLES[name]) name = "home";
-  // 結果頁在跑過一次分析前是空的，別讓網址列直接跳進去
-  if (name === "result" && $("navResult").hidden) name = "home";
+  // 結果頁沒有側欄入口，只有「歷史會議 → 完整檢視」與剛分析完會開它。
+  // 還沒開過任何一場時它是空的，別讓網址列直接跳進去
+  if (name === "result" && $("result").style.display !== "flex") name = "home";
   document.querySelectorAll(".view").forEach(v => v.classList.toggle("active", v.id === `view-${name}`));
+  // 會議內容沒有自己的分頁鈕（它是歷史會議的完整檢視），高亮留在「歷史會議」，
+  // 不然側欄會整排都沒亮，看不出自己在哪一區
+  const tab = name === "result" ? "meeting" : name;
   document.querySelectorAll(".nav-item").forEach(b => {
-    const on = b.dataset.view === name;
+    const on = b.dataset.view === tab;
     b.classList.toggle("active", on);
     b.setAttribute("aria-current", on ? "page" : "false");
   });

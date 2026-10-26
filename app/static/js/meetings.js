@@ -445,4 +445,4 @@ window.addEventListener("workspacechange", () => {
   refreshMeetings();
 });
 
-export { allMeetings, askSpeakerName, detailEditing, detectSpeakers, expandedMeetingId, filteredMeetings, focusMeetingPage, meetingDetailCache, meetingDetailHtml, meetingLabel, meetingShareText, meetingsLoaded, openMeetingDetail, refreshMeetings, renameSpeaker, renderMeetings };
+export { allMeetings, askSpeakerName, detailEditing, detectSpeakers, expandedMeetingId, filteredMeetings, focusMeetingPage, meetingDetailCache, meetingDetailHtml, meetingLabel, meetingShareText, meetingsLoaded, openMeetingDetail, openMeetingFull, refreshMeetings, renameSpeaker, renderMeetings };

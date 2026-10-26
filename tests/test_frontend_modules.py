@@ -145,3 +145,22 @@ def test_auth_does_not_overwrite_the_whole_avatar_menu(modules):
     html = (JS_DIR.parent / "index.html").read_text(encoding="utf-8")
     menu = html[html.index('id="avatarMenu"') : html.index('id="avatarActions"')]
     assert 'id="wsChip"' in menu, "工作區那一列要在頭像選單裡"
+
+
+# ---- 聆聽結束的救援路徑 ----
+
+def test_live_finish_rescue_only_spreads_variables_it_declared(modules):
+    """聆聽 session 遺失（伺服器重啟）時改用瀏覽器留的逐字稿分析。
+
+    那段 catch 只在 404 時走到，單元測試與日常點擊都不會經過它——而它正是
+    「Render 重新部署剛好撞上開會結束」唯一能救回整場會議的程式碼。實際出過
+    的事：拿掉標記與筆記功能時刪了 `const extras = {...}`，卻漏掉這裡的
+    `...extras`，整條救援路徑變成 ReferenceError；語法檢查過、全部測試也過。
+    """
+    src = modules["inputs.js"]
+    block = src[src.index("async function finishLiveSession"):]
+    block = block[: block.index("\n}\n")]
+    assert "api.analyze" in block, "聆聽結束沒有 404 的救援路徑了"
+    spread = set(re.findall(r"\.\.\.(\w+)", block))
+    declared = set(re.findall(r"\b(?:const|let|var)\s+(\w+)", block))
+    assert spread <= declared, f"救援路徑展開了沒有在這個函式裡宣告的變數：{spread - declared}"
