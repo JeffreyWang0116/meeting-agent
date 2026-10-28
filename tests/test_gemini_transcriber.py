@@ -1168,3 +1168,32 @@ def test_unfinished_diarization_still_skips_label_retries(monkeypatch, tmp_path)
     t = setup.transcriber_with_sequence([_UNLABELLED], label_retries=2, relabeled_later=True)
     t.transcribe(src, diarization=Future())
     assert setup.calls["n"] == 2
+
+
+# ---- 接縫空太久 ----
+# 去重疊只看時間戳：任一段時間戳漂掉，接縫處就可能有內容被濾掉而沒人發現
+# （第六十次週會 8:01 → 8:48 空了 47 秒）。至少要留下記錄，才查得到是哪一場、哪個接縫。
+
+def test_long_silence_at_a_seam_is_logged(monkeypatch, tmp_path, caplog):
+    src = tmp_path / "long.wav"
+    src.write_bytes(b"RIFF-fake")
+    setup = FakeChunkedSetup(monkeypatch, tmp_path, duration=600, chunk_texts=[
+        "[3:50] 講者A：我們三個都要到。",
+        "[0:48] 講者A：好，那這項就定案了。",
+    ])
+    with caplog.at_level("WARNING", logger="app.transcription.gemini_transcriber"):
+        setup.transcriber(chunk_seconds=240).transcribe(src)
+    warnings = [r.getMessage() for r in caplog.records if r.levelname == "WARNING"]
+    assert any("3:50" in w and "4:48" in w for w in warnings), warnings
+
+
+def test_normal_seam_is_not_logged(monkeypatch, tmp_path, caplog):
+    src = tmp_path / "long.wav"
+    src.write_bytes(b"RIFF-fake")
+    setup = FakeChunkedSetup(monkeypatch, tmp_path, duration=600, chunk_texts=[
+        "[3:55] 講者A：我們三個都要到。",
+        "[0:03] 講者A：好，那這項就定案了。",
+    ])
+    with caplog.at_level("WARNING", logger="app.transcription.gemini_transcriber"):
+        setup.transcriber(chunk_seconds=240).transcribe(src)
+    assert not [r for r in caplog.records if r.levelname == "WARNING"]

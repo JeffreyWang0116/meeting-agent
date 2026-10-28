@@ -73,6 +73,15 @@ def last_timestamp_seconds(text: str) -> int | None:
     return last
 
 
+def first_timestamp_seconds(text: str) -> int | None:
+    """文字裡第一個時間戳是第幾秒；一個都沒有回 None。"""
+    for line in text.splitlines():
+        matched = TIME_PREFIX_RE.match(line)
+        if matched:
+            return parse_time_label(matched.group(1))
+    return None
+
+
 def strip_time_prefix(line: str) -> str:
     return REPEATED_TIME_RE.sub("", line)
 

@@ -20,6 +20,7 @@ from app.transcription.segments import (
     collect_speakers,
     drop_empty_lines,
     drop_lines_before,
+    first_timestamp_seconds,
     format_time,
     last_timestamp_seconds,
     merge_fragments,
@@ -53,6 +54,8 @@ DEFAULT_CHUNK_THRESHOLD_SECONDS = 360  # 6 分鐘
 MIN_SPEAKER_LABEL_RATIO = 0.8
 # relabeled_later=True（有 pyannote 重標講者）時改看「有時間戳且有內容」的比例，
 # 門檻沿用同一個值：prompt 要求每一行都帶時間戳，兩成以上沒有就是模型沒照做
+# 分段接縫前後兩行隔超過這麼久就記警告（見 _check_seam）
+SEAM_GAP_WARN_SECONDS = 30
 # 聲紋樣本短於這個秒數就不值得剪：太短的音訊比對不出嗓音，還要多付一次上傳
 _MIN_VOICE_SAMPLE_SECONDS = 1.0
 
@@ -386,6 +389,7 @@ class GeminiTranscriber:
                     text = drop_lines_before(text, own_start)
                 if not text.strip():
                     continue
+                self._check_seam(parts, text, index)
                 collect_speakers(text, speakers)
                 previous_tail = transcript_tail(text)
                 parts.append(text)
@@ -401,6 +405,21 @@ class GeminiTranscriber:
         if last_error is not None and not transcribed:
             raise last_error
         return "\n".join(parts).strip()
+
+    @staticmethod
+    def _check_seam(parts: list[str], text: str, index: int) -> None:
+        """接縫兩邊空太久就記一筆。去重疊只看時間戳，任一段的時間戳漂掉，
+        重疊區的內容就可能被濾掉；可能只是真的停頓，所以只記錄、不動逐字稿。"""
+        if not parts:
+            return
+        before = last_timestamp_seconds(parts[-1])
+        after = first_timestamp_seconds(text)
+        if before is None or after is None or after - before <= SEAM_GAP_WARN_SECONDS:
+            return
+        logger.warning(
+            "第 %d、%d 段之間的接縫空了 %d 秒（%s → %s），可能有內容在去重疊時被濾掉",
+            index, index + 1, after - before, format_time(before), format_time(after),
+        )
 
     def _gap_marker(self, start: float, end: float) -> str:
         """標出「這段沒有內容」。少了它，使用者拿到的是一份看起來完整、中間
