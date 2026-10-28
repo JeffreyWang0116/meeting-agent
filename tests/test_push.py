@@ -50,6 +50,34 @@ def test_endpoint_must_be_https():
         normalize_subscription({**RAW, "endpoint": "http://evil.example/collect"})
 
 
+@pytest.mark.parametrize("endpoint", [
+    "https://fcm.googleapis.com/fcm/send/abc",                 # Chrome / Android
+    "https://updates.push.services.mozilla.com/wpush/v2/abc",  # Firefox
+    "https://web.push.apple.com/QAbc",                         # Safari / iOS
+    "https://wns2-par02p.notify.windows.com/w/?token=abc",     # Edge
+    "https://FCM.googleapis.com./fcm/send/abc",                # 大小寫與結尾的點不影響
+])
+def test_real_push_services_are_accepted(endpoint):
+    assert normalize_subscription({**RAW, "endpoint": endpoint})["endpoint"] == endpoint
+
+
+@pytest.mark.parametrize("endpoint", [
+    "https://evil.example/collect",
+    "https://10.0.0.5/admin",
+    "https://localhost/internal",
+    "https://fcm.googleapis.com.evil.example/x",  # 只是開頭像
+    "https://evilnotify.windows.com/x",           # 結尾像但不是子網域
+    "https://fcm.googleapis.com:8443/fcm/send/abc",
+    "https://user:pw@fcm.googleapis.com/fcm/send/abc",
+    "https://evil.example@fcm.googleapis.com/x",
+])
+def test_endpoint_must_point_at_a_known_push_service(endpoint):
+    """排程每小時會照 endpoint 主動發 POST——任何網址都收的話，登入的人就能叫
+    伺服器去打內網（SSRF）。"""
+    with pytest.raises(PushError):
+        normalize_subscription({**RAW, "endpoint": endpoint})
+
+
 def test_both_keys_are_required():
     with pytest.raises(PushError):
         normalize_subscription({**RAW, "keys": {"p256dh": "x"}})

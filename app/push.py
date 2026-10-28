@@ -13,6 +13,7 @@ import hashlib
 import json
 import logging
 from datetime import datetime, timedelta, timezone
+from urllib.parse import urlsplit
 
 logger = logging.getLogger(__name__)
 
@@ -23,10 +24,31 @@ SEND_WINDOW_HOURS = 3
 # 比 UTC 快幾分鐘。UTC-12（Baker Island）到 UTC+14（Kiribati）是現實世界的範圍
 MIN_TZ_OFFSET, MAX_TZ_OFFSET = -720, 840
 MAX_ENDPOINT = 2000
+# 排程會照 endpoint 主動發 POST，不限網域的話登入的人就能叫伺服器去打內網（SSRF）。
+# 開頭是「.」的代表該網域底下的子網域（Edge 的 WNS 每台機器分到的主機不同）
+PUSH_HOSTS = (
+    "fcm.googleapis.com",                 # Chrome、Android
+    "updates.push.services.mozilla.com",  # Firefox
+    "web.push.apple.com",                 # Safari、iOS
+    ".push.apple.com",
+    ".notify.windows.com",                # Edge
+)
 
 
 class PushError(Exception):
     """訂閱內容不合法。"""
+
+
+def _is_push_service(endpoint: str) -> bool:
+    try:
+        url = urlsplit(endpoint)
+        port = url.port
+    except ValueError:
+        return False
+    if url.username is not None or url.password is not None or port not in (None, 443):
+        return False
+    host = (url.hostname or "").rstrip(".").lower()
+    return any(host == h or (h.startswith(".") and host.endswith(h)) for h in PUSH_HOSTS)
 
 
 def normalize_subscription(raw: dict) -> dict:
@@ -42,6 +64,8 @@ def normalize_subscription(raw: dict) -> dict:
         raise PushError("endpoint 必須是 https")
     if len(endpoint) > MAX_ENDPOINT:
         raise PushError("endpoint 過長")
+    if not _is_push_service(endpoint):
+        raise PushError("endpoint 不是已知的推播服務")
 
     keys = raw.get("keys")
     if not isinstance(keys, dict) or not keys.get("p256dh") or not keys.get("auth"):
