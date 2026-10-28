@@ -120,4 +120,10 @@ def meeting_report_md(meeting_record: dict, tasks: list[dict]) -> str:
             f"- {p['topic']}" + (f"（{p['reason']}）" if p.get("reason") else "")
             for p in pending
         ]
+
+    transcript = [ln.strip() for ln in (meeting_record.get("transcript") or "").splitlines()]
+    transcript = [ln for ln in transcript if ln]
+    if transcript:
+        # 每句之間空一行：Markdown 會把相鄰的行併成同一段
+        lines += ["", "## 逐字稿", "", "\n\n".join(transcript)]
     return "\n".join(lines) + "\n"

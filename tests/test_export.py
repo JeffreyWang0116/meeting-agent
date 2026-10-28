@@ -52,3 +52,27 @@ def test_report_includes_kind_specific_sections():
     assert "- 年度預算 50 萬" in md
     assert "## 時程" in md
     assert "（本次未提及）" in md
+
+
+def test_report_ends_with_the_transcript():
+    """只有 AI 摘要的話，下載的人沒辦法回頭查證摘要寫得對不對。"""
+    record = make_record()
+    record["transcript"] = "[0:08] 講者A：開始吧\n[0:12] 講者B：好"
+    md = meeting_report_md(record, tasks=[])
+    assert md.rstrip().endswith("[0:12] 講者B：好")
+    tail = md[md.index("## 逐字稿"):]
+    # Markdown 會把相鄰的行併成一段，每句之間要空一行才不會黏成一大塊
+    assert "[0:08] 講者A：開始吧\n\n[0:12] 講者B：好" in tail
+
+
+def test_report_skips_blank_transcript_lines():
+    record = make_record()
+    record["transcript"] = "[0:08] 講者A：開始吧\n\n\n[0:12] 講者B：好\n"
+    md = meeting_report_md(record, tasks=[])
+    assert "開始吧\n\n[0:12]" in md
+
+
+def test_report_omits_transcript_section_when_there_is_none():
+    assert "逐字稿" not in meeting_report_md(make_record(), tasks=[])
+    record = {**make_record(), "transcript": "  \n"}
+    assert "逐字稿" not in meeting_report_md(record, tasks=[])
