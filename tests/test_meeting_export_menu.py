@@ -34,6 +34,20 @@ def test_expanded_detail_no_longer_repeats_share_and_calendar():
     assert "events.ics" not in detail
 
 
+def test_every_api_link_goes_through_the_authenticated_download():
+    """core.js 只攔 a[download][href^="/api/"] 並補上登入憑證。少了 download 的
+    連結會被瀏覽器直接開啟，登入後的網站只會拿到「未登入：請先用 Google 登入」。"""
+    static = Path(__file__).resolve().parent.parent / "app" / "static"
+    files = [*static.glob("js/*.js"), static / "index.html"]
+    bare = [
+        f"{f.name}: {tag}"
+        for f in files
+        for tag in re.findall(r'<a\b[^>]*href="/api/[^>]*>', f.read_text(encoding="utf-8"))
+        if not re.search(r"\sdownload\b", tag)
+    ]
+    assert not bare, "這些連結會繞過補憑證的下載：\n" + "\n".join(bare)
+
+
 def test_share_works_without_expanding_the_meeting_first():
     """選單在列上，按分享時那場會議可能還沒展開過、快取裡沒有內容。"""
     handler = SRC[SRC.index('closest(".share-detail")'):]
