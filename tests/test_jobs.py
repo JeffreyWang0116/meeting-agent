@@ -9,7 +9,7 @@ class FakeTranscriber:
         self.text = text
         self.error = error
 
-    def transcribe(self, path, on_progress=None, user=None):
+    def transcribe(self, path, on_progress=None, user=None, diarization=None):
         if self.error:
             raise self.error
         if on_progress:
@@ -500,3 +500,20 @@ def test_interrupted_before_any_transcript_just_asks_to_reupload(tmp_path):
 
     assert "已經轉好" not in job["error"]
     assert "重新上傳" in job["error"]
+
+
+def test_transcriber_is_told_how_diarization_is_going(tmp_path):
+    """轉錄器要能看到分群的 Future，分群一失敗就恢復為講者標籤重跑。"""
+    audio = tmp_path / "meeting.wav"
+    audio.write_bytes(b"x")
+    seen = {}
+
+    class Watching:
+        def transcribe(self, path, on_progress=None, user=None, diarization=None):
+            seen["diarization"] = diarization
+            return "[0:00] 講者A：原本"
+
+    diarizer = FakeDiarizer()
+    mgr = MediaJobManager(Watching(), FakeOrchestrator(), tmp_path, diarizer=diarizer)
+    mgr.wait(mgr.submit(audio), timeout=5)
+    assert isinstance(seen["diarization"], PendingFuture)

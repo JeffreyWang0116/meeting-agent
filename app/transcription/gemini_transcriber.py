@@ -8,6 +8,7 @@ from __future__ import annotations
 import logging
 import shutil
 import time
+from concurrent.futures import Future
 from pathlib import Path
 
 from app.gemini_keys import KeyPool, call_with_model_fallback
@@ -84,6 +85,17 @@ _TRANSCRIBE_PROMPT = (
 
 class GeminiTranscribeError(Exception):
     pass
+
+
+def _diarization_failed(future: Future | None) -> bool:
+    """分群已經確定幫不上忙：出錯，或跑完了卻沒有任何語音段（兩者 apply 都原樣
+    沿用 Gemini 的標籤）。還沒跑完不算——那時照原本的假設不付重跑的錢。"""
+    if future is None or not future.done():
+        return False
+    if future.exception() is not None:
+        return True
+    segments, _duration = future.result()
+    return not segments
 
 
 def voice_relay_parts(voice_refs: list[dict] | None) -> list[str | Path]:
@@ -180,13 +192,15 @@ class GeminiTranscriber:
     # ---- 對外介面 ----
 
     def transcribe(self, path, on_progress=None, hint: str | None = None,
-                   user: str = DEFAULT_USER) -> str:
+                   user: str = DEFAULT_USER, diarization: Future | None = None) -> str:
+        """diarization：背景跑的 pyannote 分群。它已經失敗的話，之後就沒有重標
+        可以依賴，後面幾段要恢復「講者標籤太差就重跑」。"""
         audio_path = self._ensure_audio(Path(path))
         duration = media.audio_duration(audio_path) if media.ffmpeg_available() else None
 
         chunks = self._plan_chunks(audio_path, duration)
         if chunks:
-            text = self._transcribe_chunked(chunks, on_progress, hint, user)
+            text = self._transcribe_chunked(chunks, on_progress, hint, user, diarization)
         else:
             text = self._transcribe_whole(audio_path, on_progress, hint, duration, user)
         # 提示裡要求過一行一句，模型還是常拆；縫合後再併一次，接縫兩邊的半句也接得回來
@@ -263,7 +277,8 @@ class GeminiTranscriber:
         return chunks if len(chunks) > 1 else []
 
     def _transcribe_chunked(
-        self, chunks, on_progress, hint: str | None, user: str = DEFAULT_USER
+        self, chunks, on_progress, hint: str | None, user: str = DEFAULT_USER,
+        diarization: Future | None = None,
     ) -> str:
         """逐段轉錄再縫合：時間戳平移回整場時間，講者標籤跨段沿用同一組。"""
         parts: list[str] = []
@@ -331,6 +346,9 @@ class GeminiTranscriber:
                         on_partial=inner_reporter(index),
                         voice_refs=voice_refs,
                         user=user,
+                        labels_needed=(
+                            self.speaker_labels_needed or _diarization_failed(diarization)
+                        ),
                     )
                 except Exception as exc:
                     # 一段失敗不該讓整份作廢。金鑰輪替已經退避重試過（見
@@ -444,8 +462,11 @@ class GeminiTranscriber:
         on_partial=None,
         voice_refs: list[dict] | None = None,
         user: str = DEFAULT_USER,
+        labels_needed: bool | None = None,
     ) -> tuple[str, int]:
         """轉錄一段，講者標註率太低就重跑，取標得最好的那次。
+
+        labels_needed：這一段要不要顧講者標籤（None＝看 speaker_labels_needed）。
 
         retry_budget 是整個檔案剩餘的重試次數（None＝不限）；本段最多只能用掉
         這麼多次，長影片才不會因為段數多而讓重試成本線性膨脹。
@@ -458,6 +479,8 @@ class GeminiTranscriber:
         模型偶爾會整段放棄標講者（同一輸入重跑一次就正常），沒有重試的話
         那一段在畫面上就整片沒有講者，前端的續行沿用也會把話歸錯人。
         """
+        if labels_needed is None:
+            labels_needed = self.speaker_labels_needed
         allowed_retries = self.label_retries
         if retry_budget is not None:
             allowed_retries = min(allowed_retries, max(0, retry_budget))
@@ -469,7 +492,7 @@ class GeminiTranscriber:
             )
             if attempt:
                 retries_used += 1
-            ratio = self._quality(text)
+            ratio = self._quality(text, labels_needed)
             if ratio > best_ratio:
                 best, best_ratio = text, ratio
             if ratio >= MIN_SPEAKER_LABEL_RATIO:
@@ -477,15 +500,16 @@ class GeminiTranscriber:
             if attempt < allowed_retries:
                 logger.info(
                     "%s %s只有 %.0f%%，重跑一次", chunk.name,
-                    "講者標註率" if self.speaker_labels_needed else "有時間戳的內容",
+                    "講者標註率" if labels_needed else "有時間戳的內容",
                     ratio * 100,
                 )
 
         return best, retries_used
 
-    def _quality(self, text: str) -> float:
+    @staticmethod
+    def _quality(text: str, labels_needed: bool) -> float:
         """這一輪轉錄合不合格（0~1）：要不要重跑、多次結果取哪一份都看它。"""
-        if self.speaker_labels_needed:
+        if labels_needed:
             return speaker_label_ratio(text)
         return timed_speech_ratio(text)
 

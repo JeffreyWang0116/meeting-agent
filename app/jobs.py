@@ -230,16 +230,15 @@ class MediaJobManager:
                 self._update(job_id, progress=fraction, transcript="".join(parts).strip())
 
             # 本次專用詞彙走 hint 送進轉錄，「聽」的當下就用對的寫法；
-            # 沒有詞彙時不帶這個參數，呼叫形狀與加這個功能之前一模一樣
+            # 沒有詞彙、沒開分群時不帶對應參數，呼叫形狀與加這些功能之前一模一樣
+            extra = {}
             hint = terms_hint_line(terms, "本次會議專用詞彙")
-            transcript = (
-                self._transcriber.transcribe(
-                    path, on_progress=on_progress, hint=hint, user=user
-                )
-                if hint
-                else self._transcriber.transcribe(
-                    path, on_progress=on_progress, user=user
-                )
+            if hint:
+                extra["hint"] = hint
+            if diarization is not None:
+                extra["diarization"] = diarization  # 分群失敗時轉錄器要恢復標籤重跑
+            transcript = self._transcriber.transcribe(
+                path, on_progress=on_progress, user=user, **extra
             )
             if not transcript.strip():
                 self._update(

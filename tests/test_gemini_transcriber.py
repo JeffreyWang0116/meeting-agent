@@ -1102,3 +1102,69 @@ def test_fragments_split_across_a_chunk_seam_are_joined(monkeypatch, tmp_path):
     ])
     text = setup.transcriber(chunk_seconds=240).transcribe(src)
     assert text == "[3:58] 講者A：我們接下來把順序定下來。"
+
+
+# ---- 分群已經失敗：標籤爛就要重跑 ----
+# 開了 pyannote 時為了省錢不為講者標籤重跑；但分群失敗會原樣沿用 Gemini 的標籤，
+# 第六十次週會就這樣留下 4:37~8:01 整段沒有講者。分群通常一分鐘內就有結果，
+# 轉到後面幾段時已經知道它失敗了，那時就該恢復重跑。
+
+from concurrent.futures import Future  # noqa: E402
+
+
+def _future(result=None, error=None):
+    f = Future()
+    if error:
+        f.set_exception(error)
+    else:
+        f.set_result(result)
+    return f
+
+
+_UNLABELLED = "[0:00] 沒標\n[0:05] 也沒標"
+
+
+def test_poor_labels_are_retried_once_diarization_has_failed(monkeypatch, tmp_path):
+    src = tmp_path / "long.wav"
+    src.write_bytes(b"RIFF-fake")
+    setup = RetryingSetup(monkeypatch, tmp_path, duration=600, chunk_texts=["", ""])
+    t = setup.transcriber_with_sequence(
+        [_UNLABELLED, "[0:00] 講者A：有標\n[0:05] 講者B：也有標"],
+        label_retries=2, relabeled_later=True,
+    )
+    text = t.transcribe(src, diarization=_future(error=RuntimeError("pyannote 500")))
+    assert "講者B" in text
+    assert setup.calls["n"] == 3  # 第一段重跑一次，第二段一次就過
+
+
+def test_diarization_with_no_speech_counts_as_failed(monkeypatch, tmp_path):
+    """沒有任何語音段時 apply 也是原樣回傳，等同失敗。"""
+    src = tmp_path / "long.wav"
+    src.write_bytes(b"RIFF-fake")
+    setup = RetryingSetup(monkeypatch, tmp_path, duration=600, chunk_texts=["", ""])
+    t = setup.transcriber_with_sequence(
+        [_UNLABELLED, "[0:00] 講者A：有標\n[0:05] 講者B：也有標"],
+        label_retries=2, relabeled_later=True,
+    )
+    t.transcribe(src, diarization=_future(result=([], 600.0)))
+    assert setup.calls["n"] == 3
+
+
+def test_successful_diarization_still_skips_label_retries(monkeypatch, tmp_path):
+    src = tmp_path / "long.wav"
+    src.write_bytes(b"RIFF-fake")
+    setup = RetryingSetup(monkeypatch, tmp_path, duration=600, chunk_texts=["", ""])
+    t = setup.transcriber_with_sequence([_UNLABELLED], label_retries=2, relabeled_later=True)
+    segments = [{"speaker": "S0", "start": 0.0, "end": 10.0}]
+    t.transcribe(src, diarization=_future(result=(segments, 600.0)))
+    assert setup.calls["n"] == 2
+
+
+def test_unfinished_diarization_still_skips_label_retries(monkeypatch, tmp_path):
+    """還沒有結果就照原本的假設（之後會被重標），不先付重跑的錢。"""
+    src = tmp_path / "long.wav"
+    src.write_bytes(b"RIFF-fake")
+    setup = RetryingSetup(monkeypatch, tmp_path, duration=600, chunk_texts=["", ""])
+    t = setup.transcriber_with_sequence([_UNLABELLED], label_retries=2, relabeled_later=True)
+    t.transcribe(src, diarization=Future())
+    assert setup.calls["n"] == 2
