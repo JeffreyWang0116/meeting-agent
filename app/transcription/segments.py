@@ -121,6 +121,56 @@ def drop_empty_lines(text: str) -> str:
     return "\n".join(ln for ln in text.split("\n") if _has_speech(ln))
 
 
+# 句子講完的標點；結尾不是這些就當作話還沒說完
+_SENTENCE_END = "。！？!?…」』"
+# 隔太久多半是另一個人接話（只是模型沒標出來）或換了話題
+MERGE_MAX_GAP_SECONDS = 8
+# 模型整段沒標點時，不能一路併成看不完的長行
+MERGE_MAX_CHARS = 200
+
+
+def merge_fragments(text: str) -> str:
+    """把被拆成好幾行的同一句話併回一行，時間戳保留第一行的。
+
+    只併「同一位講者（都沒標也算）、前一行沒講完、時間接得上」的行；
+    沒有時間戳的行（貼上的逐字稿、續行）原樣保留，也不跨過它們合併。
+    """
+    out: list[str] = []
+    current = None  # [時間戳前綴, 講者, 秒數, 內容]
+    for line in text.split("\n"):
+        m_time = TIME_PREFIX_RE.match(line)
+        if not m_time:
+            if current:
+                out.append(current[0] + current[3])
+                current = None
+            out.append(line)
+            continue
+        rest = line[m_time.end():]
+        m_speaker = SPEAKER_RE.match(rest)
+        speaker = speaker_of(line)
+        head = line[: m_time.end()] + (rest[: m_speaker.end()] if m_speaker else "")
+        body = rest[m_speaker.end():].strip() if m_speaker else rest.strip()
+        seconds = parse_time_label(m_time.group(1))
+        if (
+            current
+            and current[1] == speaker
+            and current[3]
+            and not current[3].endswith(tuple(_SENTENCE_END))
+            and seconds - current[2] <= MERGE_MAX_GAP_SECONDS
+            and len(current[3]) + len(body) <= MERGE_MAX_CHARS
+        ):
+            gap = " " if current[3][-1].isascii() and body[:1].isascii() and body[:1].isalnum() else ""
+            current[3] += gap + body
+            current[2] = seconds
+            continue
+        if current:
+            out.append(current[0] + current[3])
+        current = [head, speaker, seconds, body]
+    if current:
+        out.append(current[0] + current[3])
+    return "\n".join(out)
+
+
 def replace_speaker(line: str, name: str) -> str:
     """把一行的講者代號換成真實姓名（沒有標籤就原樣回傳）。
 

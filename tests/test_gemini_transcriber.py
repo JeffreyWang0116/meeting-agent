@@ -1072,3 +1072,33 @@ def test_flash_fallback_paths_are_gone():
     params = inspect.signature(GeminiTranscriber.__init__).parameters
     for gone in ("fallback_model", "max_fallback_chunks", "strong_model", "strong_whole_threshold"):
         assert gone not in params
+
+
+# ---- 一句話被拆成好幾行 ----
+
+def test_prompt_asks_for_whole_sentences_per_line():
+    from app.transcription.gemini_transcriber import _TRANSCRIBE_PROMPT
+
+    assert "不要在句子中間換行" in _TRANSCRIBE_PROMPT
+
+
+def test_fragmented_sentence_comes_back_as_one_line(tmp_path):
+    wav = tmp_path / "clip.wav"
+    wav.write_bytes(b"RIFF-fake")
+    t = GeminiTranscriber(
+        api_key="k",
+        upload=lambda p: {"handle": str(p)},
+        generate=lambda h: "[4:32] 講者B：權限調整本來\n[4:34] 講者B：在上線前的\n[4:35] 講者B：清單裡。",
+    )
+    assert t.transcribe(wav) == "[4:32] 講者B：權限調整本來在上線前的清單裡。"
+
+
+def test_fragments_split_across_a_chunk_seam_are_joined(monkeypatch, tmp_path):
+    src = tmp_path / "long.wav"
+    src.write_bytes(b"RIFF-fake")
+    setup = FakeChunkedSetup(monkeypatch, tmp_path, duration=600, chunk_texts=[
+        "[3:58] 講者A：我們接下來",
+        "[0:01] 講者A：把順序定下來。",
+    ])
+    text = setup.transcriber(chunk_seconds=240).transcribe(src)
+    assert text == "[3:58] 講者A：我們接下來把順序定下來。"

@@ -21,6 +21,7 @@ from app.transcription.segments import (
     drop_lines_before,
     format_time,
     last_timestamp_seconds,
+    merge_fragments,
     normalize_timestamps,
     shift_timestamps,
     speaker_label_ratio,
@@ -76,6 +77,7 @@ _TRANSCRIBE_PROMPT = (
     "每一句話（每一行）開頭都必須標註講者，即使整段從頭到尾只有一位講者也不可省略。"
     "每一句話（每一行）開頭標註它在音檔中出現的時間，格式是方括號的分:秒，"
     "例如「[1:02] 講者A：我們開始吧」；超過一小時用 [時:分:秒]。"
+    "一行是一句完整的話：同一個人連續說的一句話寫在同一行，不要在句子中間換行或拆成好幾行。"
     "只輸出逐字稿本身，不要加任何標題或說明。"
 )
 
@@ -184,8 +186,11 @@ class GeminiTranscriber:
 
         chunks = self._plan_chunks(audio_path, duration)
         if chunks:
-            return self._transcribe_chunked(chunks, on_progress, hint, user)
-        return self._transcribe_whole(audio_path, on_progress, hint, duration, user)
+            text = self._transcribe_chunked(chunks, on_progress, hint, user)
+        else:
+            text = self._transcribe_whole(audio_path, on_progress, hint, duration, user)
+        # 提示裡要求過一行一句，模型還是常拆；縫合後再併一次，接縫兩邊的半句也接得回來
+        return merge_fragments(text)
 
     # ---- 內部 ----
 

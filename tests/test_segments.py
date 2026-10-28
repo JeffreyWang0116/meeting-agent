@@ -517,3 +517,70 @@ def test_drop_empty_lines_sees_through_repeated_markers():
 def test_marker_in_the_middle_of_speech_is_left_alone():
     """內文裡講到的時間（「[3:51] 那張投影片」這種）不是行首重複標記，不能動。"""
     assert shift_timestamps("[0:10] 講者A：請看 [3:51] 那段", 60) == "[1:10] 講者A：請看 [3:51] 那段"
+
+
+# ---- 碎句合併 ----
+# 模型常把一句話拆成好幾行（第六十次週會：「主要是舊系統的附件檔案，」
+# 「舊系統把附件直接存在資料庫裡，」「總量有點大，」各佔一行），畫面上一句話
+# 變成一串泡泡。同一位講者、句子還沒講完、時間又接得上，就併回同一行。
+
+from app.transcription.segments import merge_fragments  # noqa: E402
+
+
+def test_fragments_of_one_sentence_become_one_line():
+    text = (
+        "[1:02] 講者B：主要是舊系統的附件檔案，\n"
+        "[1:05] 講者B：舊系統把附件直接存在資料庫裡，\n"
+        "[1:09] 講者B：總量有點大，\n"
+        "[1:10] 講者B：轉到雲端物件的速度比預期慢，目前只轉了一半。\n"
+        "[1:16] 講者A：了解。"
+    )
+    assert merge_fragments(text) == (
+        "[1:02] 講者B：主要是舊系統的附件檔案，舊系統把附件直接存在資料庫裡，"
+        "總量有點大，轉到雲端物件的速度比預期慢，目前只轉了一半。\n"
+        "[1:16] 講者A：了解。"
+    )
+
+
+def test_fragments_without_any_punctuation_are_joined():
+    text = "[4:32] 講者B：權限調整本來\n[4:34] 講者B：在上線前的\n[4:35] 講者B：清單裡。"
+    assert merge_fragments(text) == "[4:32] 講者B：權限調整本來在上線前的清單裡。"
+
+
+def test_finished_sentences_stay_on_their_own_lines():
+    text = "[0:27] 講者B：整體進度目前是65%。\n[0:31] 講者B：原本預計這週要到70%。"
+    assert merge_fragments(text) == text
+
+
+def test_different_speakers_are_never_joined():
+    text = "[4:05] 講者A：那目前雲端儲存空間有開加密，\n[4:08] 講者B：但是存取的權限，"
+    assert merge_fragments(text) == text
+
+
+def test_unlabelled_fragments_are_joined_with_each_other():
+    text = "[4:48] 你們資安跟測試跟\n[4:51] 轉檔的\n[4:53] 細節調好。"
+    assert merge_fragments(text) == "[4:48] 你們資安跟測試跟轉檔的細節調好。"
+
+
+def test_long_pause_breaks_the_join():
+    """隔太久多半是換了話題或另一個人接話，只是模型沒標出來。"""
+    text = "[1:00] 講者A：那我們\n[1:30] 講者A：下一題"
+    assert merge_fragments(text) == text
+
+
+def test_joined_line_has_a_length_cap():
+    """模型整段都沒標點時，不能一路併成一整段看不完的長行。"""
+    text = "\n".join(f"[0:{i:02d}] 講者A：{'字' * 30}" for i in range(10))
+    lines = merge_fragments(text).split("\n")
+    assert len(lines) > 1
+    assert all(len(line) <= 220 for line in lines)
+
+
+def test_english_words_keep_a_space_when_joined():
+    text = "[2:00] 講者A：我們要 focus\n[2:02] 講者A：on 一年內的資料。"
+    assert merge_fragments(text) == "[2:00] 講者A：我們要 focus on 一年內的資料。"
+
+
+def test_lines_without_timestamps_are_left_alone():
+    text = "講者A：貼上的逐字稿\n講者A：沒有時間戳"
+    assert merge_fragments(text) == text
