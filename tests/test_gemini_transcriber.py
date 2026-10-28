@@ -1197,3 +1197,31 @@ def test_normal_seam_is_not_logged(monkeypatch, tmp_path, caplog):
     with caplog.at_level("WARNING", logger="app.transcription.gemini_transcriber"):
         setup.transcriber(chunk_seconds=240).transcribe(src)
     assert not [r for r in caplog.records if r.levelname == "WARNING"]
+
+
+# ---- 台灣口音與依語意選字 ----
+# 第六十次週會與台糖質詢的錯字多半是「音聽對了、字選錯」：同一個音檔轉兩次，
+# 錯的字還不一樣（下旬／下巡、債權／再權）。一類是同音字照字面挑（公單、獨職），
+# 一類是照台灣口音的實際發音寫（不捲舌：搜緊、再權；ㄥㄣ不分：身分引本）。
+
+def test_prompt_mentions_taiwanese_accent_features():
+    from app.transcription.gemini_transcriber import _TRANSCRIBE_PROMPT
+
+    assert "台灣口音" in _TRANSCRIBE_PROMPT
+    assert "捲舌" in _TRANSCRIBE_PROMPT
+    assert "ㄥ" in _TRANSCRIBE_PROMPT and "ㄣ" in _TRANSCRIBE_PROMPT
+
+
+def test_prompt_asks_to_pick_homophones_by_meaning():
+    from app.transcription.gemini_transcriber import _TRANSCRIBE_PROMPT
+
+    assert "依前後文" in _TRANSCRIBE_PROMPT
+    assert "工單" in _TRANSCRIBE_PROMPT  # 拿真實出錯的詞當例子，模型才知道要的是什麼
+
+
+def test_prompt_keeps_it_verbatim_while_fixing_characters():
+    """選字要依語意，但不能順手把口語改成書面語、把講錯重說的地方修掉——
+    那是逐字稿，不是摘要。"""
+    from app.transcription.gemini_transcriber import _TRANSCRIBE_PROMPT
+
+    assert "只改用字，不要改寫說法" in _TRANSCRIBE_PROMPT
