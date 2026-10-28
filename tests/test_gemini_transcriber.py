@@ -1225,3 +1225,55 @@ def test_prompt_keeps_it_verbatim_while_fixing_characters():
     from app.transcription.gemini_transcriber import _TRANSCRIBE_PROMPT
 
     assert "只改用字，不要改寫說法" in _TRANSCRIBE_PROMPT
+
+
+# ---- 記下實際用了哪個轉錄模型 ----
+# 台糖質詢同一個音檔轉兩次，錯字差很多，卻查不出兩次用的是不是同一個模型
+# （主力模型過載時會自動改用備用模型）。
+
+def test_models_used_reports_the_configured_model(tmp_path):
+    wav = tmp_path / "clip.wav"
+    wav.write_bytes(b"RIFF-fake")
+    t = GeminiTranscriber(
+        api_key="k", model="lite-model",
+        upload=lambda p: {"handle": str(p)}, generate=lambda h: "[0:01] 講者A：好",
+    )
+    t.transcribe(wav)
+    assert t.models_used() == ["lite-model"]
+
+
+def test_models_used_reports_the_overload_fallback(monkeypatch, tmp_path):
+    from app.transcription import gemini_transcriber as gt
+
+    wav = tmp_path / "clip.wav"
+    wav.write_bytes(b"RIFF-fake")
+    # 模擬主力模型持續過載、改用備用模型才成功
+    monkeypatch.setattr(gt, "call_with_model_fallback",
+                        lambda pool, model, fn, **kw: fn("k", "fallback-model"))
+
+    class NoNetwork(GeminiTranscriber):
+        def _transcribe_with_key(self, key, path, hint=None, model=None, *a, **kw):
+            return "[0:01] 講者A：好"
+
+    t = NoNetwork(api_key="k", model="lite-model")
+    t.transcribe(wav)
+    assert t.models_used() == ["fallback-model"]
+
+
+def test_models_used_starts_fresh_for_each_transcription(monkeypatch, tmp_path):
+    from app.transcription import gemini_transcriber as gt
+
+    wav = tmp_path / "clip.wav"
+    wav.write_bytes(b"RIFF-fake")
+    chosen = iter(["fallback-model", "lite-model"])
+    monkeypatch.setattr(gt, "call_with_model_fallback",
+                        lambda pool, model, fn, **kw: fn("k", next(chosen)))
+
+    class NoNetwork(GeminiTranscriber):
+        def _transcribe_with_key(self, key, path, hint=None, model=None, *a, **kw):
+            return "[0:01] 講者A：好"
+
+    t = NoNetwork(api_key="k", model="lite-model")
+    t.transcribe(wav)
+    t.transcribe(wav)
+    assert t.models_used() == ["lite-model"]

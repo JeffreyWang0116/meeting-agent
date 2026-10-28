@@ -72,6 +72,10 @@ def meeting_report_md(meeting_record: dict, tasks: list[dict]) -> str:
         "",
         f"- 日期：{m['date']}",
         f"- 出席：{'、'.join(m['attendees']) or '（未記錄）'}",
+        *(
+            [f"- 轉錄模型：{'、'.join(meeting_record['transcribe_models'])}"]
+            if meeting_record.get("transcribe_models") else []
+        ),
         "",
         "## 摘要",
         "",

@@ -517,3 +517,26 @@ def test_transcriber_is_told_how_diarization_is_going(tmp_path):
     mgr = MediaJobManager(Watching(), FakeOrchestrator(), tmp_path, diarizer=diarizer)
     mgr.wait(mgr.submit(audio), timeout=5)
     assert isinstance(seen["diarization"], PendingFuture)
+
+
+def test_transcribe_models_reach_the_saved_meeting(tmp_path):
+    audio = tmp_path / "meeting.wav"
+    audio.write_bytes(b"x")
+
+    class Reporting(FakeTranscriber):
+        def models_used(self):
+            return ["gemini-3.6-flash"]
+
+    orch = FakeOrchestrator()
+    mgr = MediaJobManager(Reporting(), orch, tmp_path)
+    mgr.wait(mgr.submit(audio), timeout=5)
+    assert orch.extra["transcribe_models"] == ["gemini-3.6-flash"]
+
+
+def test_transcriber_without_model_reporting_is_still_fine(tmp_path):
+    audio = tmp_path / "meeting.wav"
+    audio.write_bytes(b"x")
+    orch = FakeOrchestrator()
+    mgr = MediaJobManager(FakeTranscriber(), orch, tmp_path)
+    mgr.wait(mgr.submit(audio), timeout=5)
+    assert "transcribe_models" not in orch.extra

@@ -76,3 +76,14 @@ def test_report_omits_transcript_section_when_there_is_none():
     assert "逐字稿" not in meeting_report_md(make_record(), tasks=[])
     record = {**make_record(), "transcript": "  \n"}
     assert "逐字稿" not in meeting_report_md(record, tasks=[])
+
+
+def test_report_says_which_model_transcribed_it():
+    """錯字多寡跟用哪個模型很有關；拿到檔案的人要看得出來。"""
+    record = {**make_record(), "transcribe_models": ["gemini-3.5-flash-lite", "gemini-3.6-flash"]}
+    md = meeting_report_md(record, tasks=[])
+    assert "- 轉錄模型：gemini-3.5-flash-lite、gemini-3.6-flash" in md
+
+
+def test_report_omits_model_line_when_unknown():
+    assert "轉錄模型" not in meeting_report_md(make_record(), tasks=[])

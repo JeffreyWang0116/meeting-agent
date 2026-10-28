@@ -252,6 +252,9 @@ class MediaJobManager:
                 transcript = self._relabel(job_id, diarization, transcript)
             self._update(job_id, transcript=transcript, progress=1.0, status="analyzing")
 
+            # 同一個音檔轉兩次錯字可能差很多，要查得出當時是哪個模型（過載會換備用）
+            models_used = getattr(self._transcriber, "models_used", None)
+            models = models_used() if models_used else []
             result = self._orchestrator.process_transcript(
                 transcript,
                 meeting_date=meeting_date,
@@ -261,6 +264,7 @@ class MediaJobManager:
                 terms=terms,
                 # 背景執行緒沒有請求上下文，使用者在 submit 當下就捕捉好
                 user=user,
+                **({"transcribe_models": models} if models else {}),
             )
             # 校正過的話逐字稿會變，job 要換成校正後的版本（前端顯示的就是這份）
             self._update(

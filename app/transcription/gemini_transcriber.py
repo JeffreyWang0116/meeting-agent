@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import logging
 import shutil
+import threading
 import time
 from concurrent.futures import Future
 from pathlib import Path
@@ -160,6 +161,7 @@ class GeminiTranscriber:
         self._pool = KeyPool(api_keys if api_keys else [api_key])
         # 每打一次 API 就回報一次，用量統計才會算到重試與換金鑰
         self._on_call = on_call
+        self._used = threading.local()  # 見 _note_model
         self.api_key = self._pool.first
         self.model = model
         self._upload = upload
@@ -207,6 +209,7 @@ class GeminiTranscriber:
                    user: str = DEFAULT_USER, diarization: Future | None = None) -> str:
         """diarization：背景跑的 pyannote 分群。它已經失敗的話，之後就沒有重標
         可以依賴，後面幾段要恢復「講者標籤太差就重跑」。"""
+        self._used.models = []
         audio_path = self._ensure_audio(Path(path))
         duration = media.audio_duration(audio_path) if media.ffmpeg_available() else None
 
@@ -556,6 +559,7 @@ class GeminiTranscriber:
         介面，不經過這裡（那些測試要驗聲音簿就直接覆寫本方法來看傳了什麼）。
         """
         if self._upload or self._generate:  # 測試注入假物件，不經金鑰輪替
+            self._note_model(self.model)
             uploaded = self._upload(audio_path)
             result = self._generate(uploaded)
             if result is None or isinstance(result, str):
@@ -573,13 +577,25 @@ class GeminiTranscriber:
             call_with_model_fallback(
                 self._pool,
                 self.model,
-                lambda key, chosen: self._transcribe_with_key(
+                lambda key, chosen: self._note_model(chosen, self._transcribe_with_key(
                     key, audio_path, hint, chosen, on_partial, voice_refs, user
-                ),
+                )),
                 on_call=self._on_call,
             )
             or ""
         ).strip()
+
+    def _note_model(self, model: str, result=None):
+        """記下這次轉錄真正產出文字的模型（過載時會換成備用模型），原樣回傳 result。
+        放在 thread-local：同一個轉錄器會被好幾個背景工作同時使用。"""
+        used = getattr(self._used, "models", None)
+        if used is not None and model not in used:
+            used.append(model)
+        return result
+
+    def models_used(self) -> list[str]:
+        """這個執行緒最近一次 transcribe() 實際用到的模型，依第一次使用排序。"""
+        return list(getattr(self._used, "models", None) or [])
 
     def _ensure_audio(self, path: Path) -> Path:
         """把非 Gemini 原生格式（影片、webm、m4a…）轉成 wav。"""

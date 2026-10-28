@@ -54,6 +54,7 @@ class Orchestrator:
         user: str = DEFAULT_USER,
         speaker_prior: dict[str, str] | None = None,
         attendees: list[str] | None = None,
+        transcribe_models: list[str] | None = None,
     ) -> dict:
         text = normalize_text(raw_text)
         corrections: list[dict] = []
@@ -73,8 +74,10 @@ class Orchestrator:
             # 只用於補全 attendees 與統一姓名寫法，不得用來猜 owner（見 build_prompt）
             attendees=attendees,
         )
+        # 貼上的逐字稿沒有轉錄模型；不帶這個參數，呼叫形狀與之前一樣
+        extra = {"transcribe_models": transcribe_models} if transcribe_models else {}
         meeting_id = self.store.save_meeting(
-            analysis, transcript=text, kind=kind, terms=terms, user=user
+            analysis, transcript=text, kind=kind, terms=terms, user=user, **extra
         )
         notifications = build_notifications(analysis, meeting_id)
         return {

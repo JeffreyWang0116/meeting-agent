@@ -374,3 +374,9 @@ def test_list_meetings_can_include_transcript():
     store = make_store()
     store.save_meeting(make_analysis(), transcript="Kevin：API 小明負責。")
     assert store.list_meetings(include_transcript=True)[0]["transcript"] == "Kevin：API 小明負責。"
+
+
+def test_save_meeting_keeps_transcribe_models():
+    store = make_store()
+    meeting_id = store.save_meeting(make_analysis(), transcribe_models=["gemini-3.6-flash"])
+    assert store.get_meeting(meeting_id)["transcribe_models"] == ["gemini-3.6-flash"]

@@ -130,6 +130,7 @@ class FirestoreStore(TaskStore):
         # 會前準備（見 app/agenda.py）：貼的議程、這場屬於哪個系列
         agenda: list[str] | None = None,
         series: str | None = None,
+        transcribe_models: list[str] | None = None,
     ) -> str:
         meeting_id = uuid.uuid4().hex[:12]
         dumped = analysis.model_dump(mode="json")
@@ -153,6 +154,7 @@ class FirestoreStore(TaskStore):
                 "agenda_review": dumped.get("agenda_review", []),
                 "off_agenda": dumped.get("off_agenda", []),
                 "series": series,
+                "transcribe_models": transcribe_models or [],
             })
             for todo in dumped["todos"]:
                 task_id = uuid.uuid4().hex[:12]

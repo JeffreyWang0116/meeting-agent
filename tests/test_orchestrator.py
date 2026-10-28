@@ -105,3 +105,18 @@ def test_attendees_reach_the_decision_agent(tmp_path):
     )
     pipeline.process_transcript("[0:05] 講者A：大家好", attendees=["王小明"])
     assert "王小明" in captured["prompt"]
+
+
+def test_transcribe_models_are_saved_with_the_meeting(orchestrator):
+    pipeline, store = orchestrator
+    result = pipeline.process_transcript(
+        "志明：我下週一前把 prompt 寫好", transcribe_models=["gemini-3.5-flash-lite"]
+    )
+    saved = store.get_meeting(result["meeting_id"])
+    assert saved["transcribe_models"] == ["gemini-3.5-flash-lite"]
+
+
+def test_pasted_transcript_has_no_transcribe_models(orchestrator):
+    pipeline, store = orchestrator
+    result = pipeline.process_transcript("志明：我下週一前把 prompt 寫好")
+    assert store.get_meeting(result["meeting_id"]).get("transcribe_models", []) == []
